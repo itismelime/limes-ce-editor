@@ -1,0 +1,173 @@
+import { useMemo, useState, useEffect } from 'react';
+import { useServerStore } from '../../store/serverStore';
+import { useUiStore } from '../../store/uiStore';
+import { SearchBar } from '../shared/SearchBar';
+import { SaveButton } from '../shared/SaveButton';
+import type { EventSpawnDef, EventSpawnPos } from '../../types/dayz';
+
+function PosRow({ pos, onUpdate, onDelete }: {
+  pos: EventSpawnPos;
+  onUpdate: (pos: EventSpawnPos) => void;
+  onDelete: () => void;
+}) {
+  const [x, setX] = useState(String(pos.x));
+  const [z, setZ] = useState(String(pos.z));
+
+  const commit = () => {
+    const nx = parseFloat(x);
+    const nz = parseFloat(z);
+    if (!isNaN(nx) && !isNaN(nz)) onUpdate({ x: nx, z: nz });
+  };
+
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <span className="text-xs text-slate-600 w-4">X</span>
+      <input
+        value={x}
+        onChange={e => setX(e.target.value)}
+        onBlur={commit}
+        className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+      />
+      <span className="text-xs text-slate-600 w-4">Z</span>
+      <input
+        value={z}
+        onChange={e => setZ(e.target.value)}
+        onBlur={commit}
+        className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+      />
+      <button onClick={onDelete} className="ml-auto text-slate-600 hover:text-red-400 transition-colors text-sm">✕</button>
+    </div>
+  );
+}
+
+export function EventSpawnsEditor() {
+  const mission = useServerStore(s => s.mission)!;
+  const setEventSpawns = useServerStore(s => s.setEventSpawns);
+  const saveEventSpawns = useServerStore(s => s.saveEventSpawns);
+  const isDirty = useServerStore(s => s.dirty.eventSpawns);
+  const selectedEventName = useUiStore(s => s.selectedEventName);
+  const setSelectedEvent = useUiStore(s => s.setSelectedEvent);
+  const [filter, setFilter] = useState('');
+
+  // Sync with map selection
+  useEffect(() => {
+    if (selectedEventName) setFilter('');
+  }, [selectedEventName]);
+
+  const filtered = useMemo(() => {
+    const q = filter.toLowerCase();
+    return mission.eventSpawns.filter(e =>
+      !q || e.eventName.toLowerCase().includes(q)
+    );
+  }, [mission.eventSpawns, filter]);
+
+  const updatePos = (eventName: string, idx: number, pos: EventSpawnPos) => {
+    const next = mission.eventSpawns.map(e => {
+      if (e.eventName !== eventName) return e;
+      const positions = [...e.positions];
+      positions[idx] = pos;
+      return { ...e, positions };
+    });
+    setEventSpawns(next);
+  };
+
+  const deletePos = (eventName: string, idx: number) => {
+    const next = mission.eventSpawns.map(e => {
+      if (e.eventName !== eventName) return e;
+      return { ...e, positions: e.positions.filter((_, i) => i !== idx) };
+    });
+    setEventSpawns(next);
+  };
+
+  const addPos = (eventName: string) => {
+    const next = mission.eventSpawns.map(e => {
+      if (e.eventName !== eventName) return e;
+      return { ...e, positions: [...e.positions, { x: 0, z: 0 }] };
+    });
+    setEventSpawns(next);
+  };
+
+  const displayList = selectedEventName
+    ? filtered.filter(e => e.eventName === selectedEventName)
+    : filtered;
+
+  return (
+    <div className="flex h-full">
+      {/* Event list */}
+      <div className="w-56 border-r border-slate-800 flex flex-col bg-slate-900">
+        <div className="p-3 border-b border-slate-800">
+          <SearchBar value={filter} onChange={setFilter} placeholder="Filter events…" />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {filtered.map(e => (
+            <button
+              key={e.eventName}
+              onClick={() => setSelectedEvent(selectedEventName === e.eventName ? null : e.eventName)}
+              className={`w-full text-left px-3 py-2 text-xs font-mono border-b border-slate-800/50 transition-colors ${
+                selectedEventName === e.eventName
+                  ? 'bg-indigo-950/50 text-indigo-300 border-l-2 border-l-indigo-500'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <span className="block truncate">{e.eventName}</span>
+              <span className="text-slate-600">{e.positions.length} pts</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Positions panel */}
+      <div className="flex-1 flex flex-col">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900">
+          <span className="text-sm text-slate-300 font-medium">
+            {selectedEventName
+              ? <>Editing: <span className="text-indigo-400 font-mono">{selectedEventName}</span></>
+              : 'All Spawn Points'
+            }
+          </span>
+          {selectedEventName && (
+            <button onClick={() => setSelectedEvent(null)} className="text-xs text-slate-600 hover:text-slate-400">
+              ← Show all
+            </button>
+          )}
+          <div className="ml-auto">
+            <SaveButton isDirty={isDirty} onSave={saveEventSpawns} label="Save cfgeventspawns.xml" />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {displayList.map((e: EventSpawnDef) => (
+            <div key={e.eventName} className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-mono text-slate-300">{e.eventName}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-600">{e.positions.length} points</span>
+                  <button
+                    onClick={() => addPos(e.eventName)}
+                    className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2 py-1 rounded transition-colors"
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg px-3 py-2 space-y-0.5">
+                {e.positions.length === 0 ? (
+                  <p className="text-xs text-slate-600 italic py-1">No positions defined</p>
+                ) : (
+                  e.positions.map((pos, idx) => (
+                    <PosRow
+                      key={idx}
+                      pos={pos}
+                      onUpdate={p => updatePos(e.eventName, idx, p)}
+                      onDelete={() => deletePos(e.eventName, idx)}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
