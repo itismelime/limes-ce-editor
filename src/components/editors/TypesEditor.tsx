@@ -7,9 +7,9 @@ import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
-import { TIER_COLORS } from '../../types/map';
+import { TIER_COLORS, USAGE_COLORS, USAGE_PRIORITY } from '../../types/map';
 
-const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4'];
+const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
 
 function TierBadge({ tier }: { tier: string }) {
   const color = TIER_COLORS[tier];
@@ -19,6 +19,18 @@ function TierBadge({ tier }: { tier: string }) {
       style={{ backgroundColor: `${color}22`, color, border: `1px solid ${color}44` }}
     >
       {tier.replace('Tier', 'T')}
+    </span>
+  );
+}
+
+function UsageBadge({ usage }: { usage: string }) {
+  const color = USAGE_COLORS[usage] ?? '#64748b';
+  return (
+    <span
+      className="text-xs px-1.5 py-0.5 rounded font-medium"
+      style={{ backgroundColor: `${color}22`, color, border: `1px solid ${color}44` }}
+    >
+      {usage}
     </span>
   );
 }
@@ -47,6 +59,10 @@ function TypeRow({
 
       <div className="flex gap-1 w-32">
         {type.tiers.map(t => <TierBadge key={t} tier={t} />)}
+      </div>
+
+      <div className="flex flex-wrap gap-1 w-40">
+        {type.usages.map(u => <UsageBadge key={u} usage={u} />)}
       </div>
 
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -92,44 +108,65 @@ function DetailPanel({ type, onUpdate, onClose }: {
     onUpdate({ tiers });
   };
 
+  const removeUsage = (u: string) => onUpdate({ usages: type.usages.filter(x => x !== u) });
+  const addUsage    = (u: string) => { if (u && !type.usages.includes(u)) onUpdate({ usages: [...type.usages, u] }); };
+
+  const availableUsages = USAGE_PRIORITY.filter(u => !type.usages.includes(u));
+
   return (
     <div className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-        <span className="font-mono text-sm text-slate-200 truncate">{type.name}</span>
+        <div className="flex flex-col min-w-0 mr-2">
+          <span className="font-mono text-sm text-slate-200 truncate">{type.name}</span>
+          <span className="text-xs text-slate-600 truncate font-mono">{type.source.split(/[\\/]/).pop()}</span>
+        </div>
         <button onClick={onClose} className="text-slate-600 hover:text-slate-400 text-lg leading-none">×</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+
+        {/* Category */}
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Category</p>
+          <input
+            type="text"
+            value={type.category ?? ''}
+            onChange={e => onUpdate({ category: e.target.value || null })}
+            placeholder="none"
+            className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        {/* Quantities */}
         <div>
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Quantities</p>
           <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: 'Nominal', key: 'nominal' as const },
-              { label: 'Min', key: 'min' as const },
-              { label: 'Lifetime (s)', key: 'lifetime' as const },
-              { label: 'Restock (s)', key: 'restock' as const },
-              { label: 'Quant Min', key: 'quantmin' as const },
-              { label: 'Quant Max', key: 'quantmax' as const },
-            ].map(({ label, key }) => (
+            {([
+              { label: 'Nominal',     key: 'nominal'  as const, min: 0  },
+              { label: 'Min',         key: 'min'      as const, min: 0  },
+              { label: 'Lifetime (s)',key: 'lifetime' as const, min: 0  },
+              { label: 'Restock (s)', key: 'restock'  as const, min: 0  },
+              { label: 'Quant Min',   key: 'quantmin' as const, min: -1 },
+              { label: 'Quant Max',   key: 'quantmax' as const, min: -1 },
+              { label: 'Cost',        key: 'cost'     as const, min: 0  },
+            ] as const).map(({ label, key, min }) => (
               <div key={key}>
                 <label className="text-xs text-slate-500 block mb-1">{label}</label>
-                <NumberInput
-                  value={type[key]}
-                  onChange={v => onUpdate({ [key]: v })}
-                  min={key === 'quantmin' ? -1 : 0}
-                  className="w-full"
-                />
+                <NumberInput value={type[key]} onChange={v => onUpdate({ [key]: v })} min={min} className="w-full" />
               </div>
             ))}
           </div>
         </div>
 
+        {/* Tiers */}
         <div>
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Tiers</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            Tiers {type.tiers.length === 0 && <span className="text-slate-700 normal-case font-normal">(none)</span>}
+          </p>
           <div className="flex flex-wrap gap-2">
             {TIER_OPTIONS.map(tier => {
               const active = type.tiers.includes(tier);
-              const color = TIER_COLORS[tier];
+              const color  = TIER_COLORS[tier] ?? '#6b7280';
               return (
                 <button
                   key={tier}
@@ -147,6 +184,31 @@ function DetailPanel({ type, onUpdate, onClose }: {
           </div>
         </div>
 
+        {/* Usage zones */}
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Usage Zones</p>
+          <div className="flex flex-wrap gap-1 mb-2">
+            {type.usages.length === 0 && <span className="text-xs text-slate-700">none</span>}
+            {type.usages.map(u => (
+              <span key={u} className="flex items-center gap-1 text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
+                {u}
+                <button onClick={() => removeUsage(u)} className="text-slate-600 hover:text-red-400 leading-none">×</button>
+              </span>
+            ))}
+          </div>
+          {availableUsages.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={e => { addUsage(e.target.value); e.target.value = ''; }}
+              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-400 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="" disabled>Add usage…</option>
+              {availableUsages.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          )}
+        </div>
+
+        {/* Flags */}
         <div>
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Flags</p>
           <div className="space-y-2">
@@ -164,16 +226,6 @@ function DetailPanel({ type, onUpdate, onClose }: {
           </div>
         </div>
 
-        {type.usages.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Usage Zones</p>
-            <div className="flex flex-wrap gap-1">
-              {type.usages.map(u => (
-                <span key={u} className="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded">{u}</span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -182,24 +234,33 @@ function DetailPanel({ type, onUpdate, onClose }: {
 export function TypesEditor() {
   const mission = useServerStore(s => s.mission)!;
   const updateType = useServerStore(s => s.updateType);
-  const saveTypes = useServerStore(s => s.saveTypes);
-  const isDirty = useServerStore(s => s.dirty.types);
+  const saveTypesSource = useServerStore(s => s.saveTypesSource);
+  const dirtyTypesSources = useServerStore(s => s.dirty.typesSources);
   const typeFilter = useUiStore(s => s.typeFilter);
   const setTypeFilter = useUiStore(s => s.setTypeFilter);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string>('');
+  const [usageFilter, setUsageFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
   const parentRef = useRef<HTMLDivElement>(null);
 
   const allTypes = useMemo(() => Array.from(mission.types.values()), [mission.types]);
+
+  const allSources = useMemo(() => {
+    const s = new Set(allTypes.map(t => t.source).filter(Boolean));
+    return Array.from(s).sort();
+  }, [allTypes]);
 
   const filtered = useMemo(() => {
     const q = typeFilter.toLowerCase();
     return allTypes.filter(t => {
       const matchesSearch = !q || t.name.toLowerCase().includes(q) || t.category?.toLowerCase().includes(q);
       const matchesTier = !tierFilter || t.tiers.includes(tierFilter);
-      return matchesSearch && matchesTier;
+      const matchesUsage = !usageFilter || t.usages.includes(usageFilter);
+      const matchesSource = !sourceFilter || t.source === sourceFilter;
+      return matchesSearch && matchesTier && matchesUsage && matchesSource;
     });
-  }, [allTypes, typeFilter, tierFilter]);
+  }, [allTypes, typeFilter, tierFilter, usageFilter, sourceFilter]);
 
   const virtualizer = useVirtualizer({
     count: filtered.length,
@@ -245,8 +306,44 @@ export function TypesEditor() {
             ))}
           </div>
 
+          <select
+            value={usageFilter}
+            onChange={e => setUsageFilter(e.target.value)}
+            className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700"
+          >
+            <option value="">All usages</option>
+            {USAGE_PRIORITY.map(u => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+          </select>
+
+          <select
+            value={sourceFilter}
+            onChange={e => setSourceFilter(e.target.value)}
+            className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700"
+          >
+            <option value="">All files</option>
+            {allSources.map(src => (
+              <option key={src} value={src}>{src.split(/[\\/]/).pop()}</option>
+            ))}
+          </select>
+
           <span className="text-xs text-slate-600">{filtered.length} / {allTypes.length}</span>
-          <SaveButton isDirty={isDirty} onSave={saveTypes} label="Save types.xml" />
+
+          {!sourceFilter ? (
+            <button
+              disabled
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 text-slate-500 cursor-not-allowed"
+            >
+              Select a file to save
+            </button>
+          ) : (
+            <SaveButton
+              isDirty={dirtyTypesSources.includes(sourceFilter)}
+              onSave={() => saveTypesSource(sourceFilter)}
+              label={`Save ${sourceFilter.split(/[\\/]/).pop()}`}
+            />
+          )}
         </div>
 
         {/* Header */}
@@ -254,6 +351,7 @@ export function TypesEditor() {
           <span className="w-52">Name</span>
           <span className="w-24">Category</span>
           <span className="w-32">Tiers</span>
+          <span className="w-40">Usages</span>
           <span>Min / Nominal</span>
           <span className="ml-auto">Flags</span>
         </div>

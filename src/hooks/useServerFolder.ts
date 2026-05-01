@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { pickAndDiscoverServer, readFile, type MissionFiles } from '../lib/fileDiscovery';
+import { pickAndDiscoverServer, scanFolder, readFile, type MissionFiles } from '../lib/fileDiscovery';
+
+const LAST_FOLDER_KEY = 'lastServerFolder';
 import {
   parseTypesXml, parseEventSpawnsXml,
   parseEventsXml, parseSpawnableTypesXml,
+  parseEconomyCoreXml,
 } from '../lib/xmlParser';
-import type { MissionData } from '../types/dayz';
+import type { MissionData, CeEntry } from '../types/dayz';
 import { useServerStore } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
 
@@ -51,7 +54,7 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
   let events = new Map();
   let spawnableTypes = new Map();
 
-  try { if (typesRaw)     types          = parseTypesXml(typesRaw);              } catch { warnings.push('types.xml (parse error)'); }
+  try { if (typesRaw)     types          = parseTypesXml(typesRaw, m.typesPath ?? '');              } catch { warnings.push('types.xml (parse error)'); }
   try { if (spawnsRaw)    eventSpawns    = parseEventSpawnsXml(spawnsRaw);       } catch { warnings.push('cfgeventspawns.xml (parse error)'); }
   try { if (eventsRaw)    events         = parseEventsXml(eventsRaw);            } catch { warnings.push('events.xml (parse error)'); }
   try { if (spawnableRaw) spawnableTypes = parseSpawnableTypesXml(spawnableRaw); } catch { warnings.push('cfgspawnabletypes.xml (parse error)'); }
@@ -63,8 +66,9 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
 }
 
 export function useServerFolder() {
-  const setMission = useServerStore(s => s.setMission);
-  const setPaths   = useServerStore(s => s.setPaths);
+  const setMission     = useServerStore(s => s.setMission);
+  const setPaths       = useServerStore(s => s.setPaths);
+  const setEconomyCore = useServerStore(s => s.setEconomyCore);
   const setLoading      = useUiStore(s => s.setLoading);
   const setLoadError    = useUiStore(s => s.setLoadError);
   const setLoadWarnings = useUiStore(s => s.setLoadWarnings);
@@ -86,15 +90,47 @@ export function useServerFolder() {
 
     try {
       setPaths({
+        missionPath:        m.missionPath,
         typesPath:          m.typesPath,
         eventSpawnsPath:    m.eventSpawnsPath,
         eventsPath:         m.eventsPath,
         spawnableTypesPath: m.spawnableTypesPath,
+        economyCorePath:    m.economyCorePath,
       });
 
       const { mission, warnings } = await loadMission(m);
       setLoadWarnings(warnings);
       setMission(mission);
+
+      let economyCoreEntries: CeEntry[] = [];
+      if (m.economyCorePath) {
+        try {
+          const raw = await readFile(m.economyCorePath);
+          economyCoreEntries = parseEconomyCoreXml(raw);
+          setEconomyCore(economyCoreEntries);
+        } catch { }
+      }
+
+      // Load and merge custom types from economy core
+      if (economyCoreEntries.length > 0) {
+        const mergedTypes = new Map(mission.types);
+        for (const entry of economyCoreEntries) {
+          for (const file of entry.files) {
+            if (file.type !== 'types') continue;
+            const filePath = `${m.missionPath}/${entry.folder}/${file.name}`;
+            try {
+              const raw = await readFile(filePath);
+              const customTypes = parseTypesXml(raw, filePath);
+              for (const [name, type] of customTypes) {
+                mergedTypes.set(name, type);
+              }
+            } catch { /* file may not exist yet */ }
+          }
+        }
+        if (mergedTypes.size > mission.types.size) {
+          setMission({ ...mission, types: mergedTypes });
+        }
+      }
 
       if (m.mapImagePath) {
         setMapImagePath(activeMap, convertFileSrc(m.mapImagePath));
@@ -128,34 +164,37 @@ export function useServerFolder() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap]);
 
+  async function loadFromMissions(missions: MissionFiles[]) {
+    if (missions.length === 0) {
+      setLoadError('no_files_found');
+      setLoading(false);
+      return;
+    }
+    setAllMissions(missions);
+    if (missions.length === 1) {
+      await selectMission(missions[0]);
+    } else {
+      const auto = autoSelectMission(missions, activeMap);
+      if (auto) {
+        await selectMission(auto);
+      } else {
+        setLoading(false);
+        setPendingMissions(missions);
+      }
+    }
+  }
+
   const openFolder = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     setLoadWarnings([]);
 
     try {
-      const missions = await pickAndDiscoverServer();
-      if (!missions) { setLoading(false); return; }
+      const result = await pickAndDiscoverServer();
+      if (!result) { setLoading(false); return; }
 
-      if (missions.length === 0) {
-        setLoadError('no_files_found');
-        setLoading(false);
-        return;
-      }
-
-      setAllMissions(missions);
-
-      if (missions.length === 1) {
-        await selectMission(missions[0]);
-      } else {
-        const auto = autoSelectMission(missions, activeMap);
-        if (auto) {
-          await selectMission(auto);
-        } else {
-          setLoading(false);
-          setPendingMissions(missions);
-        }
-      }
+      localStorage.setItem(LAST_FOLDER_KEY, result.path);
+      await loadFromMissions(result.missions);
     } catch (err) {
       if (err instanceof Error) {
         setLoadError(err.message.toLowerCase().includes('permission')
@@ -165,11 +204,28 @@ export function useServerFolder() {
       }
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap, selectMission, setLoading, setLoadError, setLoadWarnings]);
+
+  const autoLoad = useCallback(async () => {
+    const saved = localStorage.getItem(LAST_FOLDER_KEY);
+    if (!saved) return;
+
+    setLoading(true);
+    try {
+      const missions = await scanFolder(saved);
+      if (missions.length > 0) await loadFromMissions(missions);
+    } catch {
+      // Folder gone or inaccessible — silently ignore
+    } finally {
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMap, selectMission]);
 
   const cancelPicker = useCallback(() => {
     setPendingMissions(null);
   }, []);
 
-  return { openFolder, pendingMissions, selectMission, cancelPicker };
+  return { openFolder, autoLoad, pendingMissions, selectMission, cancelPicker };
 }

@@ -1,4 +1,4 @@
-import { readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { readDir, readTextFile, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 
 const TARGET_FILES = new Set([
@@ -6,6 +6,7 @@ const TARGET_FILES = new Set([
   'cfgeventspawns.xml',
   'events.xml',
   'cfgspawnabletypes.xml',
+  'cfgeconomycore.xml',
 ]);
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.tga']);
@@ -21,6 +22,7 @@ export interface MissionFiles {
   eventSpawnsPath: string | null;
   eventsPath: string | null;
   spawnableTypesPath: string | null;
+  economyCorePath: string | null;
   mapImagePath: string | null;
 }
 
@@ -30,6 +32,10 @@ interface ScanResult {
   isImage?: boolean;
 }
 
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
 async function scanDir(
   dirPath: string,
   depth: number,
@@ -37,16 +43,17 @@ async function scanDir(
 ): Promise<void> {
   if (depth > MAX_DEPTH) return;
 
+  const normalDir = normalizePath(dirPath);
   let entries;
   try {
-    entries = await readDir(dirPath);
+    entries = await readDir(normalDir);
   } catch {
     return;
   }
 
   for (const entry of entries) {
     if (!entry.name) continue;
-    const fullPath = `${dirPath}/${entry.name}`;
+    const fullPath = `${normalDir}/${entry.name}`;
 
     if (entry.isDirectory) {
       if (SKIP_DIRS.test(entry.name)) continue;
@@ -109,12 +116,19 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
       eventSpawnsPath:    files['cfgeventspawns.xml']    ?? null,
       eventsPath:         files['events.xml']            ?? null,
       spawnableTypesPath: files['cfgspawnabletypes.xml'] ?? null,
+      economyCorePath:    files['cfgeconomycore.xml']    ?? null,
       mapImagePath,
     };
   });
 }
 
-export async function pickAndDiscoverServer(): Promise<MissionFiles[] | null> {
+export async function scanFolder(folderPath: string): Promise<MissionFiles[]> {
+  const results: ScanResult[] = [];
+  await scanDir(folderPath, 0, results);
+  return groupByMission(results);
+}
+
+export async function pickAndDiscoverServer(): Promise<{ path: string; missions: MissionFiles[] } | null> {
   const selected = await open({
     directory: true,
     multiple: false,
@@ -123,12 +137,8 @@ export async function pickAndDiscoverServer(): Promise<MissionFiles[] | null> {
 
   if (!selected || typeof selected !== 'string') return null;
 
-  const results: ScanResult[] = [];
-  await scanDir(selected, 0, results);
-
-  if (results.length === 0) return [];
-
-  return groupByMission(results);
+  const missions = await scanFolder(selected);
+  return { path: selected, missions };
 }
 
 export async function readFile(path: string): Promise<string> {
@@ -137,4 +147,8 @@ export async function readFile(path: string): Promise<string> {
 
 export async function writeFile(path: string, text: string): Promise<void> {
   return writeTextFile(path, text);
+}
+
+export async function createDir(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
 }

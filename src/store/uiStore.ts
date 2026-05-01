@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { MapId } from '../types/map';
 
-export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'spawnableTypes';
+export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'spawnableTypes' | 'economy';
 
 interface UiState {
   activeTab: ActiveTab;
@@ -19,6 +19,7 @@ interface UiState {
   loadWarnings: string[];
   hiddenTiers: string[];
   hiddenUsages: string[];
+  hiddenEvents: string[];
   mapEventFilter: string;
 
   setActiveTab: (tab: ActiveTab) => void;
@@ -34,6 +35,7 @@ interface UiState {
   setLoadWarnings: (v: string[]) => void;
   toggleTier: (tier: string) => void;
   toggleUsage: (usage: string) => void;
+  toggleEvent: (name: string) => void;
   setMapEventFilter: (v: string) => void;
 }
 
@@ -76,6 +78,7 @@ export const useUiStore = create<UiState>((set) => ({
   setLoadWarnings: (v) => set({ loadWarnings: v }),
   hiddenTiers: [],
   hiddenUsages: [],
+  hiddenEvents: [],
   mapEventFilter: '',
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
@@ -86,6 +89,11 @@ export const useUiStore = create<UiState>((set) => ({
     hiddenUsages: s.hiddenUsages.includes(usage)
       ? s.hiddenUsages.filter(u => u !== usage)
       : [...s.hiddenUsages, usage],
+  })),
+  toggleEvent: (name) => set(s => ({
+    hiddenEvents: s.hiddenEvents.includes(name)
+      ? s.hiddenEvents.filter(e => e !== name)
+      : [...s.hiddenEvents, name],
   })),
   setMapEventFilter: (v) => set({ mapEventFilter: v }),
 }));

@@ -20,6 +20,7 @@ export interface DayZType {
   category: string | null;
   usages: string[];
   tiers: string[];
+  source: string;
 }
 
 export interface EventSpawnPos {
@@ -91,8 +92,18 @@ export interface FileHandles {
 }
 
 export type DirtyFlags = {
-  types: boolean;
+  typesSources: string[];
   eventSpawns: boolean;
   events: boolean;
   spawnableTypes: boolean;
 };
+
+export interface CeFile {
+  name: string;
+  type: string;
+}
+
+export interface CeEntry {
+  folder: string;
+  files: CeFile[];
+}

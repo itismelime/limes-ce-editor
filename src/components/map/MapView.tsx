@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, ImageOverlay, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { CRS } from 'leaflet';
@@ -73,12 +73,14 @@ function EventMarkers({ markers, mapConfig }: { markers: ResolvedMarker[]; mapCo
   const setSelectedEvent = useUiStore(s => s.setSelectedEvent);
   const hiddenTiers      = useUiStore(s => s.hiddenTiers);
   const hiddenUsages     = useUiStore(s => s.hiddenUsages);
+  const hiddenEvents     = useUiStore(s => s.hiddenEvents);
   const mapEventFilter   = useUiStore(s => s.mapEventFilter);
 
   const filterLower = mapEventFilter.toLowerCase();
   const visible = markers.filter(m =>
     !hiddenTiers.includes(m.dominantTier) &&
     !hiddenUsages.includes(m.dominantUsage) &&
+    !hiddenEvents.includes(m.eventName) &&
     (filterLower === '' || m.eventName.toLowerCase().includes(filterLower))
   );
 
@@ -141,9 +143,22 @@ export function MapView() {
   const mapEventFilter    = useUiStore(s => s.mapEventFilter);
   const setMapEventFilter = useUiStore(s => s.setMapEventFilter);
 
+  const hiddenEvents     = useUiStore(s => s.hiddenEvents);
+  const toggleEvent      = useUiStore(s => s.toggleEvent);
+
+  const eventsInitialized = useRef(false);
+  useEffect(() => {
+    if (!eventsInitialized.current && markers.length > 0) {
+      eventsInitialized.current = true;
+      const { hiddenEvents: current, toggleEvent: toggle } = useUiStore.getState();
+      markers.forEach(m => { if (!current.includes(m.eventName)) toggle(m.eventName); });
+    }
+  }, [markers.length]);
+
   const [downloading, setDownloading]       = useState(false);
   const [downloadProgress, setProgress]     = useState(0);
   const [downloadError, setDownloadError]   = useState<string | null>(null);
+  const [showEventList, setShowEventList]   = useState(false);
 
   const bounds      = mapBounds(mapConfig);
   const isKnownMap  = TILE_MAPS.has(activeMap);
@@ -154,26 +169,34 @@ export function MapView() {
   useEffect(() => {
     if (!isKnownMap || hasImage || downloading) return;
 
-    setDownloading(true);
-    setProgress(0);
-    setDownloadError(null);
+    let cancelled = false;
 
-    let unlisten: (() => void) | null = null;
+    (async () => {
+      setDownloading(true);
+      setProgress(0);
+      setDownloadError(null);
 
-    listen<number>('tile-progress', e => setProgress(e.payload)).then(fn => {
-      unlisten = fn;
-    });
-
-    invoke<{ path: string; width: number; height: number }>('download_map_tiles', { mapId: activeMap })
-      .then(result => {
-        setMapImagePath(activeMap, convertFileSrc(result.path));
-        setMapImageSize(activeMap, result.width, result.height);
-      })
-      .catch(err => setDownloadError(err instanceof Error ? err.message : String(err)))
-      .finally(() => {
-        unlisten?.();
-        setDownloading(false);
+      const unlisten = await listen<number>('tile-progress', e => {
+        if (!cancelled) setProgress(e.payload);
       });
+
+      try {
+        const result = await invoke<{ path: string; width: number; height: number }>(
+          'download_map_tiles', { mapId: activeMap }
+        );
+        if (!cancelled) {
+          setMapImagePath(activeMap, convertFileSrc(result.path));
+          setMapImageSize(activeMap, result.width, result.height);
+        }
+      } catch (err) {
+        if (!cancelled) setDownloadError(err instanceof Error ? err.message : String(err));
+      } finally {
+        unlisten();
+        if (!cancelled) setDownloading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap, hasImage]);
 
@@ -268,21 +291,73 @@ export function MapView() {
       </MapContainer>
 
       <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2">
-        <div className="relative">
-          <input
-            type="text"
-            value={mapEventFilter}
-            onChange={e => setMapEventFilter(e.target.value)}
-            placeholder="Filter events…"
-            className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-1.5 backdrop-blur text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-40"
-          />
-          {mapEventFilter && (
-            <button
-              onClick={() => setMapEventFilter('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
-            >✕</button>
+        {/* Events controls column */}
+        <div className="flex flex-col items-end gap-2">
+          {showEventList && (
+            <div className="bg-slate-900/95 border border-slate-700 rounded-lg backdrop-blur w-56 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                <span className="text-xs font-medium text-slate-300">Events</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => markers.forEach(m => { if (!hiddenEvents.includes(m.eventName)) toggleEvent(m.eventName); })}
+                    className="text-xs text-slate-500 hover:text-slate-300"
+                  >Hide all</button>
+                  <button
+                    onClick={() => markers.forEach(m => { if (hiddenEvents.includes(m.eventName)) toggleEvent(m.eventName); })}
+                    className="text-xs text-slate-500 hover:text-slate-300"
+                  >Show all</button>
+                </div>
+              </div>
+              <div className="overflow-y-auto max-h-64">
+                {[...markers]
+                  .sort((a, b) => a.eventName.localeCompare(b.eventName))
+                  .filter(m => mapEventFilter === '' || m.eventName.toLowerCase().includes(mapEventFilter.toLowerCase()))
+                  .map(m => {
+                    const hidden = hiddenEvents.includes(m.eventName);
+                    return (
+                      <button
+                        key={m.eventName}
+                        onClick={() => toggleEvent(m.eventName)}
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-800 transition-colors ${hidden ? 'opacity-40' : ''}`}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: USAGE_COLORS[m.dominantUsage] ?? USAGE_COLORS['Other'] }}
+                        />
+                        <span className="text-xs text-slate-200 truncate flex-1">{m.eventName}</span>
+                        <span className="text-xs text-slate-500 flex-shrink-0">{m.positions.length}</span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
           )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowEventList(v => !v)}
+              className={`bg-slate-900/90 border rounded-lg px-3 py-1.5 backdrop-blur text-xs transition-colors ${showEventList ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+            >
+              Events {hiddenEvents.length > 0 ? `(${hiddenEvents.length} hidden)` : ''}
+            </button>
+            <div className="relative">
+              <input
+                type="text"
+                value={mapEventFilter}
+                onChange={e => setMapEventFilter(e.target.value)}
+                placeholder="Filter events…"
+                className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-1.5 backdrop-blur text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-40"
+              />
+              {mapEventFilter && (
+                <button
+                  onClick={() => setMapEventFilter('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
+                >✕</button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Tier/usage legend — always visible, anchored to bottom-right */}
         <TierLegend />
       </div>
 

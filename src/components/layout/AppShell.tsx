@@ -9,6 +9,7 @@ import { TypesEditor } from '../editors/TypesEditor';
 import { EventsEditor } from '../editors/EventsEditor';
 import { EventSpawnsEditor } from '../editors/EventSpawnsEditor';
 import { SpawnableTypesEditor } from '../editors/SpawnableTypesEditor';
+import { EconomyCoreEditor } from '../editors/EconomyCoreEditor';
 
 const FILE_DESCRIPTIONS: Record<string, string> = {
   'types.xml': 'Item spawn quantities, lifetime, flags and tiers',
@@ -153,7 +154,9 @@ export function AppShell() {
   const mission = useServerStore(s => s.mission);
   const dirty = useServerStore(s => s.dirty);
   const { activeTab, loadError, loadWarnings } = useUiStore();
-  const { openFolder, pendingMissions, selectMission, cancelPicker } = useServerFolder();
+  const { openFolder, autoLoad, pendingMissions, selectMission, cancelPicker } = useServerFolder();
+
+  useEffect(() => { autoLoad(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -204,6 +207,7 @@ export function AppShell() {
               {activeTab === 'events'         && <EventsEditor />}
               {activeTab === 'spawns'         && <EventSpawnsEditor />}
               {activeTab === 'spawnableTypes' && <SpawnableTypesEditor />}
+              {activeTab === 'economy'        && <EconomyCoreEditor />}
             </div>
           </div>
         )}

@@ -15,7 +15,7 @@ async fn download_map_tiles(
     version_cache: tauri::State<'_, VersionCache>,
     http:          tauri::State<'_, SharedClient>,
     map_id:        String,
-) -> Result<crate::ExtractResult, String> {
+) -> Result<ExtractResult, String> {
     let cache_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("map_cache");

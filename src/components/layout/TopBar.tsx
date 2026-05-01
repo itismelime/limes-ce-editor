@@ -9,6 +9,7 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'events',        label: '⚡ Events' },
   { id: 'spawns',        label: '📍 Spawn Points' },
   { id: 'spawnableTypes', label: '📦 Spawnable Types' },
+  { id: 'economy',       label: '⚙ Economy Core' },
 ];
 
 const MAPS: { id: MapId; label: string }[] = [
@@ -22,12 +23,21 @@ const MAPS: { id: MapId; label: string }[] = [
 export function TopBar({ onOpenFolder }: { onOpenFolder: () => void }) {
   const mission = useServerStore(s => s.mission);
   const dirty = useServerStore(s => s.dirty);
+  const saveError = useServerStore(s => s.saveError);
+  const saveStatus = useServerStore(s => s.saveStatus);
+  const clearSaveError = useServerStore(s => s.clearSaveError);
   const { activeTab, setActiveTab, activeMap, setActiveMap, isLoading } = useUiStore();
 
-  const hasDirty = Object.values(dirty).some(Boolean);
+  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes;
 
   return (
     <div className="flex flex-col bg-slate-900 border-b border-slate-800">
+      {saveError && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-red-950 border-b border-red-800 text-red-300 text-xs">
+          <span className="flex-1">{saveError}</span>
+          <button onClick={clearSaveError} className="text-red-400 hover:text-red-200 font-medium">Dismiss</button>
+        </div>
+      )}
       {/* Top row */}
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="flex items-center gap-2 mr-2">
@@ -57,7 +67,19 @@ export function TopBar({ onOpenFolder }: { onOpenFolder: () => void }) {
           </span>
         )}
 
-        {hasDirty && (
+        {saveStatus === 'saving' && (
+          <span className="ml-auto flex items-center gap-1.5 text-slate-400 text-xs">
+            <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
+            Saving…
+          </span>
+        )}
+        {saveStatus === 'success' && (
+          <span className="ml-auto flex items-center gap-1.5 text-green-400 text-xs">
+            <span className="w-2 h-2 rounded-full bg-green-400" />
+            Saved successfully
+          </span>
+        )}
+        {saveStatus === 'idle' && hasDirty && (
           <span className="ml-auto flex items-center gap-1.5 text-amber-400 text-xs">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
             Unsaved changes
