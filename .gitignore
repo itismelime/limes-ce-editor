@@ -27,3 +27,20 @@ dist-ssr
 CLAUDE.md
 
 src-tauri/target/*
+
+# Tauri release bundle outputs
+src-tauri/target/release/bundle/
+
+# Environment variables (may contain secrets)
+.env
+.env.*
+!.env.example
+
+# OS files
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# TypeScript build cache
+*.tsbuildinfo
