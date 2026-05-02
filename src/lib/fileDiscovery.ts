@@ -7,6 +7,8 @@ const TARGET_FILES = new Set([
   'events.xml',
   'cfgspawnabletypes.xml',
   'cfgeconomycore.xml',
+  'mapgroupproto.xml',
+  'mapgrouppos.xml',
 ]);
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.tga']);
@@ -23,6 +25,8 @@ export interface MissionFiles {
   eventsPath: string | null;
   spawnableTypesPath: string | null;
   economyCorePath: string | null;
+  mapGroupProtoPath: string | null;
+  mapGroupPosPath: string | null;
   mapImagePath: string | null;
 }
 
@@ -72,13 +76,16 @@ async function scanDir(
   }
 }
 
+const MISSION_SUBFOLDERS = new Set(['db', 'env', 'ce', 'custom_types', 'customtypes']);
+
 function getMissionFolder(filePath: string): string {
   const norm = filePath.replace(/\\/g, '/');
   const parts = norm.split('/');
-  // If the file is inside a 'db' dir, the mission folder is the parent of 'db'
-  const dbIdx = parts.map(p => p.toLowerCase()).lastIndexOf('db');
-  if (dbIdx > 0) return parts.slice(0, dbIdx).join('/');
-  // Otherwise use parent dir
+  // If the file lives inside a known mission subfolder, go up one extra level
+  const parentDir = parts[parts.length - 2]?.toLowerCase() ?? '';
+  if (MISSION_SUBFOLDERS.has(parentDir)) {
+    return parts.slice(0, -2).join('/');
+  }
   return parts.slice(0, -1).join('/');
 }
 
@@ -117,6 +124,8 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
       eventsPath:         files['events.xml']            ?? null,
       spawnableTypesPath: files['cfgspawnabletypes.xml'] ?? null,
       economyCorePath:    files['cfgeconomycore.xml']    ?? null,
+      mapGroupProtoPath:  files['mapgroupproto.xml']     ?? null,
+      mapGroupPosPath:    files['mapgrouppos.xml']       ?? null,
       mapImagePath,
     };
   });

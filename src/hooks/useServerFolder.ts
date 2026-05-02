@@ -7,6 +7,7 @@ import {
   parseTypesXml, parseEventSpawnsXml,
   parseEventsXml, parseSpawnableTypesXml,
   parseEconomyCoreXml,
+  parseMapGroupProtoXml, parseMapGroupPosXml, joinMapGroups,
 } from '../lib/xmlParser';
 import type { MissionData, CeEntry } from '../types/dayz';
 import { useServerStore } from '../store/serverStore';
@@ -66,9 +67,10 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
 }
 
 export function useServerFolder() {
-  const setMission     = useServerStore(s => s.setMission);
-  const setPaths       = useServerStore(s => s.setPaths);
-  const setEconomyCore = useServerStore(s => s.setEconomyCore);
+  const setMission           = useServerStore(s => s.setMission);
+  const setPaths             = useServerStore(s => s.setPaths);
+  const setEconomyCore       = useServerStore(s => s.setEconomyCore);
+  const setBuildingInstances = useServerStore(s => s.setBuildingInstances);
   const setLoading      = useUiStore(s => s.setLoading);
   const setLoadError    = useUiStore(s => s.setLoadError);
   const setLoadWarnings = useUiStore(s => s.setLoadWarnings);
@@ -130,6 +132,19 @@ export function useServerFolder() {
         if (mergedTypes.size > mission.types.size) {
           setMission({ ...mission, types: mergedTypes });
         }
+      }
+
+      // Load building spawn layer
+      if (m.mapGroupProtoPath && m.mapGroupPosPath) {
+        try {
+          const [protoRaw, posRaw] = await Promise.all([
+            readFile(m.mapGroupProtoPath),
+            readFile(m.mapGroupPosPath),
+          ]);
+          const proto = parseMapGroupProtoXml(protoRaw);
+          const positions = parseMapGroupPosXml(posRaw);
+          setBuildingInstances(joinMapGroups(proto, positions));
+        } catch { /* optional layer — silently skip */ }
       }
 
       if (m.mapImagePath) {

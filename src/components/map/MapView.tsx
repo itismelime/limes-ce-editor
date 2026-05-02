@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 import 'leaflet/dist/leaflet.css';
 import { useMapMarkers } from '../../hooks/useMapMarkers';
 import { useUiStore } from '../../store/uiStore';
+import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet, mapBounds, mapPanBounds } from '../../lib/coordinateTransform';
 import { TIER_COLORS, USAGE_COLORS } from '../../types/map';
 import { TierLegend } from './TierLegend';
@@ -115,6 +116,63 @@ function EventMarkers({ markers, mapConfig }: { markers: ResolvedMarker[]; mapCo
   );
 }
 
+function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
+  const buildingInstances    = useServerStore(s => s.buildingInstances);
+  const mission              = useServerStore(s => s.mission);
+  const showBuildings       = useUiStore(s => s.showBuildings);
+  const buildingItemFilter  = useUiStore(s => s.buildingItemFilter);
+  const hiddenUsages        = useUiStore(s => s.hiddenUsages);
+
+  const visible = useMemo(() => {
+    if (!showBuildings) return [];
+
+    let itemUsageFilter: Set<string> | null = null;
+    const q = buildingItemFilter.trim().toLowerCase();
+    if (q) {
+      const matched = mission ? [...mission.types.values()].filter(t =>
+        t.name.toLowerCase().includes(q)
+      ) : [];
+      const usages = new Set(matched.flatMap(t => t.usages));
+      itemUsageFilter = usages.size > 0 ? usages : new Set<string>();
+    }
+
+    return buildingInstances.filter(b => {
+      const primaryUsage = b.usages[0] ?? 'Other';
+      if (hiddenUsages.includes(primaryUsage)) return false;
+      if (itemUsageFilter !== null) return b.usages.some(u => itemUsageFilter!.has(u));
+      return true;
+    });
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, hiddenUsages]);
+
+  return (
+    <>
+      {visible.map((b, idx) => {
+        const latlng = gameToLeaflet(b.x, b.z, mapConfig);
+        const primaryUsage = b.usages[0] ?? 'Other';
+        const color = USAGE_COLORS[primaryUsage] ?? '#64748b';
+        return (
+          <CircleMarker
+            key={idx}
+            center={latlng}
+            radius={3}
+            pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: 1 }}
+          >
+            <Popup>
+              <div className="text-slate-800 text-xs">
+                <p className="font-mono font-semibold mb-1">{b.typeName}</p>
+                {b.usages.length > 0
+                  ? <p className="text-slate-600">{b.usages.join(', ')}</p>
+                  : <p className="text-slate-400 italic">No usage zone</p>
+                }
+              </div>
+            </Popup>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
+}
+
 async function pickMapImage(
   activeMap:       string,
   setMapImagePath: (id: string, url: string) => void,
@@ -143,8 +201,13 @@ export function MapView() {
   const mapEventFilter    = useUiStore(s => s.mapEventFilter);
   const setMapEventFilter = useUiStore(s => s.setMapEventFilter);
 
-  const hiddenEvents     = useUiStore(s => s.hiddenEvents);
-  const toggleEvent      = useUiStore(s => s.toggleEvent);
+  const hiddenEvents          = useUiStore(s => s.hiddenEvents);
+  const toggleEvent           = useUiStore(s => s.toggleEvent);
+  const showBuildings          = useUiStore(s => s.showBuildings);
+  const toggleBuildings        = useUiStore(s => s.toggleBuildings);
+  const buildingItemFilter     = useUiStore(s => s.buildingItemFilter);
+  const setBuildingItemFilter  = useUiStore(s => s.setBuildingItemFilter);
+  const buildingInstances      = useServerStore(s => s.buildingInstances);
 
   const eventsInitialized = useRef(false);
   useEffect(() => {
@@ -159,6 +222,7 @@ export function MapView() {
   const [downloadProgress, setProgress]     = useState(0);
   const [downloadError, setDownloadError]   = useState<string | null>(null);
   const [showEventList, setShowEventList]   = useState(false);
+  const [showBuildingPanel, setShowBuildingPanel] = useState(false);
 
   const bounds      = mapBounds(mapConfig);
   const isKnownMap  = TILE_MAPS.has(activeMap);
@@ -288,11 +352,47 @@ export function MapView() {
         {isKnownMap && <DayZTileLayer mapId={activeMap} />}
 
         <EventMarkers markers={markers} mapConfig={mapConfig} />
+        <BuildingMarkers mapConfig={mapConfig} />
       </MapContainer>
 
-      <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2">
+      <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2 pointer-events-none">
+        {/* Buildings controls column */}
+        {buildingInstances.length > 0 && (
+          <div className="flex flex-col items-end gap-2 pointer-events-auto">
+            {showBuildingPanel && (
+              <div className="bg-slate-900/95 border border-slate-700 rounded-lg backdrop-blur w-64 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                  <span className="text-xs font-medium text-slate-300">Buildings</span>
+                  <span className="text-xs text-slate-600">{buildingInstances.length.toLocaleString()} total</span>
+                </div>
+                <div className="p-3 space-y-3">
+                  {/* Item search */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={buildingItemFilter}
+                      onChange={e => setBuildingItemFilter(e.target.value)}
+                      placeholder="Search item to find spawn zones…"
+                      className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                    {buildingItemFilter && (
+                      <button onClick={() => setBuildingItemFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => setShowBuildingPanel(v => !v)}
+              className={`bg-slate-900/90 border rounded-lg px-3 py-1.5 backdrop-blur text-xs transition-colors ${showBuildingPanel ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+            >
+              Buildings
+            </button>
+          </div>
+        )}
+
         {/* Events controls column */}
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-end gap-2 pointer-events-auto">
           {showEventList && (
             <div className="bg-slate-900/95 border border-slate-700 rounded-lg backdrop-blur w-56 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
@@ -364,6 +464,7 @@ export function MapView() {
       <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2">
         <div className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-1.5 backdrop-blur text-xs text-slate-400">
           {markers.length} events · {markers.reduce((s, m) => s + m.positions.length, 0)} spawn points
+          {buildingInstances.length > 0 && ` · ${buildingInstances.length.toLocaleString()} buildings`}
         </div>
         {isCustomMap && (
           <button

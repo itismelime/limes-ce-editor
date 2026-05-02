@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry } from '../types/dayz';
+import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance } from '../types/dayz';
 import {
   serializeTypesXml, serializeEventSpawnsXml,
   serializeEventsXml, serializeSpawnableTypesXml,
@@ -23,10 +23,12 @@ interface ServerState {
   saveError: string | null;
   saveStatus: 'idle' | 'saving' | 'success';
   economyCore: CeEntry[];
+  buildingInstances: BuildingInstance[];
 
   setMission: (mission: MissionData) => void;
   setPaths: (paths: Partial<FilePaths>) => void;
   setEconomyCore: (entries: CeEntry[]) => void;
+  setBuildingInstances: (instances: BuildingInstance[]) => void;
   clearSaveError: () => void;
 
   updateType: (name: string, patch: Partial<DayZType>) => void;
@@ -60,10 +62,12 @@ export const useServerStore = create<ServerState>((set, get) => ({
   saveError: null,
   saveStatus: 'idle' as const,
   economyCore: [],
+  buildingInstances: [],
 
   setMission: (mission) => set({ mission, dirty: emptyDirty }),
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
+  setBuildingInstances: (instances) => set({ buildingInstances: instances }),
   clearSaveError: () => set({ saveError: null }),
 
   updateType: (name, patch) => set(s => {

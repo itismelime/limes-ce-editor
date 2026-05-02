@@ -21,6 +21,8 @@ interface UiState {
   hiddenUsages: string[];
   hiddenEvents: string[];
   mapEventFilter: string;
+  showBuildings: boolean;
+  buildingItemFilter: string;
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
@@ -37,6 +39,8 @@ interface UiState {
   toggleUsage: (usage: string) => void;
   toggleEvent: (name: string) => void;
   setMapEventFilter: (v: string) => void;
+  toggleBuildings: () => void;
+  setBuildingItemFilter: (v: string) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -80,6 +84,8 @@ export const useUiStore = create<UiState>((set) => ({
   hiddenUsages: [],
   hiddenEvents: [],
   mapEventFilter: '',
+  showBuildings: true,
+  buildingItemFilter: '',
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
       ? s.hiddenTiers.filter(t => t !== tier)
@@ -96,4 +102,6 @@ export const useUiStore = create<UiState>((set) => ({
       : [...s.hiddenEvents, name],
   })),
   setMapEventFilter: (v) => set({ mapEventFilter: v }),
+  toggleBuildings: () => set(s => ({ showBuildings: !s.showBuildings })),
+  setBuildingItemFilter: (v) => set({ buildingItemFilter: v }),
 }));

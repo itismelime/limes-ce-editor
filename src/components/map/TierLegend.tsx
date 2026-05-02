@@ -8,7 +8,7 @@ export function TierLegend() {
   const toggleUsage  = useUiStore(s => s.toggleUsage);
 
   return (
-    <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px]">
+    <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px] pointer-events-auto">
       <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Tier (ring)</p>
       {[...TIER_ORDER, 'unknown'].map(tier => {
         const hidden = hiddenTiers.includes(tier);

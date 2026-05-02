@@ -270,6 +270,105 @@ export function serializeSpawnableTypesXml(spawnableTypes: Map<string, Spawnable
     builder.build({ spawnabletypes: { type: typesList } });
 }
 
+// ─── mapgroupproto.xml + mapgrouppos.xml ─────────────────────────────────────
+
+import type { BuildingInstance } from '../types/dayz';
+
+const PROTO_PARSER_OPTIONS = {
+  ...PARSER_OPTIONS,
+  isArray: (name: string) => ['group', 'usage', 'container', 'category', 'tag'].includes(name),
+};
+
+const POS_PARSER_OPTIONS = {
+  ...PARSER_OPTIONS,
+  isArray: (name: string) => name === 'group',
+};
+
+function sanitizeReservedTagNames(xml: string): string {
+  // fast-xml-parser rejects tag names matching JS reserved words (prototype, constructor, __proto__)
+  for (const name of ['prototype', 'constructor', '__proto__']) {
+    xml = xml.replace(new RegExp(`<${name}([\\s/>])`, 'g'), `<_${name}$1`);
+    xml = xml.replace(new RegExp(`</${name}>`, 'g'), `</_${name}>`);
+  }
+  return xml;
+}
+
+// Maps lowercase tag names from mapgroupproto containers to canonical usage zone names
+const TAG_TO_USAGE: Record<string, string> = {
+  military:    'Military',
+  police:      'Police',
+  medic:       'Medic',
+  medical:     'Medic',
+  industrial:  'Industrial',
+  farm:        'Farm',
+  hunting:     'Hunting',
+  firefighter: 'Firefighter',
+  coast:       'Coastal',
+  coastal:     'Coastal',
+  town:        'Town',
+  village:     'Village',
+  lunapark:    'Lunapark',
+  prison:      'Prison',
+};
+
+export function parseMapGroupProtoXml(raw: string): Map<string, string[]> {
+  const parser = new XMLParser(PROTO_PARSER_OPTIONS);
+  const doc = parser.parse(sanitizeReservedTagNames(stripBom(raw)));
+  const root = doc?.mapgroupproto ?? doc?.map ?? doc?._prototype ?? {};
+  const groups: unknown[] = root?.group ?? [];
+  // Keyed by lowercase name so pos-file lookups are case-insensitive
+  const map = new Map<string, string[]>();
+
+
+  for (const g of groups) {
+    const group = g as Record<string, unknown>;
+    const name = strAttr(group, 'name').toLowerCase();
+    if (!name) continue;
+
+    // Collect unique usage zones from all container <tag> elements
+    const containerArr = (group.container as Record<string, unknown>[] | undefined) ?? [];
+    const usages = [...new Set(
+      containerArr.flatMap(c => {
+        const tagArr = (c as Record<string, unknown>).tag as Record<string, unknown>[] | undefined ?? [];
+        return tagArr
+          .map(t => TAG_TO_USAGE[strAttr(t, 'name').toLowerCase()])
+          .filter(Boolean) as string[];
+      })
+    )];
+
+    map.set(name, usages);
+  }
+  return map;
+}
+
+export function parseMapGroupPosXml(raw: string): { name: string; x: number; z: number }[] {
+  const parser = new XMLParser(POS_PARSER_OPTIONS);
+  const doc = parser.parse(sanitizeReservedTagNames(stripBom(raw)));
+  // Root element is <map> or <mapgrouppos> depending on the source
+  const root = doc?.map ?? doc?.mapgrouppos ?? {};
+  const groups: unknown[] = root?.group ?? [];
+  return groups.flatMap(g => {
+    const group = g as Record<string, unknown>;
+    const name = strAttr(group, 'name');
+    if (!name) return [];
+    const posStr = strAttr(group, 'pos');
+    const parts = posStr.trim().split(/\s+/);
+    return [{ name, x: num(parts[0]), z: num(parts[2]) }];
+  });
+}
+
+export function joinMapGroups(
+  proto: Map<string, string[]>,
+  positions: { name: string; x: number; z: number }[],
+): BuildingInstance[] {
+  return positions.map(p => ({
+    typeName: p.name,
+    usages: proto.get(p.name.toLowerCase()) ?? [],
+    x: p.x,
+    z: p.z,
+  }));
+}
+
 // ─── cfgeconomycore.xml ───────────────────────────────────────────────────────
 
 const CE_PARSER_OPTIONS = {

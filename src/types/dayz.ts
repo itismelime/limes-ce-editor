@@ -107,3 +107,10 @@ export interface CeEntry {
   folder: string;
   files: CeFile[];
 }
+
+export interface BuildingInstance {
+  typeName: string;
+  usages: string[];
+  x: number;
+  z: number;
+}
