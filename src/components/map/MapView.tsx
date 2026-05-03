@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, ImageOverlay, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, ImageOverlay, CircleMarker, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { CRS } from 'leaflet';
 import { open } from '@tauri-apps/plugin-dialog';
+import { sampleTierAtPos } from '../../lib/tierZoneResolver';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -11,9 +12,10 @@ import { useMapMarkers } from '../../hooks/useMapMarkers';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet, mapBounds, mapPanBounds } from '../../lib/coordinateTransform';
-import { TIER_COLORS, USAGE_COLORS } from '../../types/map';
+import { TIER_COLORS, TIER_ORDER, getUsageColor } from '../../types/map';
 import { TierLegend } from './TierLegend';
 import { MarkerPopup } from './MarkerPopup';
+import { BuildingPopup } from './BuildingPopup';
 import type { ResolvedMarker } from '../../lib/lootResolver';
 import type { MapConfig } from '../../types/map';
 
@@ -91,14 +93,14 @@ function EventMarkers({ markers, mapConfig }: { markers: ResolvedMarker[]; mapCo
         marker.positions.map((pos, idx) => {
           const latlng     = gameToLeaflet(pos.x, pos.z, mapConfig);
           const tierColor  = TIER_COLORS[marker.dominantTier] ?? TIER_COLORS.unknown;
-          const usageColor = USAGE_COLORS[marker.dominantUsage] ?? USAGE_COLORS['Other'];
+          const usageColor = getUsageColor(marker.dominantUsage);
           const isSelected = selectedEvent === marker.eventName;
           const opacity    = marker.inBounds ? (marker.active ? 0.85 : 0.4) : 0.25;
           return (
             <CircleMarker
               key={`${marker.eventName}-${idx}`}
               center={latlng}
-              radius={isSelected ? 10 : 6}
+              radius={isSelected ? 14 : 9}
               pathOptions={{
                 color: isSelected ? '#fff' : tierColor,
                 fillColor: usageColor,
@@ -116,59 +118,136 @@ function EventMarkers({ markers, mapConfig }: { markers: ResolvedMarker[]; mapCo
   );
 }
 
+function buildingMarkerIcon(tiers: string[], usageColor: string): L.DivIcon {
+  const size = 18;
+  const cx = 9, cy = 9;
+  const fillR = 5;
+  const ringR = 7;
+  const sw = 2.5;
+  const n = Math.max(tiers.length, 1);
+
+  let ringPaths = '';
+  if (n === 1) {
+    const color = TIER_COLORS[tiers[0]] ?? TIER_COLORS.unknown;
+    ringPaths = `<circle cx="${cx}" cy="${cy}" r="${ringR}" stroke="${color}" stroke-width="${sw}" fill="none"/>`;
+  } else {
+    const gap = 0.1;
+    const step = (2 * Math.PI) / n;
+    for (let i = 0; i < n; i++) {
+      const color = TIER_COLORS[tiers[i]] ?? TIER_COLORS.unknown;
+      const sa = i * step - Math.PI / 2 + gap / 2;
+      const ea = (i + 1) * step - Math.PI / 2 - gap / 2;
+      const x1 = (cx + ringR * Math.cos(sa)).toFixed(2);
+      const y1 = (cy + ringR * Math.sin(sa)).toFixed(2);
+      const x2 = (cx + ringR * Math.cos(ea)).toFixed(2);
+      const y2 = (cy + ringR * Math.sin(ea)).toFixed(2);
+      const large = (ea - sa) > Math.PI ? 1 : 0;
+      ringPaths += `<path d="M${x1} ${y1} A${ringR} ${ringR} 0 ${large} 1 ${x2} ${y2}" stroke="${color}" stroke-width="${sw}" fill="none" stroke-linecap="round"/>`;
+    }
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${fillR}" fill="${usageColor}" fill-opacity="0.75"/>${ringPaths}</svg>`;
+  return L.divIcon({ html: svg, className: '', iconSize: [size, size], iconAnchor: [cx, cy], popupAnchor: [0, -cy] });
+}
+
 function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
-  const buildingInstances    = useServerStore(s => s.buildingInstances);
-  const mission              = useServerStore(s => s.mission);
-  const showBuildings       = useUiStore(s => s.showBuildings);
-  const buildingItemFilter  = useUiStore(s => s.buildingItemFilter);
-  const hiddenUsages        = useUiStore(s => s.hiddenUsages);
+  const buildingInstances  = useServerStore(s => s.buildingInstances);
+  const mission            = useServerStore(s => s.mission);
+  const showBuildings      = useUiStore(s => s.showBuildings);
+  const buildingItemFilter = useUiStore(s => s.buildingItemFilter);
+  const hiddenUsages       = useUiStore(s => s.hiddenUsages);
+  const hiddenTiers        = useUiStore(s => s.hiddenTiers);
+  const tierZonesLoaded    = useUiStore(s => s.tierZonesLoaded);
+
+  // Fallback: infer tier from dominant item tier per usage tag
+  const usageTierMap = useMemo(() => {
+    if (!mission) return new Map<string, string>();
+    const counts = new Map<string, Map<string, number>>();
+    for (const type of mission.types.values()) {
+      const dominant = TIER_ORDER.find(t => type.tiers.includes(t));
+      if (!dominant) continue;
+      for (const usage of type.usages) {
+        if (!counts.has(usage)) counts.set(usage, new Map());
+        const m = counts.get(usage)!;
+        m.set(dominant, (m.get(dominant) ?? 0) + 1);
+      }
+    }
+    const result = new Map<string, string>();
+    for (const [usage, tierCounts] of counts) {
+      const best = [...tierCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (best) result.set(usage, best[0]);
+    }
+    return result;
+  }, [mission]);
 
   const visible = useMemo(() => {
     if (!showBuildings) return [];
 
-    let itemUsageFilter: Set<string> | null = null;
     const q = buildingItemFilter.trim().toLowerCase();
-    if (q) {
-      const matched = mission ? [...mission.types.values()].filter(t =>
-        t.name.toLowerCase().includes(q)
-      ) : [];
-      const usages = new Set(matched.flatMap(t => t.usages));
-      itemUsageFilter = usages.size > 0 ? usages : new Set<string>();
+    let itemFilter: ((b: typeof buildingInstances[0]) => boolean) | null = null;
+
+    if (q && mission) {
+      const canonicalUsages = new Set(
+        [...mission.types.values()]
+          .filter(t => t.name.toLowerCase().includes(q))
+          .flatMap(t => t.usages)
+      );
+      const rawTagUsages = new Set(
+        [...mission.spawnableTypes.values()]
+          .filter(st => st.name.toLowerCase().includes(q))
+          .flatMap(st => st.usages)
+      );
+      if (canonicalUsages.size === 0 && rawTagUsages.size === 0) {
+        itemFilter = () => false;
+      } else {
+        itemFilter = b =>
+          (canonicalUsages.size > 0 && b.usages.some(u => canonicalUsages.has(u))) ||
+          (rawTagUsages.size > 0 && b.containers.some(c => c.tags.some(t => rawTagUsages.has(t))));
+      }
     }
 
-    return buildingInstances.filter(b => {
+    return buildingInstances.flatMap(b => {
       const primaryUsage = b.usages[0] ?? 'Other';
-      if (hiddenUsages.includes(primaryUsage)) return false;
-      if (itemUsageFilter !== null) return b.usages.some(u => itemUsageFilter!.has(u));
-      return true;
+      if (hiddenUsages.includes(primaryUsage)) return [];
+      if (itemFilter !== null && !itemFilter(b)) return [];
+
+      // Merge zone tier (areaflags, in-bounds only) with proto container tiers
+      const zoneTier = tierZonesLoaded ? sampleTierAtPos(b.x, b.z) : null;
+      const mergedSet = new Set<string>([
+        ...(zoneTier && zoneTier !== 'unknown' ? [zoneTier] : []),
+        ...b.tiers,
+      ]);
+      let displayTiers = TIER_ORDER.filter(t => mergedSet.has(t));
+      if (displayTiers.length === 0) {
+        const fallback = usageTierMap.get(primaryUsage);
+        if (fallback) displayTiers = [fallback];
+      }
+      if (displayTiers.length === 0) displayTiers = ['unknown'];
+
+      if (displayTiers.every(t => hiddenTiers.includes(t))) return [];
+
+      return [{ b, displayTiers, usageColor: getUsageColor(primaryUsage), latlng: gameToLeaflet(b.x, b.z, mapConfig) }];
     });
-  }, [showBuildings, buildingInstances, mission, buildingItemFilter, hiddenUsages]);
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig]);
 
   return (
     <>
-      {visible.map((b, idx) => {
-        const latlng = gameToLeaflet(b.x, b.z, mapConfig);
-        const primaryUsage = b.usages[0] ?? 'Other';
-        const color = USAGE_COLORS[primaryUsage] ?? '#64748b';
-        return (
-          <CircleMarker
-            key={idx}
-            center={latlng}
-            radius={3}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: 1 }}
-          >
-            <Popup>
-              <div className="text-slate-800 text-xs">
-                <p className="font-mono font-semibold mb-1">{b.typeName}</p>
-                {b.usages.length > 0
-                  ? <p className="text-slate-600">{b.usages.join(', ')}</p>
-                  : <p className="text-slate-400 italic">No usage zone</p>
-                }
-              </div>
-            </Popup>
-          </CircleMarker>
-        );
-      })}
+      {visible.map(({ b, displayTiers, usageColor, latlng }, idx) => (
+        <Marker
+          key={idx}
+          position={latlng}
+          icon={buildingMarkerIcon(displayTiers, usageColor)}
+        >
+          <Popup maxWidth={320}>
+            <BuildingPopup
+              building={b}
+              spawnableTypes={mission?.spawnableTypes ?? new Map()}
+              types={mission?.types ?? new Map()}
+              tiers={displayTiers}
+            />
+          </Popup>
+        </Marker>
+      ))}
     </>
   );
 }
@@ -207,6 +286,7 @@ export function MapView() {
   const toggleBuildings        = useUiStore(s => s.toggleBuildings);
   const buildingItemFilter     = useUiStore(s => s.buildingItemFilter);
   const setBuildingItemFilter  = useUiStore(s => s.setBuildingItemFilter);
+  const tierZonesLoaded        = useUiStore(s => s.tierZonesLoaded);
   const buildingInstances      = useServerStore(s => s.buildingInstances);
 
   const eventsInitialized = useRef(false);
@@ -366,6 +446,10 @@ export function MapView() {
                   <span className="text-xs text-slate-600">{buildingInstances.length.toLocaleString()} total</span>
                 </div>
                 <div className="p-3 space-y-3">
+                  {/* Tier zone status */}
+                  <p className={`text-xs ${tierZonesLoaded ? 'text-green-500' : 'text-slate-600'}`}>
+                    {tierZonesLoaded ? 'Tier zones: loaded from areaflags.map' : 'Tier zones: not available (no areaflags.map found)'}
+                  </p>
                   {/* Item search */}
                   <div className="relative">
                     <input
@@ -422,7 +506,7 @@ export function MapView() {
                       >
                         <span
                           className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: USAGE_COLORS[m.dominantUsage] ?? USAGE_COLORS['Other'] }}
+                          style={{ backgroundColor: getUsageColor(m.dominantUsage) }}
                         />
                         <span className="text-xs text-slate-200 truncate flex-1">{m.eventName}</span>
                         <span className="text-xs text-slate-500 flex-shrink-0">{m.positions.length}</span>

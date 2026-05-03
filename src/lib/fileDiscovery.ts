@@ -1,4 +1,4 @@
-import { readDir, readTextFile, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
+import { readDir, readTextFile, readFile as readBinaryFileNative, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 
 const TARGET_FILES = new Set([
@@ -9,6 +9,7 @@ const TARGET_FILES = new Set([
   'cfgeconomycore.xml',
   'mapgroupproto.xml',
   'mapgrouppos.xml',
+  'areaflags.map',
 ]);
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.tga']);
@@ -27,6 +28,7 @@ export interface MissionFiles {
   economyCorePath: string | null;
   mapGroupProtoPath: string | null;
   mapGroupPosPath: string | null;
+  areaFlagsPath: string | null;
   mapImagePath: string | null;
 }
 
@@ -126,6 +128,7 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
       economyCorePath:    files['cfgeconomycore.xml']    ?? null,
       mapGroupProtoPath:  files['mapgroupproto.xml']     ?? null,
       mapGroupPosPath:    files['mapgrouppos.xml']       ?? null,
+      areaFlagsPath:      files['areaflags.map']         ?? null,
       mapImagePath,
     };
   });
@@ -152,6 +155,10 @@ export async function pickAndDiscoverServer(): Promise<{ path: string; missions:
 
 export async function readFile(path: string): Promise<string> {
   return readTextFile(path);
+}
+
+export async function readBinaryFile(path: string): Promise<Uint8Array> {
+  return readBinaryFileNative(path);
 }
 
 export async function writeFile(path: string, text: string): Promise<void> {

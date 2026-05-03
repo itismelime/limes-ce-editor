@@ -7,7 +7,7 @@ import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
-import { TIER_COLORS, USAGE_COLORS, USAGE_PRIORITY } from '../../types/map';
+import { TIER_COLORS, getUsageColor } from '../../types/map';
 
 const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
 
@@ -24,7 +24,7 @@ function TierBadge({ tier }: { tier: string }) {
 }
 
 function UsageBadge({ usage }: { usage: string }) {
-  const color = USAGE_COLORS[usage] ?? '#64748b';
+  const color = getUsageColor(usage);
   return (
     <span
       className="text-xs px-1.5 py-0.5 rounded font-medium"
@@ -96,10 +96,11 @@ function TypeRow({
   );
 }
 
-function DetailPanel({ type, onUpdate, onClose }: {
+function DetailPanel({ type, onUpdate, onClose, allUsages }: {
   type: DayZType;
   onUpdate: (patch: Partial<DayZType>) => void;
   onClose: () => void;
+  allUsages: string[];
 }) {
   const toggleTier = (tier: string) => {
     const tiers = type.tiers.includes(tier)
@@ -111,7 +112,7 @@ function DetailPanel({ type, onUpdate, onClose }: {
   const removeUsage = (u: string) => onUpdate({ usages: type.usages.filter(x => x !== u) });
   const addUsage    = (u: string) => { if (u && !type.usages.includes(u)) onUpdate({ usages: [...type.usages, u] }); };
 
-  const availableUsages = USAGE_PRIORITY.filter(u => !type.usages.includes(u));
+  const availableUsages = allUsages.filter(u => !type.usages.includes(u));
 
   return (
     <div className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col">
@@ -232,19 +233,27 @@ function DetailPanel({ type, onUpdate, onClose }: {
 }
 
 export function TypesEditor() {
-  const mission = useServerStore(s => s.mission)!;
-  const updateType = useServerStore(s => s.updateType);
-  const saveTypesSource = useServerStore(s => s.saveTypesSource);
+  const mission           = useServerStore(s => s.mission)!;
+  const buildingInstances = useServerStore(s => s.buildingInstances);
+  const updateType        = useServerStore(s => s.updateType);
+  const saveTypesSource   = useServerStore(s => s.saveTypesSource);
   const dirtyTypesSources = useServerStore(s => s.dirty.typesSources);
-  const typeFilter = useUiStore(s => s.typeFilter);
-  const setTypeFilter = useUiStore(s => s.setTypeFilter);
+  const typeFilter        = useUiStore(s => s.typeFilter);
+  const setTypeFilter     = useUiStore(s => s.setTypeFilter);
   const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [tierFilter, setTierFilter] = useState<string>('');
-  const [usageFilter, setUsageFilter] = useState('');
+  const [tierFilter, setTierFilter]     = useState<string>('');
+  const [usageFilter, setUsageFilter]   = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const parentRef = useRef<HTMLDivElement>(null);
 
   const allTypes = useMemo(() => Array.from(mission.types.values()), [mission.types]);
+
+  const allUsages = useMemo(() => {
+    const s = new Set<string>();
+    for (const t of mission.types.values()) t.usages.forEach(u => s.add(u));
+    for (const b of buildingInstances) b.usages.forEach(u => s.add(u));
+    return [...s].sort();
+  }, [mission.types, buildingInstances]);
 
   const allSources = useMemo(() => {
     const s = new Set(allTypes.map(t => t.source).filter(Boolean));
@@ -312,7 +321,7 @@ export function TypesEditor() {
             className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700"
           >
             <option value="">All usages</option>
-            {USAGE_PRIORITY.map(u => (
+            {allUsages.map(u => (
               <option key={u} value={u}>{u}</option>
             ))}
           </select>
@@ -384,6 +393,7 @@ export function TypesEditor() {
           type={selectedType}
           onUpdate={patch => handleUpdate(selectedType.name, patch)}
           onClose={() => setSelectedName(null)}
+          allUsages={allUsages}
         />
       )}
     </div>

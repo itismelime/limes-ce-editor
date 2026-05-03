@@ -1,6 +1,6 @@
 import type { MissionData, EventSpawnPos } from '../types/dayz';
 import type { MapConfig } from '../types/map';
-import { TIER_ORDER, USAGE_PRIORITY } from '../types/map';
+import { TIER_ORDER } from '../types/map';
 import { isInBounds } from './coordinateTransform';
 
 export interface ResolvedLootItem {
@@ -53,8 +53,8 @@ export function resolveLoot(data: MissionData, mapConfig: MapConfig): ResolvedMa
       const typeDef = data.types.get(i.name);
       return typeDef?.usages ?? [];
     }));
-    const allUsages = USAGE_PRIORITY.filter(u => allUsagesSet.has(u));
-    const dominantUsage = allUsages[0] ?? 'Other';
+    const allUsages = [...allUsagesSet];
+    const dominantUsage = allUsages[0] ?? 'unknown';
 
     const inBounds = spawnDef.positions.length === 0 || spawnDef.positions.some(p =>
       isInBounds(p.x, p.z, mapConfig)

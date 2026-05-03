@@ -1,11 +1,22 @@
-import { TIER_COLORS, TIER_ORDER, USAGE_COLORS, USAGE_PRIORITY } from '../../types/map';
+import { useMemo } from 'react';
+import { TIER_COLORS, TIER_ORDER, getUsageColor } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
+import { useServerStore } from '../../store/serverStore';
 
 export function TierLegend() {
-  const hiddenTiers  = useUiStore(s => s.hiddenTiers);
-  const hiddenUsages = useUiStore(s => s.hiddenUsages);
-  const toggleTier   = useUiStore(s => s.toggleTier);
-  const toggleUsage  = useUiStore(s => s.toggleUsage);
+  const hiddenTiers       = useUiStore(s => s.hiddenTiers);
+  const hiddenUsages      = useUiStore(s => s.hiddenUsages);
+  const toggleTier        = useUiStore(s => s.toggleTier);
+  const toggleUsage       = useUiStore(s => s.toggleUsage);
+  const buildingInstances = useServerStore(s => s.buildingInstances);
+  const mission           = useServerStore(s => s.mission);
+
+  const activeUsages = useMemo(() => {
+    const s = new Set<string>();
+    for (const b of buildingInstances) b.usages.forEach(u => s.add(u));
+    if (mission) for (const t of mission.types.values()) t.usages.forEach(u => s.add(u));
+    return [...s].sort();
+  }, [buildingInstances, mission]);
 
   return (
     <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px] pointer-events-auto">
@@ -28,26 +39,29 @@ export function TierLegend() {
         );
       })}
 
-      <div className="border-t border-slate-700 my-2" />
-
-      <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Usage (fill)</p>
-      {USAGE_PRIORITY.map(usage => {
-        const hidden = hiddenUsages.includes(usage);
-        const color  = USAGE_COLORS[usage];
-        return (
-          <button
-            key={usage}
-            onClick={() => toggleUsage(usage)}
-            className="flex items-center gap-2 mb-1 last:mb-0 w-full text-left"
-          >
-            <span
-              className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: color, opacity: hidden ? 0.2 : 1 }}
-            />
-            <span className={`text-xs ${hidden ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{usage}</span>
-          </button>
-        );
-      })}
+      {activeUsages.length > 0 && (
+        <>
+          <div className="border-t border-slate-700 my-2" />
+          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Usage (fill)</p>
+          {activeUsages.map(usage => {
+            const hidden = hiddenUsages.includes(usage);
+            const color  = getUsageColor(usage);
+            return (
+              <button
+                key={usage}
+                onClick={() => toggleUsage(usage)}
+                className="flex items-center gap-2 mb-1 last:mb-0 w-full text-left"
+              >
+                <span
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: color, opacity: hidden ? 0.2 : 1 }}
+                />
+                <span className={`text-xs ${hidden ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{usage}</span>
+              </button>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }

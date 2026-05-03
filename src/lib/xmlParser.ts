@@ -2,6 +2,7 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import type {
   DayZType, DayZTypeFlags, DayZEvent, EventSpawnDef,
   SpawnableType, SpawnableCargo, SpawnableAttachments, CeEntry,
+  ContainerDef,
 } from '../types/dayz';
 
 const ALWAYS_ARRAY = new Set([
@@ -212,8 +213,13 @@ export function serializeEventsXml(events: Map<string, DayZEvent>): string {
 
 // ─── cfgspawnabletypes.xml ────────────────────────────────────────────────────
 
+const SPAWNABLE_PARSER_OPTIONS = {
+  ...PARSER_OPTIONS,
+  isArray: (name: string) => ['type', 'usage', 'category', 'tag', 'cargo', 'attachments', 'item'].includes(name),
+};
+
 export function parseSpawnableTypesXml(raw: string): Map<string, SpawnableType> {
-  const parser = new XMLParser(PARSER_OPTIONS);
+  const parser = new XMLParser(SPAWNABLE_PARSER_OPTIONS);
   const doc = parser.parse(stripBom(raw));
   const typesList: unknown[] = doc?.spawnabletypes?.type ?? [];
   const map = new Map<string, SpawnableType>();
@@ -241,6 +247,9 @@ export function parseSpawnableTypesXml(raw: string): Map<string, SpawnableType> 
 
     const spawnableType: SpawnableType = {
       name: strAttr(st, 'name'),
+      usages:     ((st.usage as Record<string,unknown>[]) ?? []).map(u => strAttr(u, 'name').toLowerCase()),
+      categories: ((st.category as Record<string,unknown>[]) ?? []).map(c => strAttr(c, 'name').toLowerCase()),
+      tags:       ((st.tag as Record<string,unknown>[]) ?? []).map(tg => strAttr(tg, 'name').toLowerCase()),
       cargo,
       attachments,
     };
@@ -276,7 +285,7 @@ import type { BuildingInstance } from '../types/dayz';
 
 const PROTO_PARSER_OPTIONS = {
   ...PARSER_OPTIONS,
-  isArray: (name: string) => ['group', 'usage', 'container', 'category', 'tag'].includes(name),
+  isArray: (name: string) => ['group', 'usage', 'container', 'category', 'tag', 'value'].includes(name),
 };
 
 const POS_PARSER_OPTIONS = {
@@ -293,50 +302,48 @@ function sanitizeReservedTagNames(xml: string): string {
   return xml;
 }
 
-// Maps lowercase tag names from mapgroupproto containers to canonical usage zone names
-const TAG_TO_USAGE: Record<string, string> = {
-  military:    'Military',
-  police:      'Police',
-  medic:       'Medic',
-  medical:     'Medic',
-  industrial:  'Industrial',
-  farm:        'Farm',
-  hunting:     'Hunting',
-  firefighter: 'Firefighter',
-  coast:       'Coastal',
-  coastal:     'Coastal',
-  town:        'Town',
-  village:     'Village',
-  lunapark:    'Lunapark',
-  prison:      'Prison',
-};
+function titleCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
-export function parseMapGroupProtoXml(raw: string): Map<string, string[]> {
+// "Tier4" → ["Tier4"], "Tier45" → ["Tier4", "Tier5"]
+function parseTierValue(raw: string): string[] {
+  const match = raw.match(/^Tier(\d+)$/i);
+  if (!match) return [];
+  return match[1].split('').map(d => `Tier${d}`);
+}
+
+export function parseMapGroupProtoXml(raw: string): Map<string, { usages: string[]; tiers: string[]; lootmax: number; containers: ContainerDef[] }> {
   const parser = new XMLParser(PROTO_PARSER_OPTIONS);
   const doc = parser.parse(sanitizeReservedTagNames(stripBom(raw)));
   const root = doc?.mapgroupproto ?? doc?.map ?? doc?._prototype ?? {};
   const groups: unknown[] = root?.group ?? [];
-  // Keyed by lowercase name so pos-file lookups are case-insensitive
-  const map = new Map<string, string[]>();
-
+  const map = new Map<string, { usages: string[]; tiers: string[]; lootmax: number; containers: ContainerDef[] }>();
 
   for (const g of groups) {
     const group = g as Record<string, unknown>;
     const name = strAttr(group, 'name').toLowerCase();
     if (!name) continue;
 
-    // Collect unique usage zones from all container <tag> elements
     const containerArr = (group.container as Record<string, unknown>[] | undefined) ?? [];
-    const usages = [...new Set(
-      containerArr.flatMap(c => {
-        const tagArr = (c as Record<string, unknown>).tag as Record<string, unknown>[] | undefined ?? [];
-        return tagArr
-          .map(t => TAG_TO_USAGE[strAttr(t, 'name').toLowerCase()])
-          .filter(Boolean) as string[];
-      })
-    )];
 
-    map.set(name, usages);
+    const containers: ContainerDef[] = containerArr.map(c => {
+      const tagArr = (c.tag as Record<string, unknown>[] | undefined) ?? [];
+      const catArr = (c.category as Record<string, unknown>[] | undefined) ?? [];
+      return {
+        name:       strAttr(c, 'name'),
+        lootmax:    numAttr(c, 'lootmax'),
+        categories: catArr.map(cat => strAttr(cat, 'name').toLowerCase()),
+        tags:       tagArr.map(t => strAttr(t, 'name').toLowerCase()),
+      };
+    });
+
+    const usages = [...new Set(containers.flatMap(c => c.tags.map(titleCase)))];
+
+    const valueArr = (group.value as Record<string, unknown>[] | undefined) ?? [];
+    const tiers = [...new Set(valueArr.flatMap(v => parseTierValue(strAttr(v, 'user'))))];
+
+    map.set(name, { usages, tiers, lootmax: numAttr(group, 'lootmax'), containers });
   }
   return map;
 }
@@ -358,15 +365,21 @@ export function parseMapGroupPosXml(raw: string): { name: string; x: number; z: 
 }
 
 export function joinMapGroups(
-  proto: Map<string, string[]>,
+  proto: Map<string, { usages: string[]; tiers: string[]; lootmax: number; containers: ContainerDef[] }>,
   positions: { name: string; x: number; z: number }[],
 ): BuildingInstance[] {
-  return positions.map(p => ({
-    typeName: p.name,
-    usages: proto.get(p.name.toLowerCase()) ?? [],
-    x: p.x,
-    z: p.z,
-  }));
+  return positions.map(p => {
+    const entry = proto.get(p.name.toLowerCase());
+    return {
+      typeName:   p.name,
+      usages:     entry?.usages ?? [],
+      tiers:      entry?.tiers ?? [],
+      lootmax:    entry?.lootmax ?? 0,
+      containers: entry?.containers ?? [],
+      x: p.x,
+      z: p.z,
+    };
+  });
 }
 
 // ─── cfgeconomycore.xml ───────────────────────────────────────────────────────

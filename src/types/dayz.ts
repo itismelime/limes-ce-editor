@@ -72,8 +72,18 @@ export interface SpawnableAttachments {
 
 export interface SpawnableType {
   name: string;
+  usages: string[];
+  categories: string[];
+  tags: string[];
   cargo: SpawnableCargo[];
   attachments: SpawnableAttachments[];
+}
+
+export interface ContainerDef {
+  name: string;
+  lootmax: number;
+  categories: string[];
+  tags: string[];
 }
 
 export interface MissionData {
@@ -111,6 +121,9 @@ export interface CeEntry {
 export interface BuildingInstance {
   typeName: string;
   usages: string[];
+  tiers: string[];
+  lootmax: number;
+  containers: ContainerDef[];
   x: number;
   z: number;
 }

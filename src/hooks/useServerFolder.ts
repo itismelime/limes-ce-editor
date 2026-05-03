@@ -9,6 +9,8 @@ import {
   parseEconomyCoreXml,
   parseMapGroupProtoXml, parseMapGroupPosXml, joinMapGroups,
 } from '../lib/xmlParser';
+import { loadAreaFlags, clearAreaFlags } from '../lib/tierZoneResolver';
+import { readBinaryFile } from '../lib/fileDiscovery';
 import type { MissionData, CeEntry } from '../types/dayz';
 import { useServerStore } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
@@ -71,10 +73,11 @@ export function useServerFolder() {
   const setPaths             = useServerStore(s => s.setPaths);
   const setEconomyCore       = useServerStore(s => s.setEconomyCore);
   const setBuildingInstances = useServerStore(s => s.setBuildingInstances);
-  const setLoading      = useUiStore(s => s.setLoading);
-  const setLoadError    = useUiStore(s => s.setLoadError);
-  const setLoadWarnings = useUiStore(s => s.setLoadWarnings);
-  const setMapImagePath = useUiStore(s => s.setMapImagePath);
+  const setLoading          = useUiStore(s => s.setLoading);
+  const setLoadError        = useUiStore(s => s.setLoadError);
+  const setLoadWarnings     = useUiStore(s => s.setLoadWarnings);
+  const setMapImagePath     = useUiStore(s => s.setMapImagePath);
+  const setTierZonesLoaded  = useUiStore(s => s.setTierZonesLoaded);
   const activeMap       = useUiStore(s => s.activeMap);
 
   const [allMissions, setAllMissions]       = useState<MissionFiles[]>([]);
@@ -113,25 +116,30 @@ export function useServerFolder() {
         } catch { }
       }
 
-      // Load and merge custom types from economy core
+      // Load and merge all economy core files (types + spawnabletypes)
       if (economyCoreEntries.length > 0) {
         const mergedTypes = new Map(mission.types);
+        const mergedSpawnables = new Map(mission.spawnableTypes);
         for (const entry of economyCoreEntries) {
           for (const file of entry.files) {
-            if (file.type !== 'types') continue;
             const filePath = `${m.missionPath}/${entry.folder}/${file.name}`;
             try {
-              const raw = await readFile(filePath);
-              const customTypes = parseTypesXml(raw, filePath);
-              for (const [name, type] of customTypes) {
-                mergedTypes.set(name, type);
+              if (file.type === 'types') {
+                const raw = await readFile(filePath);
+                for (const [name, type] of parseTypesXml(raw, filePath)) mergedTypes.set(name, type);
+              } else if (file.type === 'spawnabletypes') {
+                const raw = await readFile(filePath);
+                for (const [name, st] of parseSpawnableTypesXml(raw)) mergedSpawnables.set(name, st);
               }
             } catch { /* file may not exist yet */ }
           }
         }
-        if (mergedTypes.size > mission.types.size) {
-          setMission({ ...mission, types: mergedTypes });
-        }
+        const updated = {
+          ...mission,
+          ...(mergedTypes.size > mission.types.size ? { types: mergedTypes } : {}),
+          ...(mergedSpawnables.size > mission.spawnableTypes.size ? { spawnableTypes: mergedSpawnables } : {}),
+        };
+        if (updated !== mission) setMission(updated);
       }
 
       // Load building spawn layer
@@ -145,6 +153,17 @@ export function useServerFolder() {
           const positions = parseMapGroupPosXml(posRaw);
           setBuildingInstances(joinMapGroups(proto, positions));
         } catch { /* optional layer — silently skip */ }
+      }
+
+      // Load tier zone data from areaflags.map
+      clearAreaFlags();
+      setTierZonesLoaded(false);
+      if (m.areaFlagsPath) {
+        try {
+          const raw = await readBinaryFile(m.areaFlagsPath);
+          loadAreaFlags(raw);
+          setTierZonesLoaded(true);
+        } catch (e) { console.error('[areaflags] load failed:', e); }
       }
 
       if (m.mapImagePath) {
