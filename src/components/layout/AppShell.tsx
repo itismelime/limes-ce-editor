@@ -10,6 +10,7 @@ import { EventsEditor } from '../editors/EventsEditor';
 import { EventSpawnsEditor } from '../editors/EventSpawnsEditor';
 import { SpawnableTypesEditor } from '../editors/SpawnableTypesEditor';
 import { EconomyCoreEditor } from '../editors/EconomyCoreEditor';
+import { PlayerSpawnsEditor } from '../editors/PlayerSpawnsEditor';
 
 const FILE_DESCRIPTIONS: Record<string, string> = {
   'types.xml': 'Item spawn quantities, lifetime, flags and tiers',
@@ -206,6 +207,7 @@ export function AppShell() {
               {activeTab === 'types'          && <TypesEditor />}
               {activeTab === 'events'         && <EventsEditor />}
               {activeTab === 'spawns'         && <EventSpawnsEditor />}
+              {activeTab === 'playerSpawns'   && <PlayerSpawnsEditor />}
               {activeTab === 'spawnableTypes' && <SpawnableTypesEditor />}
               {activeTab === 'economy'        && <EconomyCoreEditor />}
             </div>

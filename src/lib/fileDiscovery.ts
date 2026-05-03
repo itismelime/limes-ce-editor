@@ -10,6 +10,7 @@ const TARGET_FILES = new Set([
   'mapgroupproto.xml',
   'mapgrouppos.xml',
   'areaflags.map',
+  'cfgplayerspawnpoints.xml',
 ]);
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.tga']);
@@ -29,6 +30,7 @@ export interface MissionFiles {
   mapGroupProtoPath: string | null;
   mapGroupPosPath: string | null;
   areaFlagsPath: string | null;
+  playerSpawnPointsPath: string | null;
   mapImagePath: string | null;
 }
 
@@ -126,9 +128,10 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
       eventsPath:         files['events.xml']            ?? null,
       spawnableTypesPath: files['cfgspawnabletypes.xml'] ?? null,
       economyCorePath:    files['cfgeconomycore.xml']    ?? null,
-      mapGroupProtoPath:  files['mapgroupproto.xml']     ?? null,
-      mapGroupPosPath:    files['mapgrouppos.xml']       ?? null,
-      areaFlagsPath:      files['areaflags.map']         ?? null,
+      mapGroupProtoPath:     files['mapgroupproto.xml']        ?? null,
+      mapGroupPosPath:       files['mapgrouppos.xml']          ?? null,
+      areaFlagsPath:         files['areaflags.map']            ?? null,
+      playerSpawnPointsPath: files['cfgplayerspawnpoints.xml'] ?? null,
       mapImagePath,
     };
   });

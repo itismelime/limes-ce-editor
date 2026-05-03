@@ -8,6 +8,7 @@ import {
   parseEventsXml, parseSpawnableTypesXml,
   parseEconomyCoreXml,
   parseMapGroupProtoXml, parseMapGroupPosXml, joinMapGroups,
+  parsePlayerSpawnPointsXml,
 } from '../lib/xmlParser';
 import { loadAreaFlags, clearAreaFlags } from '../lib/tierZoneResolver';
 import { readBinaryFile } from '../lib/fileDiscovery';
@@ -73,6 +74,7 @@ export function useServerFolder() {
   const setPaths             = useServerStore(s => s.setPaths);
   const setEconomyCore       = useServerStore(s => s.setEconomyCore);
   const setBuildingInstances = useServerStore(s => s.setBuildingInstances);
+  const setPlayerSpawnData   = useServerStore(s => s.setPlayerSpawnData);
   const setLoading          = useUiStore(s => s.setLoading);
   const setLoadError        = useUiStore(s => s.setLoadError);
   const setLoadWarnings     = useUiStore(s => s.setLoadWarnings);
@@ -120,6 +122,7 @@ export function useServerFolder() {
       if (economyCoreEntries.length > 0) {
         const mergedTypes = new Map(mission.types);
         const mergedSpawnables = new Map(mission.spawnableTypes);
+        const ceWarnings: string[] = [];
         for (const entry of economyCoreEntries) {
           for (const file of entry.files) {
             const filePath = `${m.missionPath}/${entry.folder}/${file.name}`;
@@ -131,15 +134,20 @@ export function useServerFolder() {
                 const raw = await readFile(filePath);
                 for (const [name, st] of parseSpawnableTypesXml(raw)) mergedSpawnables.set(name, st);
               }
-            } catch { /* file may not exist yet */ }
+            } catch {
+              ceWarnings.push(`${entry.folder}/${file.name}`);
+            }
           }
+        }
+        if (ceWarnings.length > 0) {
+          setLoadWarnings([...warnings, ...ceWarnings.map(f => `ce file not found: ${f}`)]);
         }
         const updated = {
           ...mission,
-          ...(mergedTypes.size > mission.types.size ? { types: mergedTypes } : {}),
-          ...(mergedSpawnables.size > mission.spawnableTypes.size ? { spawnableTypes: mergedSpawnables } : {}),
+          types: mergedTypes,
+          spawnableTypes: mergedSpawnables,
         };
-        if (updated !== mission) setMission(updated);
+        setMission(updated);
       }
 
       // Load building spawn layer
@@ -164,6 +172,15 @@ export function useServerFolder() {
           loadAreaFlags(raw);
           setTierZonesLoaded(true);
         } catch (e) { console.error('[areaflags] load failed:', e); }
+      }
+
+      // Load player spawn points
+      setPlayerSpawnData(null);
+      if (m.playerSpawnPointsPath) {
+        try {
+          const raw = await readFile(m.playerSpawnPointsPath);
+          setPlayerSpawnData(parsePlayerSpawnPointsXml(raw));
+        } catch { /* optional — silently skip */ }
       }
 
       if (m.mapImagePath) {

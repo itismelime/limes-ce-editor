@@ -8,6 +8,8 @@ export function TierLegend() {
   const hiddenUsages      = useUiStore(s => s.hiddenUsages);
   const toggleTier        = useUiStore(s => s.toggleTier);
   const toggleUsage       = useUiStore(s => s.toggleUsage);
+  const setHiddenTiers    = useUiStore(s => s.setHiddenTiers);
+  const setHiddenUsages   = useUiStore(s => s.setHiddenUsages);
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const mission           = useServerStore(s => s.mission);
 
@@ -18,10 +20,20 @@ export function TierLegend() {
     return [...s].sort();
   }, [buildingInstances, mission]);
 
+  const allTiers = [...TIER_ORDER, 'unknown'];
+  const allTiersHidden = allTiers.every(t => hiddenTiers.includes(t));
+  const allUsagesHidden = activeUsages.every(u => hiddenUsages.includes(u));
+
   return (
     <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px] pointer-events-auto">
-      <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Tier (ring)</p>
-      {[...TIER_ORDER, 'unknown'].map(tier => {
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tier (ring)</p>
+        <button
+          onClick={() => setHiddenTiers(allTiersHidden ? [] : allTiers)}
+          className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+        >{allTiersHidden ? 'Show all' : 'Hide all'}</button>
+      </div>
+      {allTiers.map(tier => {
         const hidden = hiddenTiers.includes(tier);
         const color  = TIER_COLORS[tier] ?? '#6b7280';
         return (
@@ -42,7 +54,13 @@ export function TierLegend() {
       {activeUsages.length > 0 && (
         <>
           <div className="border-t border-slate-700 my-2" />
-          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Usage (fill)</p>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Usage (fill)</p>
+            <button
+              onClick={() => setHiddenUsages(allUsagesHidden ? [] : activeUsages)}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors whitespace-nowrap"
+            >{allUsagesHidden ? 'Show all' : 'Hide all'}</button>
+          </div>
           {activeUsages.map(usage => {
             const hidden = hiddenUsages.includes(usage);
             const color  = getUsageColor(usage);

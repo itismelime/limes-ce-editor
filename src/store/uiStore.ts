@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { MapId } from '../types/map';
 
-export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'spawnableTypes' | 'economy';
+export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy';
 
 interface UiState {
   activeTab: ActiveTab;
@@ -23,7 +23,10 @@ interface UiState {
   mapEventFilter: string;
   showBuildings: boolean;
   buildingItemFilter: string;
+  buildingNameFilter: string;
+  buildingMinLootmax: number;
   tierZonesLoaded: boolean;
+  showPlayerSpawns: boolean;
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
@@ -38,11 +41,16 @@ interface UiState {
   setLoadWarnings: (v: string[]) => void;
   toggleTier: (tier: string) => void;
   toggleUsage: (usage: string) => void;
+  setHiddenTiers: (tiers: string[]) => void;
+  setHiddenUsages: (usages: string[]) => void;
   toggleEvent: (name: string) => void;
   setMapEventFilter: (v: string) => void;
   toggleBuildings: () => void;
   setBuildingItemFilter: (v: string) => void;
+  setBuildingNameFilter: (v: string) => void;
+  setBuildingMinLootmax: (v: number) => void;
   setTierZonesLoaded: (v: boolean) => void;
+  togglePlayerSpawns: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -88,7 +96,10 @@ export const useUiStore = create<UiState>((set) => ({
   mapEventFilter: '',
   showBuildings: true,
   buildingItemFilter: '',
+  buildingNameFilter: '',
+  buildingMinLootmax: 0,
   tierZonesLoaded: false,
+  showPlayerSpawns: true,
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
       ? s.hiddenTiers.filter(t => t !== tier)
@@ -99,6 +110,8 @@ export const useUiStore = create<UiState>((set) => ({
       ? s.hiddenUsages.filter(u => u !== usage)
       : [...s.hiddenUsages, usage],
   })),
+  setHiddenTiers: (tiers) => set({ hiddenTiers: tiers }),
+  setHiddenUsages: (usages) => set({ hiddenUsages: usages }),
   toggleEvent: (name) => set(s => ({
     hiddenEvents: s.hiddenEvents.includes(name)
       ? s.hiddenEvents.filter(e => e !== name)
@@ -107,5 +120,8 @@ export const useUiStore = create<UiState>((set) => ({
   setMapEventFilter: (v) => set({ mapEventFilter: v }),
   toggleBuildings: () => set(s => ({ showBuildings: !s.showBuildings })),
   setBuildingItemFilter: (v) => set({ buildingItemFilter: v }),
+  setBuildingNameFilter: (v) => set({ buildingNameFilter: v }),
+  setBuildingMinLootmax: (v) => set({ buildingMinLootmax: v }),
   setTierZonesLoaded: (v) => set({ tierZonesLoaded: v }),
+  togglePlayerSpawns: () => set(s => ({ showPlayerSpawns: !s.showPlayerSpawns })),
 }));

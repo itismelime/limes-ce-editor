@@ -21,7 +21,7 @@ export function MarkerPopup({ marker }: Props) {
           className="w-2.5 h-2.5 rounded-full flex-shrink-0"
           style={{ backgroundColor: TIER_COLORS[marker.dominantTier] ?? TIER_COLORS.unknown }}
         />
-        <span className="font-semibold text-sm text-slate-800">{marker.eventName}</span>
+        <span className="font-semibold text-sm text-slate-100">{marker.eventName}</span>
         {!marker.active && (
           <span className="ml-auto text-xs bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">inactive</span>
         )}

@@ -7,7 +7,8 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: '🗺 Map' },
   { id: 'types',         label: '🎒 Loot Types' },
   { id: 'events',        label: '⚡ Events' },
-  { id: 'spawns',        label: '📍 Spawn Points' },
+  { id: 'spawns',        label: '📍 Event Spawn Points' },
+  { id: 'playerSpawns', label: '🧍 Player Spawn Points' },
   { id: 'spawnableTypes', label: '📦 Spawnable Types' },
   { id: 'economy',       label: '⚙ Economy Core' },
 ];

@@ -118,6 +118,27 @@ export interface CeEntry {
   files: CeFile[];
 }
 
+export interface PlayerSpawnPoint {
+  x: number;
+  z: number;
+}
+
+export interface PlayerSpawnSection {
+  type: string;
+  points: PlayerSpawnPoint[];
+  minDistInfected: number;
+  maxDistInfected: number;
+  minDistPlayer: number;
+  maxDistPlayer: number;
+  gridDensity: number;
+  gridWidth: number;
+  gridHeight: number;
+}
+
+export interface PlayerSpawnData {
+  sections: PlayerSpawnSection[];
+}
+
 export interface BuildingInstance {
   typeName: string;
   usages: string[];

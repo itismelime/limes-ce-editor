@@ -25,6 +25,23 @@ const TILE_MAPS = new Set(['namalsk', 'chernarus', 'livonia', 'sakhal']);
 const DETAIL_MIN_ZOOM = 1;
 const XAM_ZOOM_OFFSET = 4;
 
+function FilterInput({ placeholder, value, onChange }: { placeholder: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+      />
+      {value && (
+        <button onClick={() => onChange('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      )}
+    </div>
+  );
+}
+
 function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
   useMemo(() => { // eslint-disable-line
@@ -151,13 +168,15 @@ function buildingMarkerIcon(tiers: string[], usageColor: string): L.DivIcon {
 }
 
 function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
-  const buildingInstances  = useServerStore(s => s.buildingInstances);
-  const mission            = useServerStore(s => s.mission);
-  const showBuildings      = useUiStore(s => s.showBuildings);
-  const buildingItemFilter = useUiStore(s => s.buildingItemFilter);
-  const hiddenUsages       = useUiStore(s => s.hiddenUsages);
-  const hiddenTiers        = useUiStore(s => s.hiddenTiers);
-  const tierZonesLoaded    = useUiStore(s => s.tierZonesLoaded);
+  const buildingInstances   = useServerStore(s => s.buildingInstances);
+  const mission             = useServerStore(s => s.mission);
+  const showBuildings       = useUiStore(s => s.showBuildings);
+  const buildingItemFilter  = useUiStore(s => s.buildingItemFilter);
+  const buildingNameFilter  = useUiStore(s => s.buildingNameFilter);
+  const buildingMinLootmax  = useUiStore(s => s.buildingMinLootmax);
+  const hiddenUsages        = useUiStore(s => s.hiddenUsages);
+  const hiddenTiers         = useUiStore(s => s.hiddenTiers);
+  const tierZonesLoaded     = useUiStore(s => s.tierZonesLoaded);
 
   // Fallback: infer tier from dominant item tier per usage tag
   const usageTierMap = useMemo(() => {
@@ -206,9 +225,13 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       }
     }
 
+    const nameQ = buildingNameFilter.trim().toLowerCase();
+
     return buildingInstances.flatMap(b => {
       const primaryUsage = b.usages[0] ?? 'Other';
       if (hiddenUsages.includes(primaryUsage)) return [];
+      if (nameQ && !b.typeName.toLowerCase().includes(nameQ)) return [];
+      if (buildingMinLootmax > 0 && b.lootmax < buildingMinLootmax) return [];
       if (itemFilter !== null && !itemFilter(b)) return [];
 
       // Merge zone tier (areaflags, in-bounds only) with proto container tiers
@@ -228,7 +251,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
 
       return [{ b, displayTiers, usageColor: getUsageColor(primaryUsage), latlng: gameToLeaflet(b.x, b.z, mapConfig) }];
     });
-  }, [showBuildings, buildingInstances, mission, buildingItemFilter, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig]);
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig]);
 
   return (
     <>
@@ -248,6 +271,48 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
           </Popup>
         </Marker>
       ))}
+    </>
+  );
+}
+
+const PLAYER_SPAWN_COLORS: Record<string, string> = {
+  fresh: '#10b981',
+  respawn: '#f59e0b',
+};
+
+function playerSpawnIcon(type: string): L.DivIcon {
+  const color = PLAYER_SPAWN_COLORS[type] ?? '#94a3b8';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12">
+    <circle cx="6" cy="6" r="5" fill="${color}" stroke="white" stroke-width="1.5"/>
+    <circle cx="6" cy="6" r="2" fill="white"/>
+  </svg>`;
+  return L.divIcon({ html: svg, className: '', iconSize: [12, 12], iconAnchor: [6, 6], popupAnchor: [0, -6] });
+}
+
+function PlayerSpawnMarkers({ mapConfig }: { mapConfig: MapConfig }) {
+  const playerSpawnData  = useServerStore(s => s.playerSpawnData);
+  const showPlayerSpawns = useUiStore(s => s.showPlayerSpawns);
+
+  if (!showPlayerSpawns || !playerSpawnData) return null;
+
+  return (
+    <>
+      {playerSpawnData.sections.flatMap(section =>
+        section.points.map((p, idx) => (
+          <Marker
+            key={`${section.type}-${idx}`}
+            position={gameToLeaflet(p.x, p.z, mapConfig)}
+            icon={playerSpawnIcon(section.type)}
+          >
+            <Popup>
+              <div className="text-xs">
+                <p className="font-semibold text-slate-100 mb-1">{section.type === 'fresh' ? 'Fresh Spawn' : section.type === 'respawn' ? 'Respawn' : section.type}</p>
+                <p className="font-mono text-slate-400">X {p.x.toFixed(1)} · Z {p.z.toFixed(1)}</p>
+              </div>
+            </Popup>
+          </Marker>
+        ))
+      )}
     </>
   );
 }
@@ -282,12 +347,19 @@ export function MapView() {
 
   const hiddenEvents          = useUiStore(s => s.hiddenEvents);
   const toggleEvent           = useUiStore(s => s.toggleEvent);
-  const showBuildings          = useUiStore(s => s.showBuildings);
-  const toggleBuildings        = useUiStore(s => s.toggleBuildings);
-  const buildingItemFilter     = useUiStore(s => s.buildingItemFilter);
-  const setBuildingItemFilter  = useUiStore(s => s.setBuildingItemFilter);
-  const tierZonesLoaded        = useUiStore(s => s.tierZonesLoaded);
+  const showBuildings           = useUiStore(s => s.showBuildings);
+  const toggleBuildings         = useUiStore(s => s.toggleBuildings);
+  const buildingItemFilter      = useUiStore(s => s.buildingItemFilter);
+  const setBuildingItemFilter   = useUiStore(s => s.setBuildingItemFilter);
+  const buildingNameFilter      = useUiStore(s => s.buildingNameFilter);
+  const setBuildingNameFilter   = useUiStore(s => s.setBuildingNameFilter);
+  const buildingMinLootmax      = useUiStore(s => s.buildingMinLootmax);
+  const setBuildingMinLootmax   = useUiStore(s => s.setBuildingMinLootmax);
+  const tierZonesLoaded         = useUiStore(s => s.tierZonesLoaded);
+  const showPlayerSpawns       = useUiStore(s => s.showPlayerSpawns);
+  const togglePlayerSpawns     = useUiStore(s => s.togglePlayerSpawns);
   const buildingInstances      = useServerStore(s => s.buildingInstances);
+  const playerSpawnData        = useServerStore(s => s.playerSpawnData);
 
   const eventsInitialized = useRef(false);
   useEffect(() => {
@@ -433,6 +505,7 @@ export function MapView() {
 
         <EventMarkers markers={markers} mapConfig={mapConfig} />
         <BuildingMarkers mapConfig={mapConfig} />
+        <PlayerSpawnMarkers mapConfig={mapConfig} />
       </MapContainer>
 
       <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2 pointer-events-none">
@@ -442,35 +515,64 @@ export function MapView() {
             {showBuildingPanel && (
               <div className="bg-slate-900/95 border border-slate-700 rounded-lg backdrop-blur w-64 flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-                  <span className="text-xs font-medium text-slate-300">Buildings</span>
-                  <span className="text-xs text-slate-600">{buildingInstances.length.toLocaleString()} total</span>
+                  <span className="text-xs font-medium text-slate-300">Building Filters</span>
+                  <span className={`text-xs ${tierZonesLoaded ? 'text-emerald-500' : 'text-slate-600'}`}>
+                    {tierZonesLoaded ? 'Tier zones active' : 'No tier zones'}
+                  </span>
                 </div>
-                <div className="p-3 space-y-3">
-                  {/* Tier zone status */}
-                  <p className={`text-xs ${tierZonesLoaded ? 'text-green-500' : 'text-slate-600'}`}>
-                    {tierZonesLoaded ? 'Tier zones: loaded from areaflags.map' : 'Tier zones: not available (no areaflags.map found)'}
-                  </p>
-                  {/* Item search */}
-                  <div className="relative">
+                <div className="p-3 space-y-2">
+                  <FilterInput
+                    placeholder="Building name… (e.g. mil, sea)"
+                    value={buildingNameFilter}
+                    onChange={setBuildingNameFilter}
+                  />
+                  <FilterInput
+                    placeholder="Item inside… (e.g. AKM, CodeLock)"
+                    value={buildingItemFilter}
+                    onChange={setBuildingItemFilter}
+                  />
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-slate-500 whitespace-nowrap">Min lootmax</label>
                     <input
-                      type="text"
-                      value={buildingItemFilter}
-                      onChange={e => setBuildingItemFilter(e.target.value)}
-                      placeholder="Search item to find spawn zones…"
+                      type="number"
+                      min={0}
+                      value={buildingMinLootmax || ''}
+                      onChange={e => setBuildingMinLootmax(Math.max(0, Number(e.target.value) || 0))}
+                      placeholder="0"
                       className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                     />
-                    {buildingItemFilter && (
-                      <button onClick={() => setBuildingItemFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+                    {buildingMinLootmax > 0 && (
+                      <button onClick={() => setBuildingMinLootmax(0)} className="text-slate-500 hover:text-slate-300 text-xs flex-shrink-0">✕</button>
                     )}
                   </div>
                 </div>
               </div>
             )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowBuildingPanel(v => !v)}
+                className={`bg-slate-900/90 border rounded-lg px-3 py-1.5 backdrop-blur text-xs transition-colors ${showBuildingPanel ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+              >
+                Filters{(buildingNameFilter || buildingItemFilter || buildingMinLootmax > 0) ? ' ●' : ''}
+              </button>
+              <button
+                onClick={toggleBuildings}
+                className={`bg-slate-900/90 border rounded-lg px-3 py-1.5 backdrop-blur text-xs transition-colors ${showBuildings ? 'border-emerald-500 text-emerald-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+              >
+                Buildings
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Player spawns toggle */}
+        {playerSpawnData && playerSpawnData.sections.length > 0 && (
+          <div className="pointer-events-auto">
             <button
-              onClick={() => setShowBuildingPanel(v => !v)}
-              className={`bg-slate-900/90 border rounded-lg px-3 py-1.5 backdrop-blur text-xs transition-colors ${showBuildingPanel ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+              onClick={togglePlayerSpawns}
+              className={`bg-slate-900/90 border rounded-lg px-3 py-1.5 backdrop-blur text-xs transition-colors ${showPlayerSpawns ? 'border-emerald-500 text-emerald-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
             >
-              Buildings
+              Player Spawns
             </button>
           </div>
         )}
