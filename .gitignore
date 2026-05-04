@@ -25,6 +25,7 @@ dist-ssr
 
 .claude/
 CLAUDE.md
+.vscode
 
 src-tauri/target/*
 
