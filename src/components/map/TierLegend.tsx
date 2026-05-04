@@ -13,16 +13,33 @@ export function TierLegend() {
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const mission           = useServerStore(s => s.mission);
 
-  const activeUsages = useMemo(() => {
-    const s = new Set<string>();
-    for (const b of buildingInstances) b.usages.forEach(u => s.add(u));
-    if (mission) for (const t of mission.types.values()) t.usages.forEach(u => s.add(u));
-    return [...s].sort();
+  const usageGroups = useMemo(() => {
+    const byLabel = new Map<string, Set<string>>();
+    const register = (rawUsage: string) => {
+      const usage = rawUsage ?? '';
+      const normalized = usage.trim().toLowerCase();
+      const label = normalized === '' || normalized === 'unknown' ? 'Unknown' : usage;
+      if (!byLabel.has(label)) byLabel.set(label, new Set());
+      byLabel.get(label)!.add(usage);
+    };
+
+    for (const b of buildingInstances) b.usages.forEach(register);
+    if (mission) for (const t of mission.types.values()) t.usages.forEach(register);
+
+    return [...byLabel.entries()]
+      .map(([label, rawUsages]) => ({ label, rawUsages: [...rawUsages] }))
+      .sort((a, b) => {
+        if (a.label === 'Unknown') return 1;
+        if (b.label === 'Unknown') return -1;
+        return a.label.localeCompare(b.label);
+      });
   }, [buildingInstances, mission]);
+
+  const allUsageKeys = useMemo(() => usageGroups.flatMap(g => g.rawUsages), [usageGroups]);
 
   const allTiers = [...TIER_ORDER, 'unknown'];
   const allTiersHidden = allTiers.every(t => hiddenTiers.includes(t));
-  const allUsagesHidden = activeUsages.every(u => hiddenUsages.includes(u));
+  const allUsagesHidden = usageGroups.every(g => g.rawUsages.every(u => hiddenUsages.includes(u)));
 
   return (
     <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px] pointer-events-auto">
@@ -51,30 +68,37 @@ export function TierLegend() {
         );
       })}
 
-      {activeUsages.length > 0 && (
+      {usageGroups.length > 0 && (
         <>
           <div className="border-t border-slate-700 my-2" />
           <div className="flex items-center justify-between gap-2 mb-2">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Usage (fill)</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Type (fill)</p>
             <button
-              onClick={() => setHiddenUsages(allUsagesHidden ? [] : activeUsages)}
+              onClick={() => setHiddenUsages(allUsagesHidden ? [] : allUsageKeys)}
               className="text-xs text-slate-500 hover:text-slate-300 transition-colors whitespace-nowrap"
             >{allUsagesHidden ? 'Show all' : 'Hide all'}</button>
           </div>
-          {activeUsages.map(usage => {
-            const hidden = hiddenUsages.includes(usage);
-            const color  = getUsageColor(usage);
+          {usageGroups.map(group => {
+            const hidden = group.rawUsages.every(u => hiddenUsages.includes(u));
+            const color  = getUsageColor(group.rawUsages[0] ?? group.label);
             return (
               <button
-                key={usage}
-                onClick={() => toggleUsage(usage)}
+                key={group.label}
+                onClick={() => {
+                  const shouldHide = !hidden;
+                  group.rawUsages.forEach(u => {
+                    const isHidden = hiddenUsages.includes(u);
+                    if (shouldHide && !isHidden) toggleUsage(u);
+                    if (!shouldHide && isHidden) toggleUsage(u);
+                  });
+                }}
                 className="flex items-center gap-2 mb-1 last:mb-0 w-full text-left"
               >
                 <span
                   className="w-3 h-3 rounded-full flex-shrink-0"
                   style={{ backgroundColor: color, opacity: hidden ? 0.2 : 1 }}
                 />
-                <span className={`text-xs ${hidden ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{usage}</span>
+                <span className={`text-xs ${hidden ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{group.label}</span>
               </button>
             );
           })}

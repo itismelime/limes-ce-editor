@@ -1,16 +1,50 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useServerFolder } from '../../hooks/useServerFolder';
 import { TopBar } from './TopBar';
 import { MissionPicker } from '../shared/MissionPicker';
-import { MapView } from '../map/MapView';
-import { TypesEditor } from '../editors/TypesEditor';
-import { EventsEditor } from '../editors/EventsEditor';
-import { EventSpawnsEditor } from '../editors/EventSpawnsEditor';
-import { SpawnableTypesEditor } from '../editors/SpawnableTypesEditor';
-import { EconomyCoreEditor } from '../editors/EconomyCoreEditor';
-import { PlayerSpawnsEditor } from '../editors/PlayerSpawnsEditor';
+import type { ActiveTab } from '../../store/uiStore';
+
+const loadMapView = () => import('../map/MapView');
+const loadTypesEditor = () => import('../editors/TypesEditor');
+const loadEventsEditor = () => import('../editors/EventsEditor');
+const loadEventSpawnsEditor = () => import('../editors/EventSpawnsEditor');
+const loadSpawnableTypesEditor = () => import('../editors/SpawnableTypesEditor');
+const loadEconomyCoreEditor = () => import('../editors/EconomyCoreEditor');
+const loadPlayerSpawnsEditor = () => import('../editors/PlayerSpawnsEditor');
+
+const MapView = lazy(() => loadMapView().then(m => ({ default: m.MapView })));
+const TypesEditor = lazy(() => loadTypesEditor().then(m => ({ default: m.TypesEditor })));
+const EventsEditor = lazy(() => loadEventsEditor().then(m => ({ default: m.EventsEditor })));
+const EventSpawnsEditor = lazy(() => loadEventSpawnsEditor().then(m => ({ default: m.EventSpawnsEditor })));
+const SpawnableTypesEditor = lazy(() => loadSpawnableTypesEditor().then(m => ({ default: m.SpawnableTypesEditor })));
+const EconomyCoreEditor = lazy(() => loadEconomyCoreEditor().then(m => ({ default: m.EconomyCoreEditor })));
+const PlayerSpawnsEditor = lazy(() => loadPlayerSpawnsEditor().then(m => ({ default: m.PlayerSpawnsEditor })));
+
+const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
+  map: loadMapView,
+  types: loadTypesEditor,
+  events: loadEventsEditor,
+  spawns: loadEventSpawnsEditor,
+  playerSpawns: loadPlayerSpawnsEditor,
+  spawnableTypes: loadSpawnableTypesEditor,
+  economy: loadEconomyCoreEditor,
+};
+
+const IDLE_PREFETCH_TABS: ActiveTab[] = ['map', 'types'];
+const prefetchedTabs = new Set<ActiveTab>();
+
+function prefetchTabOnce(tab: ActiveTab): void {
+  if (prefetchedTabs.has(tab)) return;
+  prefetchedTabs.add(tab);
+  void TAB_PREFETCHERS[tab]();
+}
+
+type IdleCompatWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (id: number) => void;
+};
 
 const FILE_DESCRIPTIONS: Record<string, string> = {
   'types.xml': 'Item spawn quantities, lifetime, flags and tiers',
@@ -169,11 +203,39 @@ export function AppShell() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
+  useEffect(() => {
+    prefetchedTabs.add(activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const targets = IDLE_PREFETCH_TABS.filter(tab => tab !== activeTab);
+    if (targets.length === 0) return;
+
+    const prefetchTargets = () => {
+      for (const tab of targets) {
+        prefetchTabOnce(tab);
+      }
+    };
+
+    const idleWindow = window as IdleCompatWindow;
+    if (idleWindow.requestIdleCallback && idleWindow.cancelIdleCallback) {
+      const idleId = idleWindow.requestIdleCallback(prefetchTargets, { timeout: 2000 });
+      return () => idleWindow.cancelIdleCallback!(idleId);
+    }
+
+    const timeoutId = setTimeout(prefetchTargets, 350);
+    return () => clearTimeout(timeoutId);
+  }, [activeTab]);
+
   const showNoFilesError = loadError === 'no_files_found' || loadError === 'permission_denied' || loadError?.startsWith('error:');
+  const prefetchTab = (tab: ActiveTab) => {
+    if (tab === activeTab) return;
+    prefetchTabOnce(tab);
+  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-950">
-      <TopBar onOpenFolder={openFolder} />
+      <TopBar onOpenFolder={openFolder} onPrefetchTab={prefetchTab} />
       {pendingMissions && (
         <MissionPicker
           missions={pendingMissions}
@@ -203,13 +265,15 @@ export function AppShell() {
               </div>
             )}
             <div className="flex-1 overflow-hidden">
-              {activeTab === 'map'            && <MapView />}
-              {activeTab === 'types'          && <TypesEditor />}
-              {activeTab === 'events'         && <EventsEditor />}
-              {activeTab === 'spawns'         && <EventSpawnsEditor />}
-              {activeTab === 'playerSpawns'   && <PlayerSpawnsEditor />}
-              {activeTab === 'spawnableTypes' && <SpawnableTypesEditor />}
-              {activeTab === 'economy'        && <EconomyCoreEditor />}
+              <Suspense fallback={<div className="h-full w-full grid place-items-center text-sm text-slate-500">Loading editor...</div>}>
+                {activeTab === 'map'            && <MapView />}
+                {activeTab === 'types'          && <TypesEditor />}
+                {activeTab === 'events'         && <EventsEditor />}
+                {activeTab === 'spawns'         && <EventSpawnsEditor />}
+                {activeTab === 'playerSpawns'   && <PlayerSpawnsEditor />}
+                {activeTab === 'spawnableTypes' && <SpawnableTypesEditor />}
+                {activeTab === 'economy'        && <EconomyCoreEditor />}
+              </Suspense>
             </div>
           </div>
         )}

@@ -7,6 +7,25 @@ pub struct TileDef {
     pub layer:     &'static str,
 }
 
+pub fn total_tiles_through_zoom(max_zoom: u32) -> u64 {
+    let start_zoom = 4u32;
+    let clamped_max_zoom = max_zoom.max(start_zoom);
+    let mut total = 0u64;
+    for z in start_zoom..=clamped_max_zoom {
+        let grid = 1u32 << z;
+        total += (grid as u64) * (grid as u64);
+    }
+    total
+}
+
+#[derive(Default)]
+pub struct PrefetchStats {
+    pub total: u64,
+    pub cached: u64,
+    pub downloaded: u64,
+    pub failed: u64,
+}
+
 pub fn tile_def(map_id: &str) -> Option<TileDef> {
     match map_id {
         "namalsk" => Some(TileDef {
@@ -105,6 +124,60 @@ pub async fn download_overview(
     Ok((overview, TOTAL, TOTAL))
 }
 
+pub fn overview_cache_path(cache_dir: &Path, map_id: &str) -> PathBuf {
+    cache_dir.join(format!("{}_tiles.png", map_id))
+}
+
+pub fn read_cached_overview(cache_dir: &Path, map_id: &str) -> Result<Option<(PathBuf, u32, u32)>, String> {
+    let overview = overview_cache_path(cache_dir, map_id);
+    if !overview.exists() {
+        return Ok(None);
+    }
+
+    let img = image::open(&overview).map_err(|e| format!("Cache read: {}", e))?;
+    Ok(Some((overview, img.width(), img.height())))
+}
+
+pub fn tile_cache_path(
+    cache_dir: &Path,
+    map_id: &str,
+    zoom: u32,
+    x: u32,
+    y: u32,
+) -> PathBuf {
+    cache_dir
+        .join(map_id)
+        .join(zoom.to_string())
+        .join(x.to_string())
+        .join(format!("{}.webp", y))
+}
+
+pub fn cached_tile_coverage(
+    cache_dir: &Path,
+    map_id: &str,
+    max_zoom: u32,
+) -> (u64, u64) {
+    let start_zoom = 4u32;
+    let clamped_max_zoom = max_zoom.max(start_zoom);
+    let mut total = 0u64;
+    let mut cached = 0u64;
+
+    for z in start_zoom..=clamped_max_zoom {
+        let grid = 1u32 << z;
+        for y in 0..grid {
+            for x in 0..grid {
+                total += 1;
+                let path = tile_cache_path(cache_dir, map_id, z, x, y);
+                if path.exists() {
+                    cached += 1;
+                }
+            }
+        }
+    }
+
+    (cached, total)
+}
+
 /// Fetch a single tile (zoom ≥ 4), downloading from xam.nu if not cached.
 pub async fn fetch_tile(
     map_id:    &str,
@@ -116,11 +189,7 @@ pub async fn fetch_tile(
     client:    &reqwest::Client,
     def:       &TileDef,
 ) -> Result<PathBuf, String> {
-    let path = cache_dir
-        .join(map_id)
-        .join(zoom.to_string())
-        .join(x.to_string())
-        .join(format!("{}.webp", y));
+    let path = tile_cache_path(cache_dir, map_id, zoom, x, y);
 
     if path.exists() {
         return Ok(path);
@@ -145,4 +214,48 @@ pub async fn fetch_tile(
     std::fs::write(&path, &bytes).map_err(|e| format!("Write: {}", e))?;
 
     Ok(path)
+}
+
+pub async fn prefetch_tiles(
+    map_id: &str,
+    cache_dir: &Path,
+    version: &str,
+    client: &reqwest::Client,
+    max_zoom: u32,
+    on_progress: impl Fn(f32),
+    should_cancel: impl Fn() -> bool,
+) -> Result<PrefetchStats, String> {
+    let def = tile_def(map_id).ok_or_else(|| format!("Unknown map '{}'", map_id))?;
+
+    let start_zoom = 4u32;
+    let clamped_max_zoom = max_zoom.max(start_zoom);
+    let mut stats = PrefetchStats::default();
+    stats.total = total_tiles_through_zoom(clamped_max_zoom);
+
+    let mut done = 0u64;
+    for z in start_zoom..=clamped_max_zoom {
+        let grid = 1u32 << z;
+        for y in 0..grid {
+            for x in 0..grid {
+                if should_cancel() {
+                    return Err("Offline preparation cancelled".to_string());
+                }
+
+                let path = tile_cache_path(cache_dir, map_id, z, x, y);
+                if path.exists() {
+                    stats.cached += 1;
+                } else {
+                    match fetch_tile(map_id, z, x, y, cache_dir, version, client, &def).await {
+                        Ok(_) => stats.downloaded += 1,
+                        Err(_) => stats.failed += 1,
+                    }
+                }
+
+                done += 1;
+                on_progress(done as f32 / stats.total as f32);
+            }
+        }
+    }
+
+    Ok(stats)
 }

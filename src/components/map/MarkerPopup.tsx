@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { ResolvedMarker } from '../../lib/lootResolver';
 import { TIER_COLORS } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
@@ -10,9 +11,12 @@ export function MarkerPopup({ marker }: Props) {
   const setActiveTab = useUiStore(s => s.setActiveTab);
   const setSelectedEvent = useUiStore(s => s.setSelectedEvent);
 
-  const topItems = marker.lootItems
-    .sort((a, b) => b.effectiveChance - a.effectiveChance)
-    .slice(0, 8);
+  const topItems = useMemo(
+    () => [...marker.lootItems]
+      .sort((a, b) => b.effectiveChance - a.effectiveChance)
+      .slice(0, 8),
+    [marker.lootItems],
+  );
 
   return (
     <div className="min-w-[220px]">

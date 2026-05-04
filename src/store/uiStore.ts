@@ -23,6 +23,7 @@ interface UiState {
   hiddenEvents: string[];
   mapEventFilter: string;
   showBuildings: boolean;
+  mapClusterZoomThreshold: number;
   buildingItemFilter: string;
   buildingNameFilter: string;
   buildingMinLootmax: number;
@@ -45,9 +46,11 @@ interface UiState {
   toggleUsage: (usage: string) => void;
   setHiddenTiers: (tiers: string[]) => void;
   setHiddenUsages: (usages: string[]) => void;
+  setHiddenEvents: (events: string[]) => void;
   toggleEvent: (name: string) => void;
   setMapEventFilter: (v: string) => void;
   toggleBuildings: () => void;
+  setMapClusterZoomThreshold: (v: number) => void;
   setBuildingItemFilter: (v: string) => void;
   setBuildingNameFilter: (v: string) => void;
   setBuildingMinLootmax: (v: number) => void;
@@ -99,11 +102,12 @@ export const useUiStore = create<UiState>((set) => ({
   hiddenEvents: [],
   mapEventFilter: '',
   showBuildings: true,
+  mapClusterZoomThreshold: -1,
   buildingItemFilter: '',
   buildingNameFilter: '',
   buildingMinLootmax: 0,
   tierZonesLoaded: false,
-  showPlayerSpawns: true,
+  showPlayerSpawns: false,
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
       ? s.hiddenTiers.filter(t => t !== tier)
@@ -116,6 +120,7 @@ export const useUiStore = create<UiState>((set) => ({
   })),
   setHiddenTiers: (tiers) => set({ hiddenTiers: tiers }),
   setHiddenUsages: (usages) => set({ hiddenUsages: usages }),
+  setHiddenEvents: (events) => set({ hiddenEvents: events }),
   toggleEvent: (name) => set(s => ({
     hiddenEvents: s.hiddenEvents.includes(name)
       ? s.hiddenEvents.filter(e => e !== name)
@@ -123,6 +128,7 @@ export const useUiStore = create<UiState>((set) => ({
   })),
   setMapEventFilter: (v) => set({ mapEventFilter: v }),
   toggleBuildings: () => set(s => ({ showBuildings: !s.showBuildings })),
+  setMapClusterZoomThreshold: (v) => set({ mapClusterZoomThreshold: Math.min(1, Math.max(-3, Math.round(v))) }),
   setBuildingItemFilter: (v) => set({ buildingItemFilter: v }),
   setBuildingNameFilter: (v) => set({ buildingNameFilter: v }),
   setBuildingMinLootmax: (v) => set({ buildingMinLootmax: v }),
