@@ -6,10 +6,10 @@ import type { MapId } from '../../types/map';
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: '🗺 Map' },
   { id: 'types',         label: '🎒 Loot Types' },
+  { id: 'spawnableTypes', label: '📦 Spawnable Types' },
+  { id: 'playerSpawns',  label: '🧍 Player Spawn Points' },
   { id: 'events',        label: '⚡ Events' },
   { id: 'spawns',        label: '📍 Event Spawn Points' },
-  { id: 'playerSpawns', label: '🧍 Player Spawn Points' },
-  { id: 'spawnableTypes', label: '📦 Spawnable Types' },
   { id: 'economy',       label: '⚙ Economy Core' },
 ];
 

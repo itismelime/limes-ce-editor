@@ -130,12 +130,19 @@ export function useServerFolder() {
               if (file.type === 'types') {
                 const raw = await readFile(filePath);
                 for (const [name, type] of parseTypesXml(raw, filePath)) mergedTypes.set(name, type);
-              } else if (file.type === 'spawnabletypes') {
+              } else if (file.type === 'spawnabletypes' || file.type === 'cfgspawnabletypes') {
                 const raw = await readFile(filePath);
-                for (const [name, st] of parseSpawnableTypesXml(raw)) mergedSpawnables.set(name, st);
+                const parsed = parseSpawnableTypesXml(raw);
+                if (parsed.size === 0 && /<types[\s>]/i.test(raw)) {
+                  for (const [name, type] of parseTypesXml(raw, filePath)) mergedTypes.set(name, type);
+                } else {
+                  for (const [name, st] of parsed) mergedSpawnables.set(name, st);
+                }
+              } else {
+                ceWarnings.push(`${entry.folder}/${file.name} (unknown type: "${file.type}")`);
               }
-            } catch {
-              ceWarnings.push(`${entry.folder}/${file.name}`);
+            } catch (err) {
+              ceWarnings.push(`${entry.folder}/${file.name} (${err instanceof Error ? err.message : String(err)})`);
             }
           }
         }

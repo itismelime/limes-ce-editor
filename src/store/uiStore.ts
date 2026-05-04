@@ -8,6 +8,7 @@ interface UiState {
   activeMap: MapId;
   selectedEventName: string | null;
   typeFilter: string;
+  categoryFilter: string;
   eventFilter: string;
   mapImagePaths: Record<string, string>;  // mapId → convertFileSrc url
   mapImageSizes: Record<string, { w: number; h: number }>;  // mapId → pixel dims
@@ -32,6 +33,7 @@ interface UiState {
   setActiveMap: (map: MapId) => void;
   setSelectedEvent: (name: string | null) => void;
   setTypeFilter: (v: string) => void;
+  setCategoryFilter: (v: string) => void;
   setEventFilter: (v: string) => void;
   setMapImagePath: (mapId: string, url: string) => void;
   setMapImageSize: (mapId: string, w: number, h: number) => void;
@@ -58,6 +60,7 @@ export const useUiStore = create<UiState>((set) => ({
   activeMap: 'namalsk',
   selectedEventName: null,
   typeFilter: '',
+  categoryFilter: '',
   eventFilter: '',
   mapImagePaths: (() => {
     const raw: Record<string, string> = JSON.parse(localStorage.getItem('mapImagePaths') ?? '{}');
@@ -75,6 +78,7 @@ export const useUiStore = create<UiState>((set) => ({
   setActiveMap: (map) => set({ activeMap: map }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
   setTypeFilter: (v) => set({ typeFilter: v }),
+  setCategoryFilter: (v) => set({ categoryFilter: v }),
   setEventFilter: (v) => set({ eventFilter: v }),
   setMapImagePath: (mapId, url) => set(s => {
     const next = { ...s.mapImagePaths, [mapId]: url };

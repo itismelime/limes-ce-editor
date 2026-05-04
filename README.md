@@ -1,22 +1,73 @@
 # DayZ Loot Editor
 
-> A desktop GUI for editing DayZ server loot configuration files — no more hand-editing XML.
+> A desktop tool for visualising and editing DayZ server loot tables — no more hand-editing XML.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
-![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-orange)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue?style=flat-square)](https://github.com/lime/LootEditor/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=flat-square)]()
+[![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+
+---
+
+<!-- Replace with an actual screenshot: docs/screenshot.png -->
+<!--
+![DayZ Loot Editor Screenshot](docs/screenshot.png)
+-->
+
+## What it does
+
+DayZ Loot Editor opens your server mission folder and lets you read, search, filter, and edit every loot-related XML file through a clean UI. Changes write back to the original files — no format is changed, comments are preserved, and nothing outside the files you edit is touched.
+
+Supports **vanilla loot tables** and fully merges **mod economy core entries** (Custom Types folders, extra `cfgspawnabletypes` files, rootless XML fragments — all handled automatically).
 
 ---
 
 ## Features
 
-- **Types Editor** — Edit item spawn quantities, lifetime, restock timers, flags, usages, and tier assignments (`types.xml`)
-- **Events Editor** — Configure event definitions, nominal/min/max counts, and child loot groups (`events.xml`)
-- **Event Spawns Editor** — View and edit map coordinates for every spawn event (`cfgeventspawns.xml`)
-- **Spawnable Types Editor** — Manage items that spawn inside containers and vehicles (`cfgspawnabletypes.xml`)
-- **Interactive Map** — Visualise spawn markers on a live in-game map with tier/usage colour coding and high-res tile support for Chernarus, Namalsk, Livonia, and Sakhal
-- **Mission Picker** — Quickly switch between multiple mission folders in one server directory
-- **Search & Filter** — Fast search across all item lists with virtualised rendering for large files
+### Interactive Map
+- Live map overlay for **Namalsk, Chernarus+, Livonia,** and **Sakhal**
+- Buildings rendered as coloured markers by their dominant **tier zone**
+- Click any building to see a **loot breakdown by category** — Rifles, Pistols, Weapons, Weapon Parts, Ammunition, Magazines, Ammo Boxes, Clothes, and more
+- Smart attachment detection: scopes, suppressors, magazines, and mod-specific items are automatically separated from base weapons
+- Filter by tier, usage zone, loot name, and **global category filter** that carries over from the Loot Types tab
+
+### Loot Types Editor
+- Browse all `types.xml` entries across base files and every merged mod file
+- **Sortable columns** — Name, Category, Tiers, Usages, Min, Nominal
+- **Filter by display category** — uses the same smart classification as the map popup (Rifles, Weapon Parts, Magazines, etc.) rather than the raw DayZ category field
+- Filter by tier, usage zone, and source file
+- Toggle inactive items (nominal = 0) on/off
+- Inline edit Min and Nominal; full detail panel for Quantities, Tiers, Usages, Flags
+- **Undo** (per-item, up to 200 steps) and **Revert** to restore any source file to its loaded state
+- Per-file save with unsaved-changes indicator
+
+### Spawnable Types Editor
+- Full view of merged `cfgspawnabletypes` entries from all economy core sources
+- Click any entry to inspect cargo groups and attachment groups with chances
+
+### Economy Core Editor
+- View and manage `cfgeconomycore.xml` entries
+- Add custom type packs and remove entries directly from the UI
+
+### Events & Event Spawn Points
+- Edit event definitions (nominal, min, max, lifetime, children)
+- View and edit map coordinates for every spawn event
+
+### Player Spawn Points
+- View configured player spawn locations overlaid on the map
+
+---
+
+## Mod Support
+
+The editor automatically loads and merges files registered in `cfgeconomycore.xml`, including:
+
+- Extra `types` files (adds items to the Loot Types tab)
+- Extra `spawnabletypes` / `cfgspawnabletypes` files (feeds attachment classification)
+- Rootless XML fragments (files with no wrapping root element)
+- Files mislabelled as `cfgspawnabletypes` that are actually `types` files
+
+Any files that cannot be read are surfaced as warnings — the editor continues working with whatever was found.
 
 ---
 
@@ -30,29 +81,30 @@
 | Rust / Cargo | stable |
 | Tauri CLI | v2 |
 
-### Install & Run
+### Install & Run (dev)
 
 ```bash
 npm install
 npm run tauri:dev
 ```
 
-### Build
+### Build installer
 
 ```bash
 npm run tauri:build
 ```
 
-The installer is output to `src-tauri/target/release/bundle/`.
+Installers are written to `src-tauri/target/release/bundle/` — MSI under `msi/`, NSIS exe under `nsis/`.
 
 ---
 
 ## Usage
 
-1. Launch the app and click **Open Server Folder**.
-2. Point it at your mission's `db/` directory (e.g. `mpmissions\dayzOffline.chernarusplus\db`).
-3. Use the tabs to edit **Types**, **Events**, **Event Spawns**, or **Spawnable Types**.
-4. Hit **Save** in the top bar — the original XML files are written back in-place.
+1. Launch the app and click **Open Server Folder**
+2. Select your server root — the editor will scan for all missions and auto-select the one matching your active map
+3. If multiple missions are found a **Mission Picker** dialog lets you choose
+4. Use the tab bar to navigate between **Map → Loot Types → Spawnable Types → Player Spawn Points → Events → Event Spawn Points → Economy Core**
+5. Edit values inline; a **Save** button appears per file when there are unsaved changes
 
 ---
 
@@ -66,4 +118,5 @@ The installer is output to `src-tauri/target/release/bundle/`.
 | Map | Leaflet + react-leaflet |
 | XML | fast-xml-parser |
 | State | Zustand |
+| Virtual lists | @tanstack/react-virtual |
 | Bundler | Vite |

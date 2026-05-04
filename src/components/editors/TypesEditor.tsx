@@ -8,6 +8,7 @@ import { SaveButton } from '../shared/SaveButton';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
 import { TIER_COLORS, getUsageColor } from '../../types/map';
+import { CATEGORY_LABELS, CATEGORY_ORDER, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
 
 const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
 
@@ -40,11 +41,13 @@ function TypeRow({
   isSelected,
   onSelect,
   onUpdate,
+  attachmentNames,
 }: {
   type: DayZType;
   isSelected: boolean;
   onSelect: () => void;
   onUpdate: (patch: Partial<DayZType>) => void;
+  attachmentNames: Set<string>;
 }) {
   return (
     <div
@@ -55,7 +58,7 @@ function TypeRow({
     >
       <span className="w-52 text-slate-300 truncate font-mono text-xs">{type.name}</span>
 
-      <span className="w-24 text-slate-500 text-xs truncate">{type.category ?? '—'}</span>
+      <span className="w-24 text-slate-500 text-xs truncate">{CATEGORY_LABELS[displayCategory(type, attachmentNames)] ?? type.category ?? '—'}</span>
 
       <div className="flex gap-1 w-32">
         {type.tiers.map(t => <TierBadge key={t} tier={t} />)}
@@ -236,17 +239,37 @@ export function TypesEditor() {
   const mission           = useServerStore(s => s.mission)!;
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const updateType        = useServerStore(s => s.updateType);
+  const undoType          = useServerStore(s => s.undoType);
+  const revertTypesSource = useServerStore(s => s.revertTypesSource);
   const saveTypesSource   = useServerStore(s => s.saveTypesSource);
   const dirtyTypesSources = useServerStore(s => s.dirty.typesSources);
+  const typeHistory       = useServerStore(s => s.typeHistory);
   const typeFilter        = useUiStore(s => s.typeFilter);
   const setTypeFilter     = useUiStore(s => s.setTypeFilter);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [tierFilter, setTierFilter]     = useState<string>('');
-  const [usageFilter, setUsageFilter]   = useState('');
-  const [sourceFilter, setSourceFilter] = useState('');
+  const categoryFilter    = useUiStore(s => s.categoryFilter);
+  const setCategoryFilter = useUiStore(s => s.setCategoryFilter);
+  const [selectedName, setSelectedName]     = useState<string | null>(null);
+  const [tierFilter, setTierFilter]         = useState<string>('');
+  const [usageFilter, setUsageFilter]       = useState('');
+  const [sourceFilter, setSourceFilter]     = useState('');
+  const [showInactive, setShowInactive]     = useState(true);
+  const [sortCol, setSortCol]   = useState<'name' | 'category' | 'tiers' | 'usages' | 'min' | 'nominal'>('name');
+  const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('asc');
   const parentRef = useRef<HTMLDivElement>(null);
 
+  function handleSort(col: typeof sortCol) {
+    if (col === sortCol) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  }
+
+  function sortArrow(col: typeof sortCol) {
+    if (col !== sortCol) return <span className="opacity-20">↕</span>;
+    return <span>{sortDir === 'asc' ? '▲' : '▼'}</span>;
+  }
+
   const allTypes = useMemo(() => Array.from(mission.types.values()), [mission.types]);
+
+  const attachmentNames = useMemo(() => buildAttachmentNames(mission.spawnableTypes), [mission.spawnableTypes]);
 
   const allUsages = useMemo(() => {
     const s = new Set<string>();
@@ -267,12 +290,44 @@ export function TypesEditor() {
       const matchesTier = !tierFilter || t.tiers.includes(tierFilter);
       const matchesUsage = !usageFilter || t.usages.includes(usageFilter);
       const matchesSource = !sourceFilter || t.source === sourceFilter;
-      return matchesSearch && matchesTier && matchesUsage && matchesSource;
+      const matchesCategory = !categoryFilter || displayCategory(t, attachmentNames) === categoryFilter;
+      const matchesActive = showInactive || t.nominal > 0;
+      return matchesSearch && matchesTier && matchesUsage && matchesSource && matchesCategory && matchesActive;
     });
-  }, [allTypes, typeFilter, tierFilter, usageFilter, sourceFilter]);
+  }, [allTypes, typeFilter, tierFilter, usageFilter, sourceFilter, categoryFilter, showInactive, attachmentNames]);
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      switch (sortCol) {
+        case 'name':     return dir * a.name.localeCompare(b.name);
+        case 'category': {
+          const ca = displayCategory(a, attachmentNames);
+          const cb = displayCategory(b, attachmentNames);
+          return dir * ca.localeCompare(cb);
+        }
+        case 'tiers': {
+          const ta = Math.min(...(a.tiers.length ? a.tiers.map(t => parseInt(t.replace('Tier', '')) || 99) : [99]));
+          const tb = Math.min(...(b.tiers.length ? b.tiers.map(t => parseInt(t.replace('Tier', '')) || 99) : [99]));
+          return dir * (ta - tb);
+        }
+        case 'usages': {
+          const ua = a.usages.filter(u => u).sort()[0] ?? '';
+          const ub = b.usages.filter(u => u).sort()[0] ?? '';
+          if (!ua && !ub) return 0;
+          if (!ua) return 1;
+          if (!ub) return -1;
+          return dir * ua.localeCompare(ub);
+        }
+        case 'min':     return dir * (a.min - b.min);
+        case 'nominal': return dir * (a.nominal - b.nominal);
+        default:        return 0;
+      }
+    });
+  }, [filtered, sortCol, sortDir]);
 
   const virtualizer = useVirtualizer({
-    count: filtered.length,
+    count: sorted.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 44,
     overscan: 10,
@@ -327,6 +382,17 @@ export function TypesEditor() {
           </select>
 
           <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700"
+          >
+            <option value="">All categories</option>
+            {CATEGORY_ORDER.map(cat => (
+              <option key={cat} value={cat}>{CATEGORY_LABELS[cat] ?? cat}</option>
+            ))}
+          </select>
+
+          <select
             value={sourceFilter}
             onChange={e => setSourceFilter(e.target.value)}
             className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700"
@@ -337,7 +403,22 @@ export function TypesEditor() {
             ))}
           </select>
 
-          <span className="text-xs text-slate-600">{filtered.length} / {allTypes.length}</span>
+          <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap">
+            <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} className="accent-indigo-500" />
+            Show inactive
+          </label>
+
+          <span className="text-xs text-slate-600">{sorted.length} / {allTypes.length}</span>
+
+          {typeHistory.length > 0 && (
+            <button
+              onClick={undoType}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+              title={`Undo (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})`}
+            >
+              ↩ Undo
+            </button>
+          )}
 
           {!sourceFilter ? (
             <button
@@ -347,21 +428,45 @@ export function TypesEditor() {
               Select a file to save
             </button>
           ) : (
-            <SaveButton
-              isDirty={dirtyTypesSources.includes(sourceFilter)}
-              onSave={() => saveTypesSource(sourceFilter)}
-              label={`Save ${sourceFilter.split(/[\\/]/).pop()}`}
-            />
+            <div className="flex items-center gap-2">
+              {dirtyTypesSources.includes(sourceFilter) && (
+                <button
+                  onClick={() => revertTypesSource(sourceFilter)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-600 text-slate-400 hover:border-red-500/50 hover:text-red-400 transition-colors"
+                >
+                  Revert
+                </button>
+              )}
+              <SaveButton
+                isDirty={dirtyTypesSources.includes(sourceFilter)}
+                onSave={() => saveTypesSource(sourceFilter)}
+                label={`Save ${sourceFilter.split(/[\\/]/).pop()}`}
+              />
+            </div>
           )}
         </div>
 
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-800 bg-slate-900/50">
-          <span className="w-52">Name</span>
-          <span className="w-24">Category</span>
-          <span className="w-32">Tiers</span>
-          <span className="w-40">Usages</span>
-          <span>Min / Nominal</span>
+        <div className="flex items-center gap-3 px-4 py-2 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-800 bg-slate-900/50 select-none">
+          {([
+            { col: 'name',     label: 'Name',         cls: 'w-52' },
+            { col: 'category', label: 'Category',     cls: 'w-24' },
+            { col: 'tiers',    label: 'Tiers',        cls: 'w-32' },
+            { col: 'usages',   label: 'Usages',       cls: 'w-40' },
+          ] as const).map(({ col, label, cls }) => (
+            <button
+              key={col}
+              onClick={() => handleSort(col)}
+              className={`${cls} flex items-center gap-1 hover:text-slate-400 transition-colors text-left ${sortCol === col ? 'text-slate-400' : ''}`}
+            >
+              {label} {sortArrow(col)}
+            </button>
+          ))}
+          <div className="flex items-center gap-1">
+            <button onClick={() => handleSort('min')}     className={`hover:text-slate-400 transition-colors ${sortCol === 'min' ? 'text-slate-400' : ''}`}>Min {sortArrow('min')}</button>
+            <span className="text-slate-700"> / </span>
+            <button onClick={() => handleSort('nominal')} className={`hover:text-slate-400 transition-colors ${sortCol === 'nominal' ? 'text-slate-400' : ''}`}>Nominal {sortArrow('nominal')}</button>
+          </div>
           <span className="ml-auto">Flags</span>
         </div>
 
@@ -369,7 +474,7 @@ export function TypesEditor() {
         <div ref={parentRef} className="flex-1 overflow-y-auto">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map(vi => {
-              const t = filtered[vi.index];
+              const t = sorted[vi.index];
               return (
                 <div
                   key={t.name}
@@ -380,6 +485,7 @@ export function TypesEditor() {
                     isSelected={selectedName === t.name}
                     onSelect={() => setSelectedName(selectedName === t.name ? null : t.name)}
                     onUpdate={patch => handleUpdate(t.name, patch)}
+                    attachmentNames={attachmentNames}
                   />
                 </div>
               );

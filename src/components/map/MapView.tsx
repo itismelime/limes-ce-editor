@@ -339,7 +339,6 @@ async function pickMapImage(
 export function MapView() {
   const { markers, mapConfig } = useMapMarkers();
   const activeMap         = useUiStore(s => s.activeMap);
-  const mapImagePaths     = useUiStore(s => s.mapImagePaths);
   const setMapImagePath   = useUiStore(s => s.setMapImagePath);
   const setMapImageSize   = useUiStore(s => s.setMapImageSize);
   const mapEventFilter    = useUiStore(s => s.mapEventFilter);

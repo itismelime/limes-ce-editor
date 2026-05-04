@@ -25,6 +25,8 @@ interface ServerState {
   economyCore: CeEntry[];
   buildingInstances: BuildingInstance[];
   playerSpawnData: PlayerSpawnData | null;
+  originalTypes: Map<string, DayZType>;
+  typeHistory: { name: string; prev: DayZType }[];
 
   setMission: (mission: MissionData) => void;
   setPaths: (paths: Partial<FilePaths>) => void;
@@ -34,6 +36,8 @@ interface ServerState {
   clearSaveError: () => void;
 
   updateType: (name: string, patch: Partial<DayZType>) => void;
+  undoType: () => void;
+  revertTypesSource: (sourcePath: string) => void;
   updateEvent: (name: string, patch: Partial<DayZEvent>) => void;
   setEventSpawns: (spawns: EventSpawnDef[]) => void;
   updateSpawnableType: (name: string, patch: Partial<SpawnableType>) => void;
@@ -66,8 +70,10 @@ export const useServerStore = create<ServerState>((set, get) => ({
   economyCore: [],
   buildingInstances: [],
   playerSpawnData: null,
+  originalTypes: new Map(),
+  typeHistory: [],
 
-  setMission: (mission) => set({ mission, dirty: emptyDirty }),
+  setMission: (mission) => set({ mission, dirty: emptyDirty, originalTypes: new Map(mission.types), typeHistory: [] }),
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
   setBuildingInstances: (instances) => set({ buildingInstances: instances }),
@@ -81,11 +87,38 @@ export const useServerStore = create<ServerState>((set, get) => ({
     if (!existing) return s;
     const updated = { ...existing, ...patch };
     next.set(name, updated);
-    const source = (updated as any).source ?? '';
+    const source = updated.source ?? '';
     const typesSources = s.dirty.typesSources.includes(source)
       ? s.dirty.typesSources
       : [...s.dirty.typesSources, source];
-    return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources } };
+    const typeHistory = [{ name, prev: existing }, ...s.typeHistory].slice(0, 200);
+    return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources }, typeHistory };
+  }),
+
+  undoType: () => set(s => {
+    if (!s.mission || s.typeHistory.length === 0) return s;
+    const [last, ...rest] = s.typeHistory;
+    const next = new Map(s.mission.types);
+    next.set(last.name, last.prev);
+    const source = last.prev.source ?? '';
+    const sourceStillDirty = [...next.values()].some(
+      t => t.source === source && t !== s.originalTypes.get(t.name)
+    );
+    const typesSources = sourceStillDirty
+      ? s.dirty.typesSources.includes(source) ? s.dirty.typesSources : [...s.dirty.typesSources, source]
+      : s.dirty.typesSources.filter(p => p !== source);
+    return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources }, typeHistory: rest };
+  }),
+
+  revertTypesSource: (sourcePath) => set(s => {
+    if (!s.mission) return s;
+    const next = new Map(s.mission.types);
+    for (const [name, orig] of s.originalTypes) {
+      if (orig.source === sourcePath) next.set(name, orig);
+    }
+    const typeHistory = s.typeHistory.filter(h => s.originalTypes.get(h.name)?.source !== sourcePath);
+    const typesSources = s.dirty.typesSources.filter(p => p !== sourcePath);
+    return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources }, typeHistory };
   }),
 
   updateEvent: (name, patch) => set(s => {

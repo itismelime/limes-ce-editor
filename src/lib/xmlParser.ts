@@ -218,10 +218,19 @@ const SPAWNABLE_PARSER_OPTIONS = {
   isArray: (name: string) => ['type', 'usage', 'category', 'tag', 'cargo', 'attachments', 'item'].includes(name),
 };
 
+function normalizeSpawnableRoot(raw: string): string {
+  const stripped = stripBom(raw)
+    .replace(/<\?xml[^?]*\?>\s*/i, '')
+    .replace(/<!--[\s\S]*?-->\s*/g, '')
+    .trimStart();
+  if (/^<(?:spawnabletypes|cfgspawnabletypes)[\s>]/i.test(stripped)) return raw;
+  return `<spawnabletypes>${stripped}</spawnabletypes>`;
+}
+
 export function parseSpawnableTypesXml(raw: string): Map<string, SpawnableType> {
   const parser = new XMLParser(SPAWNABLE_PARSER_OPTIONS);
-  const doc = parser.parse(stripBom(raw));
-  const typesList: unknown[] = doc?.spawnabletypes?.type ?? [];
+  const doc = parser.parse(normalizeSpawnableRoot(raw));
+  const typesList: unknown[] = doc?.spawnabletypes?.type ?? doc?.cfgspawnabletypes?.type ?? [];
   const map = new Map<string, SpawnableType>();
 
   for (const t of typesList) {
