@@ -4,6 +4,13 @@ import { TIER_COLORS } from '../../types/map';
 import { CATEGORY_LABELS, CATEGORY_ORDER, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
 import { useUiStore } from '../../store/uiStore';
 
+interface Props {
+  building: BuildingInstance;
+  spawnableTypes: Map<string, SpawnableType>;
+  types: Map<string, DayZType>;
+  tiers: string[];
+}
+
 function matchesContainer(
   type: DayZType,
   containerTags: string[],
