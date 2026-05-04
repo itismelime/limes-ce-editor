@@ -3,6 +3,13 @@ import type { MapId } from '../types/map';
 
 export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy';
 
+export interface BuildingLootOverride {
+  blockItems: string[];
+  blockCategories: string[];
+  addItems: string[];
+  addCategories: string[];
+}
+
 interface UiState {
   activeTab: ActiveTab;
   activeMap: MapId;
@@ -29,6 +36,8 @@ interface UiState {
   buildingMinLootmax: number;
   tierZonesLoaded: boolean;
   showPlayerSpawns: boolean;
+  categoryOverrides: Record<string, string>;
+  buildingLootOverrides: Record<string, BuildingLootOverride>;
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
@@ -56,6 +65,59 @@ interface UiState {
   setBuildingMinLootmax: (v: number) => void;
   setTierZonesLoaded: (v: boolean) => void;
   togglePlayerSpawns: () => void;
+  setCategoryOverride: (typeName: string, category: string) => void;
+  clearCategoryOverride: (typeName: string) => void;
+  importCategoryOverrides: (overrides: Record<string, string>) => void;
+  clearCategoryOverrides: () => void;
+  toggleBuildingBlockedItem: (buildingType: string, itemName: string) => void;
+  toggleBuildingBlockedCategory: (buildingType: string, category: string) => void;
+  toggleBuildingAddedItem: (buildingType: string, itemName: string) => void;
+  toggleBuildingAddedCategory: (buildingType: string, category: string) => void;
+  clearBuildingLootOverride: (buildingType: string) => void;
+}
+
+const CATEGORY_OVERRIDES_KEY = 'categoryOverrides';
+const BUILDING_LOOT_OVERRIDES_KEY = 'buildingLootOverrides';
+
+function readCategoryOverrides(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CATEGORY_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    const result: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'string' && v.trim()) result[k.toLowerCase()] = v;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function normalizeList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values
+    .map(v => (typeof v === 'string' ? v.trim().toLowerCase() : ''))
+    .filter(Boolean))];
+}
+
+function readBuildingLootOverrides(): Record<string, BuildingLootOverride> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BUILDING_LOOT_OVERRIDES_KEY) ?? '{}') as Record<string, unknown>;
+    const result: Record<string, BuildingLootOverride> = {};
+    for (const [keyRaw, value] of Object.entries(parsed)) {
+      const key = keyRaw.trim().toLowerCase();
+      if (!key || typeof value !== 'object' || value === null) continue;
+      const record = value as Record<string, unknown>;
+      result[key] = {
+        blockItems: normalizeList(record.blockItems),
+        blockCategories: normalizeList(record.blockCategories),
+        addItems: normalizeList(record.addItems),
+        addCategories: normalizeList(record.addCategories),
+      };
+    }
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -108,6 +170,8 @@ export const useUiStore = create<UiState>((set) => ({
   buildingMinLootmax: 0,
   tierZonesLoaded: false,
   showPlayerSpawns: false,
+  categoryOverrides: readCategoryOverrides(),
+  buildingLootOverrides: readBuildingLootOverrides(),
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
       ? s.hiddenTiers.filter(t => t !== tier)
@@ -134,4 +198,95 @@ export const useUiStore = create<UiState>((set) => ({
   setBuildingMinLootmax: (v) => set({ buildingMinLootmax: v }),
   setTierZonesLoaded: (v) => set({ tierZonesLoaded: v }),
   togglePlayerSpawns: () => set(s => ({ showPlayerSpawns: !s.showPlayerSpawns })),
+  setCategoryOverride: (typeName, category) => set(s => {
+    const key = typeName.trim().toLowerCase();
+    if (!key) return {};
+    const next = { ...s.categoryOverrides, [key]: category };
+    localStorage.setItem(CATEGORY_OVERRIDES_KEY, JSON.stringify(next));
+    return { categoryOverrides: next };
+  }),
+  clearCategoryOverride: (typeName) => set(s => {
+    const key = typeName.trim().toLowerCase();
+    if (!key || !(key in s.categoryOverrides)) return {};
+    const next = { ...s.categoryOverrides };
+    delete next[key];
+    localStorage.setItem(CATEGORY_OVERRIDES_KEY, JSON.stringify(next));
+    return { categoryOverrides: next };
+  }),
+  importCategoryOverrides: (overrides) => set(() => {
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(overrides)) {
+      if (typeof v === 'string' && v.trim()) next[k.toLowerCase()] = v;
+    }
+    localStorage.setItem(CATEGORY_OVERRIDES_KEY, JSON.stringify(next));
+    return { categoryOverrides: next };
+  }),
+  clearCategoryOverrides: () => set(() => {
+    localStorage.setItem(CATEGORY_OVERRIDES_KEY, JSON.stringify({}));
+    return { categoryOverrides: {} };
+  }),
+  toggleBuildingBlockedItem: (buildingType, itemName) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const value = itemName.trim().toLowerCase();
+    if (!key || !value) return {};
+    const prev = s.buildingLootOverrides[key] ?? { blockItems: [], blockCategories: [], addItems: [], addCategories: [] };
+    const blockItems = prev.blockItems.includes(value)
+      ? prev.blockItems.filter(v => v !== value)
+      : [...prev.blockItems, value];
+    const addItems = prev.addItems.filter(v => v !== value);
+    const nextEntry: BuildingLootOverride = { ...prev, blockItems, addItems };
+    const next = { ...s.buildingLootOverrides, [key]: nextEntry };
+    localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
+    return { buildingLootOverrides: next };
+  }),
+  toggleBuildingBlockedCategory: (buildingType, category) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const value = category.trim().toLowerCase();
+    if (!key || !value) return {};
+    const prev = s.buildingLootOverrides[key] ?? { blockItems: [], blockCategories: [], addItems: [], addCategories: [] };
+    const blockCategories = prev.blockCategories.includes(value)
+      ? prev.blockCategories.filter(v => v !== value)
+      : [...prev.blockCategories, value];
+    const addCategories = prev.addCategories.filter(v => v !== value);
+    const nextEntry: BuildingLootOverride = { ...prev, blockCategories, addCategories };
+    const next = { ...s.buildingLootOverrides, [key]: nextEntry };
+    localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
+    return { buildingLootOverrides: next };
+  }),
+  toggleBuildingAddedItem: (buildingType, itemName) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const value = itemName.trim().toLowerCase();
+    if (!key || !value) return {};
+    const prev = s.buildingLootOverrides[key] ?? { blockItems: [], blockCategories: [], addItems: [], addCategories: [] };
+    const addItems = prev.addItems.includes(value)
+      ? prev.addItems.filter(v => v !== value)
+      : [...prev.addItems, value];
+    const blockItems = prev.blockItems.filter(v => v !== value);
+    const nextEntry: BuildingLootOverride = { ...prev, addItems, blockItems };
+    const next = { ...s.buildingLootOverrides, [key]: nextEntry };
+    localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
+    return { buildingLootOverrides: next };
+  }),
+  toggleBuildingAddedCategory: (buildingType, category) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const value = category.trim().toLowerCase();
+    if (!key || !value) return {};
+    const prev = s.buildingLootOverrides[key] ?? { blockItems: [], blockCategories: [], addItems: [], addCategories: [] };
+    const addCategories = prev.addCategories.includes(value)
+      ? prev.addCategories.filter(v => v !== value)
+      : [...prev.addCategories, value];
+    const blockCategories = prev.blockCategories.filter(v => v !== value);
+    const nextEntry: BuildingLootOverride = { ...prev, addCategories, blockCategories };
+    const next = { ...s.buildingLootOverrides, [key]: nextEntry };
+    localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
+    return { buildingLootOverrides: next };
+  }),
+  clearBuildingLootOverride: (buildingType) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    if (!key || !(key in s.buildingLootOverrides)) return {};
+    const next = { ...s.buildingLootOverrides };
+    delete next[key];
+    localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
+    return { buildingLootOverrides: next };
+  }),
 }));

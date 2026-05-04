@@ -51,16 +51,52 @@ export function TopBar({
   const saveError = useServerStore(s => s.saveError);
   const saveStatus = useServerStore(s => s.saveStatus);
   const clearSaveError = useServerStore(s => s.clearSaveError);
-  const { activeTab, setActiveTab, activeMap, setActiveMap, isLoading } = useUiStore();
+  const saveTypesSource = useServerStore(s => s.saveTypesSource);
+  const saveEventSpawns = useServerStore(s => s.saveEventSpawns);
+  const saveEvents = useServerStore(s => s.saveEvents);
+  const saveSpawnableTypes = useServerStore(s => s.saveSpawnableTypes);
+  const saveMapGroupProto = useServerStore(s => s.saveMapGroupProto);
+  const undoType = useServerStore(s => s.undoType);
+  const typeHistory = useServerStore(s => s.typeHistory);
+  const activeTab = useUiStore(s => s.activeTab);
+  const setActiveTab = useUiStore(s => s.setActiveTab);
+  const activeMap = useUiStore(s => s.activeMap);
+  const setActiveMap = useUiStore(s => s.setActiveMap);
+  const isLoading = useUiStore(s => s.isLoading);
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [preparingOffline, setPreparingOffline] = useState(false);
   const [offlineProgress, setOfflineProgress] = useState(0);
   const [offlineStatus, setOfflineStatus] = useState<string | null>(null);
   const [offlineCurrentMap, setOfflineCurrentMap] = useState<string | null>(null);
   const [offlineStatuses, setOfflineStatuses] = useState<Record<string, OfflineCacheStatus>>({});
+  const [savingPending, setSavingPending] = useState(false);
   const offlinePanelRef = useRef<HTMLDivElement | null>(null);
+  const pendingTabRef = useRef<ActiveTab | null>(null);
+  const tabSwitchInFlightRef = useRef(false);
 
-  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes;
+  const commitPendingTab = () => {
+    if (tabSwitchInFlightRef.current) return;
+    const targetTab = pendingTabRef.current;
+    if (!targetTab) return;
+
+    const currentTab = useUiStore.getState().activeTab;
+    if (targetTab === currentTab) {
+      pendingTabRef.current = null;
+      return;
+    }
+
+    pendingTabRef.current = null;
+    tabSwitchInFlightRef.current = true;
+    setActiveTab(targetTab);
+  };
+
+  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto;
+  const pendingSummary: string[] = [];
+  if (dirty.typesSources.length > 0) pendingSummary.push(`${dirty.typesSources.length} types`);
+  if (dirty.eventSpawns) pendingSummary.push('spawns');
+  if (dirty.events) pendingSummary.push('events');
+  if (dirty.spawnableTypes) pendingSummary.push('spawnable');
+  if (dirty.mapGroupProto) pendingSummary.push('mapgroup');
   const isKnownMap = OFFLINE_MAP_ORDER.includes(activeMap);
   const currentMapReady = isKnownMap && !!offlineStatuses[activeMap]?.ready;
 
@@ -129,11 +165,11 @@ export function TopBar({
   };
 
   useEffect(() => {
-    if (activeTab === 'map') {
+    if (showOfflinePanel) {
       void refreshOfflineStatuses();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, activeMap]);
+  }, [showOfflinePanel, activeMap]);
 
   useEffect(() => {
     let unlistenProgress: (() => void) | undefined;
@@ -166,6 +202,60 @@ export function TopBar({
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [showOfflinePanel]);
+
+  useEffect(() => {
+    if (!tabSwitchInFlightRef.current) return;
+    requestAnimationFrame(() => {
+      tabSwitchInFlightRef.current = false;
+      if (pendingTabRef.current && pendingTabRef.current !== useUiStore.getState().activeTab) {
+        commitPendingTab();
+      }
+    });
+  }, [activeTab]);
+
+  const handleTabClick = (tabId: ActiveTab) => {
+    pendingTabRef.current = tabId;
+
+    if (!tabSwitchInFlightRef.current) {
+      const currentTab = useUiStore.getState().activeTab;
+      if (tabId !== currentTab) {
+        commitPendingTab();
+      }
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        undoType();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [undoType]);
+
+  const savePendingChanges = async () => {
+    if (savingPending || !hasDirty) return;
+    const proceed = window.confirm(`Save pending changes (${pendingSummary.join(', ')})?`);
+    if (!proceed) return;
+
+    setSavingPending(true);
+    try {
+      if (dirty.mapGroupProto) await saveMapGroupProto();
+      const typeSources = [...dirty.typesSources];
+      for (const source of typeSources) {
+        await saveTypesSource(source);
+      }
+      if (dirty.eventSpawns) await saveEventSpawns();
+      if (dirty.events) await saveEvents();
+      if (dirty.spawnableTypes) await saveSpawnableTypes();
+    } finally {
+      setSavingPending(false);
+    }
+  };
 
   return (
     <div className="relative z-[2000] flex flex-col bg-slate-900 border-b border-slate-800">
@@ -204,27 +294,20 @@ export function TopBar({
           </span>
         )}
 
-        {saveStatus === 'saving' && (
-          <span className="ml-auto flex items-center gap-1.5 text-slate-400 text-xs">
-            <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
-            Saving…
-          </span>
-        )}
-        {saveStatus === 'success' && (
-          <span className="ml-auto flex items-center gap-1.5 text-green-400 text-xs">
-            <span className="w-2 h-2 rounded-full bg-green-400" />
-            Saved successfully
-          </span>
-        )}
-        {saveStatus === 'idle' && hasDirty && (
-          <span className="ml-auto flex items-center gap-1.5 text-amber-400 text-xs">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            Unsaved changes
-          </span>
-        )}
-
-        {activeTab === 'map' && (
-          <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
+          {saveStatus === 'saving' && (
+            <span className="flex items-center gap-1.5 text-slate-400 text-xs">
+              <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
+              Saving…
+            </span>
+          )}
+          {saveStatus === 'success' && (
+            <span className="flex items-center gap-1.5 text-green-400 text-xs">
+              <span className="w-2 h-2 rounded-full bg-green-400" />
+              Saved successfully
+            </span>
+          )}
+          {activeTab === 'map' && (<>
             <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
               {MAPS.map(m => (
                 <button
@@ -317,7 +400,30 @@ export function TopBar({
                 </div>
               )}
             </div>
-          </div>
+          </>
+          )}
+        </div>
+      </div>
+
+      <div className="absolute bottom-2 right-4 z-30 flex items-center gap-1.5">
+        {typeHistory.length > 0 && (
+          <button
+            onClick={undoType}
+            title={`Undo (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})`}
+            className="h-8 px-3 rounded-lg border border-slate-600 bg-slate-800 text-slate-300 hover:text-slate-100 hover:border-slate-500 text-xs font-medium transition-colors"
+          >
+            ↩ Undo
+          </button>
+        )}
+        {hasDirty && (
+          <button
+            onClick={() => { void savePendingChanges(); }}
+            disabled={savingPending}
+            className="h-8 px-3 rounded-lg text-sm font-medium transition-all bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 flex items-center gap-2"
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            {savingPending ? 'Saving…' : 'Save'}
+          </button>
         )}
       </div>
 
@@ -326,7 +432,7 @@ export function TopBar({
         {TABS.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleTabClick(tab.id)}
             onMouseEnter={() => onPrefetchTab(tab.id)}
             onFocus={() => onPrefetchTab(tab.id)}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 ${
@@ -339,6 +445,8 @@ export function TopBar({
           </button>
         ))}
       </div>
+
+
     </div>
   );
 }

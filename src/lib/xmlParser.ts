@@ -391,6 +391,41 @@ export function joinMapGroups(
   });
 }
 
+function tiersToValueUsers(tiers: string[]): string[] {
+  const nums = [...new Set(
+    tiers
+      .map(t => Number.parseInt(t.replace('Tier', ''), 10))
+      .filter(n => Number.isFinite(n) && n >= 1 && n <= 9)
+      .sort((a, b) => a - b)
+  )];
+  if (nums.length === 0) return [];
+  return nums.map(n => `Tier${n}`);
+}
+
+export function serializeMapGroupProtoXml(
+  proto: Map<string, { usages: string[]; tiers: string[]; lootmax: number; containers: ContainerDef[] }>,
+): string {
+  const groups = [...proto.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, entry]) => ({
+      '@_name': name,
+      '@_lootmax': String(entry.lootmax),
+      ...(entry.containers.length ? {
+        container: entry.containers.map(c => ({
+          '@_name': c.name,
+          '@_lootmax': String(c.lootmax),
+          ...(c.categories.length ? { category: c.categories.map(cat => ({ '@_name': cat })) } : {}),
+          ...(c.tags.length ? { tag: c.tags.map(tag => ({ '@_name': tag })) } : {}),
+        })),
+      } : {}),
+      ...(entry.tiers.length ? { value: tiersToValueUsers(entry.tiers).map(user => ({ '@_user': user })) } : {}),
+    }));
+
+  const builder = new XMLBuilder(BUILDER_OPTIONS);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    builder.build({ mapgroupproto: { group: groups } });
+}
+
 // ─── cfgplayerspawnpoints.xml ────────────────────────────────────────────────
 
 import type { PlayerSpawnData, PlayerSpawnSection } from '../types/dayz';

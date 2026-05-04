@@ -2,7 +2,7 @@
 
 > A desktop tool for visualising and editing DayZ server loot tables — no more hand-editing XML.
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue?style=flat-square)](https://github.com/lime/LootEditor/releases)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue?style=flat-square)](https://github.com/lime/LootEditor/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=flat-square)]()
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)

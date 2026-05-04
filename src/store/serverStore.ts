@@ -3,9 +3,10 @@ import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, Di
 import {
   serializeTypesXml, serializeEventSpawnsXml,
   serializeEventsXml, serializeSpawnableTypesXml,
-  serializeEconomyCoreXml,
+  serializeEconomyCoreXml, serializeMapGroupProtoXml,
 } from '../lib/xmlParser';
 import { writeFile, createDir } from '../lib/fileDiscovery';
+import type { ContainerDef } from '../types/dayz';
 
 interface FilePaths {
   missionPath: string | null;
@@ -14,7 +15,15 @@ interface FilePaths {
   eventsPath: string | null;
   spawnableTypesPath: string | null;
   economyCorePath: string | null;
+  mapGroupProtoPath: string | null;
 }
+
+type MapGroupProtoEntry = {
+  usages: string[];
+  tiers: string[];
+  lootmax: number;
+  containers: ContainerDef[];
+};
 
 interface ServerState {
   mission: MissionData | null;
@@ -24,6 +33,7 @@ interface ServerState {
   saveStatus: 'idle' | 'saving' | 'success';
   economyCore: CeEntry[];
   buildingInstances: BuildingInstance[];
+  mapGroupProto: Map<string, MapGroupProtoEntry>;
   playerSpawnData: PlayerSpawnData | null;
   originalTypes: Map<string, DayZType>;
   typeHistory: { name: string; prev: DayZType }[];
@@ -32,6 +42,7 @@ interface ServerState {
   setPaths: (paths: Partial<FilePaths>) => void;
   setEconomyCore: (entries: CeEntry[]) => void;
   setBuildingInstances: (instances: BuildingInstance[]) => void;
+  setMapGroupProto: (proto: Map<string, MapGroupProtoEntry>) => void;
   setPlayerSpawnData: (data: PlayerSpawnData | null) => void;
   clearSaveError: () => void;
 
@@ -41,6 +52,8 @@ interface ServerState {
   updateEvent: (name: string, patch: Partial<DayZEvent>) => void;
   setEventSpawns: (spawns: EventSpawnDef[]) => void;
   updateSpawnableType: (name: string, patch: Partial<SpawnableType>) => void;
+  addBuildingCategory: (buildingType: string, category: string) => void;
+  removeBuildingCategory: (buildingType: string, category: string) => void;
 
   addCustomTypePack: (name: string, xmlContent: string) => Promise<void>;
   removeEconomyCoreEntry: (folder: string) => Promise<void>;
@@ -48,9 +61,10 @@ interface ServerState {
   saveEventSpawns: () => Promise<void>;
   saveEvents: () => Promise<void>;
   saveSpawnableTypes: () => Promise<void>;
+  saveMapGroupProto: () => Promise<void>;
 }
 
-const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false };
+const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false };
 
 function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -63,12 +77,13 @@ function markSuccess(set: (fn: (s: ServerState) => Partial<ServerState>) => void
 
 export const useServerStore = create<ServerState>((set, get) => ({
   mission: null,
-  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null },
+  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null },
   dirty: emptyDirty,
   saveError: null,
   saveStatus: 'idle' as const,
   economyCore: [],
   buildingInstances: [],
+  mapGroupProto: new Map(),
   playerSpawnData: null,
   originalTypes: new Map(),
   typeHistory: [],
@@ -77,6 +92,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
   setBuildingInstances: (instances) => set({ buildingInstances: instances }),
+  setMapGroupProto: (proto) => set({ mapGroupProto: new Map(proto) }),
   setPlayerSpawnData: (data) => set({ playerSpawnData: data }),
   clearSaveError: () => set({ saveError: null }),
 
@@ -140,6 +156,46 @@ export const useServerStore = create<ServerState>((set, get) => ({
     const existing = next.get(name);
     if (existing) next.set(name, { ...existing, ...patch });
     return { mission: { ...s.mission, spawnableTypes: next }, dirty: { ...s.dirty, spawnableTypes: true } };
+  }),
+
+  addBuildingCategory: (buildingType, category) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cat = category.trim().toLowerCase();
+    if (!key || !cat || !s.mapGroupProto.has(key)) return s;
+
+    const protoNext = new Map(s.mapGroupProto);
+    const entry = protoNext.get(key)!;
+    const containers = entry.containers.map(c => {
+      if (c.categories.includes(cat)) return c;
+      return { ...c, categories: [...c.categories, cat] };
+    });
+
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+
+    return { mapGroupProto: protoNext, buildingInstances, dirty: { ...s.dirty, mapGroupProto: true } };
+  }),
+
+  removeBuildingCategory: (buildingType, category) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cat = category.trim().toLowerCase();
+    if (!key || !cat || !s.mapGroupProto.has(key)) return s;
+
+    const protoNext = new Map(s.mapGroupProto);
+    const entry = protoNext.get(key)!;
+    const containers = entry.containers.map(c => ({
+      ...c,
+      categories: c.categories.filter(existing => existing !== cat),
+    }));
+
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+
+    return { mapGroupProto: protoNext, buildingInstances, dirty: { ...s.dirty, mapGroupProto: true } };
   }),
 
   addCustomTypePack: async (name, xmlContent) => {
@@ -234,6 +290,19 @@ export const useServerStore = create<ServerState>((set, get) => ({
       markSuccess(set);
     } catch (err) {
       set({ saveError: `Failed to save cfgspawnabletypes.xml: ${toMessage(err)}`, saveStatus: 'idle' });
+    }
+  },
+
+  saveMapGroupProto: async () => {
+    const { mapGroupProto, paths } = get();
+    if (!paths.mapGroupProtoPath) return;
+    set({ saveStatus: 'saving' });
+    try {
+      await writeFile(paths.mapGroupProtoPath, serializeMapGroupProtoXml(mapGroupProto));
+      set(s => ({ dirty: { ...s.dirty, mapGroupProto: false } }));
+      markSuccess(set);
+    } catch (err) {
+      set({ saveError: `Failed to save mapgroupproto.xml: ${toMessage(err)}`, saveStatus: 'idle' });
     }
   },
 }));

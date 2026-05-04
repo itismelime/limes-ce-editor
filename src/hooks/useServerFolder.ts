@@ -74,6 +74,7 @@ export function useServerFolder() {
   const setPaths             = useServerStore(s => s.setPaths);
   const setEconomyCore       = useServerStore(s => s.setEconomyCore);
   const setBuildingInstances = useServerStore(s => s.setBuildingInstances);
+  const setMapGroupProto     = useServerStore(s => s.setMapGroupProto);
   const setPlayerSpawnData   = useServerStore(s => s.setPlayerSpawnData);
   const setLoading          = useUiStore(s => s.setLoading);
   const setLoadError        = useUiStore(s => s.setLoadError);
@@ -103,6 +104,7 @@ export function useServerFolder() {
         eventsPath:         m.eventsPath,
         spawnableTypesPath: m.spawnableTypesPath,
         economyCorePath:    m.economyCorePath,
+        mapGroupProtoPath:  m.mapGroupProtoPath,
       });
 
       const { mission, warnings } = await loadMission(m);
@@ -166,8 +168,12 @@ export function useServerFolder() {
           ]);
           const proto = parseMapGroupProtoXml(protoRaw);
           const positions = parseMapGroupPosXml(posRaw);
+          setMapGroupProto(proto);
           setBuildingInstances(joinMapGroups(proto, positions));
         } catch { /* optional layer — silently skip */ }
+      } else {
+        setMapGroupProto(new Map());
+        setBuildingInstances([]);
       }
 
       // Load tier zone data from areaflags.map

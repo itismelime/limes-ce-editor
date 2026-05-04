@@ -217,23 +217,24 @@ fn cancel_offline_prepare(offline_state: tauri::State<'_, OfflinePrepareState>) 
 }
 
 #[tauri::command]
-fn get_offline_cache_statuses(app: tauri::AppHandle) -> Result<Vec<MapOfflineStatus>, String> {
+async fn get_offline_cache_statuses(app: tauri::AppHandle) -> Result<Vec<MapOfflineStatus>, String> {
     let cache_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("map_cache");
 
-    let mut statuses = Vec::new();
-    for map_id in KNOWN_MAPS {
-        let (cached, total) = tiles::cached_tile_coverage(&cache_dir, map_id, max_xam_zoom_for_map(map_id));
-        statuses.push(MapOfflineStatus {
-            map_id: map_id.to_string(),
-            ready: total > 0 && cached == total,
-            cached,
-            total,
-        });
-    }
-
-    Ok(statuses)
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut statuses = Vec::new();
+        for map_id in KNOWN_MAPS {
+            let (cached, total) = tiles::cached_tile_coverage(&cache_dir, map_id, max_xam_zoom_for_map(map_id));
+            statuses.push(MapOfflineStatus {
+                map_id: map_id.to_string(),
+                ready: total > 0 && cached == total,
+                cached,
+                total,
+            });
+        }
+        Ok(statuses)
+    }).await.map_err(|e| e.to_string())?
 }
 
 async fn resolve_version(

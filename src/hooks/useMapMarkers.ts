@@ -4,7 +4,7 @@ import { useUiStore } from '../store/uiStore';
 import { resolveLoot } from '../lib/lootResolver';
 import { MAP_CONFIGS } from '../lib/mapConfig';
 
-export function useMapMarkers() {
+export function useMapMarkers(enabled = true) {
   const mission    = useServerStore(s => s.mission);
   const activeMap  = useUiStore(s => s.activeMap);
   const mapImagePaths  = useUiStore(s => s.mapImagePaths);
@@ -30,9 +30,10 @@ export function useMapMarkers() {
   }, [activeMap, mapImagePaths, mapImageSizes, customMapUrl, customMapWidth, customMapHeight]);
 
   const markers = useMemo(() => {
-    if (!mission) return [];
-    return resolveLoot(mission, mapConfig);
-  }, [mission, mapConfig]);
+    if (!mission || !enabled) return [];
+    const result = resolveLoot(mission, mapConfig);
+    return result;
+  }, [mission, mapConfig, enabled]);
 
   return { markers, mapConfig };
 }

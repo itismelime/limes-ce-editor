@@ -23,17 +23,12 @@ export function leafletToGame(
   };
 }
 
-const PAN_PADDING = 300; // px beyond the map edge the user can pan
-
 export function mapBounds(map: MapConfig): LatLngBoundsExpression {
   return [[0, 0], [-map.imageHeight, map.imageWidth]];
 }
 
 export function mapPanBounds(map: MapConfig): LatLngBoundsExpression {
-  return [
-    [PAN_PADDING, -PAN_PADDING],
-    [-map.imageHeight - PAN_PADDING, map.imageWidth + PAN_PADDING],
-  ];
+  return mapBounds(map);
 }
 
 export function isInBounds(x: number, z: number, map: MapConfig): boolean {

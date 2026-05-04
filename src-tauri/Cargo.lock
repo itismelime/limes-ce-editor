@@ -519,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "dayz-loot-editor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "image",
  "reqwest 0.12.28",

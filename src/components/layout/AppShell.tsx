@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, memo, Suspense, useEffect, useState } from 'react';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useServerFolder } from '../../hooks/useServerFolder';
@@ -22,6 +23,14 @@ const SpawnableTypesEditor = lazy(() => loadSpawnableTypesEditor().then(m => ({ 
 const EconomyCoreEditor = lazy(() => loadEconomyCoreEditor().then(m => ({ default: m.EconomyCoreEditor })));
 const PlayerSpawnsEditor = lazy(() => loadPlayerSpawnsEditor().then(m => ({ default: m.PlayerSpawnsEditor })));
 
+const StableMapView = memo(MapView);
+const StableTypesEditor = memo(TypesEditor);
+const StableEventsEditor = memo(EventsEditor);
+const StableEventSpawnsEditor = memo(EventSpawnsEditor);
+const StablePlayerSpawnsEditor = memo(PlayerSpawnsEditor);
+const StableSpawnableTypesEditor = memo(SpawnableTypesEditor);
+const StableEconomyCoreEditor = memo(EconomyCoreEditor);
+
 const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
   map: loadMapView,
   types: loadTypesEditor,
@@ -34,6 +43,7 @@ const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
 
 const IDLE_PREFETCH_TABS: ActiveTab[] = ['map', 'types'];
 const prefetchedTabs = new Set<ActiveTab>();
+const KNOWN_MAPS = new Set(['namalsk', 'chernarus', 'livonia', 'sakhal']);
 
 function prefetchTabOnce(tab: ActiveTab): void {
   if (prefetchedTabs.has(tab)) return;
@@ -187,9 +197,20 @@ function MissingFilesWarning({ warnings }: { warnings: string[] }) {
 
 export function AppShell() {
   const mission = useServerStore(s => s.mission);
+  const missionPath = useServerStore(s => s.paths.missionPath);
   const dirty = useServerStore(s => s.dirty);
-  const { activeTab, loadError, loadWarnings } = useUiStore();
+  const activeTab = useUiStore(s => s.activeTab);
+  const activeMap = useUiStore(s => s.activeMap);
+  const mapImagePaths = useUiStore(s => s.mapImagePaths);
+  const setMapImagePath = useUiStore(s => s.setMapImagePath);
+  const setMapImageSize = useUiStore(s => s.setMapImageSize);
+  const loadError = useUiStore(s => s.loadError);
+  const loadWarnings = useUiStore(s => s.loadWarnings);
+  const isLoading = useUiStore(s => s.isLoading);
   const { openFolder, autoLoad, pendingMissions, selectMission, cancelPicker } = useServerFolder();
+  const [mountedTabs, setMountedTabs] = useState<Partial<Record<ActiveTab, true>>>({ [activeTab]: true });
+  const [isStartupWarmup, setIsStartupWarmup] = useState(false);
+  const [startupMessage, setStartupMessage] = useState('Preparing editor...');
 
   useEffect(() => { autoLoad(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -205,6 +226,13 @@ export function AppShell() {
 
   useEffect(() => {
     prefetchedTabs.add(activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    setMountedTabs(prev => {
+      if (prev[activeTab]) return prev;
+      return { ...prev, [activeTab]: true };
+    });
   }, [activeTab]);
 
   useEffect(() => {
@@ -227,14 +255,76 @@ export function AppShell() {
     return () => clearTimeout(timeoutId);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!mission || !missionPath) {
+      setIsStartupWarmup(false);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    setIsStartupWarmup(true);
+    setStartupMessage('Preparing map cache...');
+
+    const warmup = async () => {
+      // Keep startup focused on map readiness; avoid mounting hidden heavy tabs.
+      setMountedTabs(prev => ({
+        ...prev,
+        map: true,
+      }));
+      prefetchTabOnce('map');
+      prefetchTabOnce('types');
+
+      if (KNOWN_MAPS.has(activeMap) && !mapImagePaths[activeMap]) {
+        try {
+          const result = await invoke<{ path: string; width: number; height: number }>('download_map_tiles', {
+            mapId: activeMap,
+          });
+          if (!cancelled) {
+            setMapImagePath(activeMap, convertFileSrc(result.path));
+            setMapImageSize(activeMap, result.width, result.height);
+          }
+        } catch {
+          // If map cache preparation fails, continue warmup and let map tab handle retries.
+        }
+      }
+
+      if (cancelled) return;
+      setStartupMessage('Warming editors...');
+      await Promise.allSettled([TAB_PREFETCHERS.map(), TAB_PREFETCHERS.types()]);
+
+      if (cancelled) return;
+      setStartupMessage('Finalizing...');
+      await new Promise<void>(resolve => {
+        timeoutId = setTimeout(resolve, 220);
+      });
+      if (!cancelled) setIsStartupWarmup(false);
+    };
+
+    void warmup();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    };
+  }, [missionPath, mission, activeMap, mapImagePaths, setMapImagePath, setMapImageSize]);
+
   const showNoFilesError = loadError === 'no_files_found' || loadError === 'permission_denied' || loadError?.startsWith('error:');
   const prefetchTab = (tab: ActiveTab) => {
     if (tab === activeTab) return;
     prefetchTabOnce(tab);
   };
+  const tabPanelClass = (tab: ActiveTab) => {
+    if (activeTab === tab) {
+      if (tab === 'map') return 'fixed inset-0 z-10';
+      return 'h-full w-full relative z-10';
+    }
+    return 'hidden';
+  };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950">
+    <div className="relative flex flex-col h-screen bg-slate-950">
       <TopBar onOpenFolder={openFolder} onPrefetchTab={prefetchTab} />
       {pendingMissions && (
         <MissionPicker
@@ -264,20 +354,64 @@ export function AppShell() {
                 </button>
               </div>
             )}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden relative">
               <Suspense fallback={<div className="h-full w-full grid place-items-center text-sm text-slate-500">Loading editor...</div>}>
-                {activeTab === 'map'            && <MapView />}
-                {activeTab === 'types'          && <TypesEditor />}
-                {activeTab === 'events'         && <EventsEditor />}
-                {activeTab === 'spawns'         && <EventSpawnsEditor />}
-                {activeTab === 'playerSpawns'   && <PlayerSpawnsEditor />}
-                {activeTab === 'spawnableTypes' && <SpawnableTypesEditor />}
-                {activeTab === 'economy'        && <EconomyCoreEditor />}
+                {mountedTabs.map && (
+                  <div className={tabPanelClass('map')}>
+                    <StableMapView />
+                  </div>
+                )}
+                {mountedTabs.types && (
+                  <div className={tabPanelClass('types')}>
+                    <StableTypesEditor />
+                  </div>
+                )}
+                {mountedTabs.events && (
+                  <div className={tabPanelClass('events')}>
+                    <StableEventsEditor />
+                  </div>
+                )}
+                {mountedTabs.spawns && (
+                  <div className={tabPanelClass('spawns')}>
+                    <StableEventSpawnsEditor />
+                  </div>
+                )}
+                {mountedTabs.playerSpawns && (
+                  <div className={tabPanelClass('playerSpawns')}>
+                    <StablePlayerSpawnsEditor />
+                  </div>
+                )}
+                {mountedTabs.spawnableTypes && (
+                  <div className={tabPanelClass('spawnableTypes')}>
+                    <StableSpawnableTypesEditor />
+                  </div>
+                )}
+                {mountedTabs.economy && (
+                  <div className={tabPanelClass('economy')}>
+                    <StableEconomyCoreEditor />
+                  </div>
+                )}
               </Suspense>
             </div>
           </div>
         )}
       </div>
+
+      {(isLoading || isStartupWarmup) && (
+        <div className="absolute inset-0 z-[5000] bg-slate-950 flex items-center justify-center">
+          <div className="w-[360px] max-w-[90vw] rounded-xl border border-slate-700 bg-slate-900/95 p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-5 h-5 rounded-full border-2 border-slate-600 border-t-indigo-400 animate-spin" />
+              <p className="text-sm font-medium text-slate-200">
+                {isLoading ? 'Loading server files...' : startupMessage}
+              </p>
+            </div>
+            <p className="text-xs text-slate-500">
+              First load may take a moment. Tabs will become interactive once warmup finishes.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 [package]
 name = "dayz-loot-editor"
-version = "0.1.0"
+version = "0.1.1"
 description = "DayZ Loot Editor"
 authors = []
 edition = "2021"

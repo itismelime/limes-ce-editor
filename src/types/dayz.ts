@@ -106,6 +106,7 @@ export type DirtyFlags = {
   eventSpawns: boolean;
   events: boolean;
   spawnableTypes: boolean;
+  mapGroupProto: boolean;
 };
 
 export interface CeFile {

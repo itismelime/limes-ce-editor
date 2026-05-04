@@ -11,7 +11,7 @@ import 'leaflet/dist/leaflet.css';
 import { useMapMarkers } from '../../hooks/useMapMarkers';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
-import { gameToLeaflet, mapBounds, mapPanBounds } from '../../lib/coordinateTransform';
+import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
 import { TIER_ORDER, getUsageColor } from '../../types/map';
 import { TierLegend } from './TierLegend';
 import { MarkerPopup } from './MarkerPopup';
@@ -27,8 +27,8 @@ const MAX_XAM_ZOOM_BY_MAP: Record<string, number> = {
   sakhal: 8,
 };
 
-// Leaflet zoom 0 = xam.nu zoom 4.  Detail tiles start at Leaflet zoom 1 (xam zoom 5).
-const DETAIL_MIN_ZOOM = 0;
+// Leaflet zoom 0 = xam.nu zoom 4. Delay detail tiles until zoom 1 to cut heavy decode work.
+const DETAIL_MIN_ZOOM = 1;
 const XAM_ZOOM_OFFSET = 4;
 const EVENT_MARKER_RADIUS = 10;
 const EVENT_SELECTED_RADIUS = 13;
@@ -58,14 +58,105 @@ function FilterInput({ placeholder, value, onChange }: { placeholder: string; va
 
 function PopupAutoFlip() {
   const map = useMap();
+  const popupCleanupRef = useRef(new WeakMap<L.Popup, () => void>());
+
+  const attachDraggable = (popup: L.Popup, el: HTMLElement) => {
+    const wrapper = el.querySelector('.leaflet-popup-content-wrapper') as HTMLElement | null;
+    if (!wrapper) return;
+
+    let handle = wrapper.querySelector('.popup-drag-handle') as HTMLDivElement | null;
+    if (!handle) {
+      handle = document.createElement('div');
+      handle.className = 'popup-drag-handle';
+      handle.style.height = '14px';
+      handle.style.margin = '-8px -8px 6px -8px';
+      handle.style.padding = '4px 0 0 0';
+      handle.style.display = 'flex';
+      handle.style.alignItems = 'center';
+      handle.style.justifyContent = 'center';
+      handle.style.background = 'transparent';
+
+      const grip = document.createElement('div');
+      grip.className = 'popup-drag-grip';
+      grip.style.width = '34px';
+      grip.style.height = '4px';
+      grip.style.borderRadius = '999px';
+      grip.style.background = 'rgba(148, 163, 184, 0.5)';
+      handle.appendChild(grip);
+
+      wrapper.prepend(handle);
+    }
+    handle.style.cursor = 'grab';
+
+    let dragging = false;
+    let startMouseX = 0;
+    let startMouseY = 0;
+    let startPoint = L.point(0, 0);
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      if (!dragging) return;
+      if (!popup.isOpen() || !popup.getElement()) {
+        stopDrag();
+        return;
+      }
+      const dx = moveEvt.clientX - startMouseX;
+      const dy = moveEvt.clientY - startMouseY;
+      const nextPoint = L.point(startPoint.x + dx, startPoint.y + dy);
+      popup.setLatLng(map.containerPointToLatLng(nextPoint));
+      if (popup.isOpen()) popup.update();
+      moveEvt.preventDefault();
+    };
+
+    const stopDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.style.cursor = 'grab';
+      map.dragging.enable();
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', stopDrag);
+    };
+
+    const onMouseDown = (evt: MouseEvent) => {
+      if (evt.button !== 0) return;
+
+      dragging = true;
+      handle.style.cursor = 'grabbing';
+      startMouseX = evt.clientX;
+      startMouseY = evt.clientY;
+      const popupLatLng = popup.getLatLng() ?? map.getCenter();
+      startPoint = map.latLngToContainerPoint(popupLatLng);
+      map.dragging.disable();
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', stopDrag);
+      evt.preventDefault();
+      evt.stopPropagation();
+    };
+
+    handle.addEventListener('mousedown', onMouseDown);
+
+    const cleanup = () => {
+      stopDrag();
+      handle.style.cursor = '';
+      handle.removeEventListener('mousedown', onMouseDown);
+    };
+
+    const previousCleanup = popupCleanupRef.current.get(popup);
+    previousCleanup?.();
+    popupCleanupRef.current.set(popup, cleanup);
+  };
+
   useMapEvent('popupopen', (e) => {
     const popup = e.popup;
     const latlng = popup.getLatLng();
     const el = popup.getElement();
     if (!el || !latlng) return;
 
+    attachDraggable(popup, el);
+
     // Give the DOM a frame to finish rendering so offsetHeight is accurate
     requestAnimationFrame(() => {
+      if (!popup.isOpen() || !popup.getElement()) return;
       const markerPt = map.latLngToContainerPoint(latlng);
       const popupH = el.offsetHeight;
       const tipH = 14; // px for the leaflet popup tip
@@ -82,21 +173,56 @@ function PopupAutoFlip() {
       if (clipped || obscured) {
         // Flip: position popup below the marker
         popup.options.offset = [0, popupH + tipH * 2];
-        popup.update();
+        if (popup.isOpen()) popup.update();
       } else {
         popup.options.offset = [0, 0];
       }
     });
   });
+
+  useMapEvent('popupclose', (e) => {
+    const cleanup = popupCleanupRef.current.get(e.popup);
+    cleanup?.();
+    popupCleanupRef.current.delete(e.popup);
+  });
+
   return null;
 }
 
 function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
-  useMemo(() => { // eslint-disable-line
-    map.setMaxBounds(mapPanBounds(mapConfig));
-    map.fitBounds(mapBounds(mapConfig));
-  }, [mapConfig.id]); // eslint-disable-line
+  useEffect(() => {
+    const boundsExpr = mapBounds(mapConfig) as L.LatLngBoundsLiteral;
+    const bounds = L.latLngBounds(boundsExpr);
+
+    const syncViewBounds = () => {
+      const minZoom = map.getBoundsZoom(bounds, false);
+      map.setMinZoom(minZoom);
+      map.setMaxBounds(bounds);
+      map.panInsideBounds(bounds, { animate: false });
+      if (map.getZoom() < minZoom) {
+        map.setZoom(minZoom);
+      }
+    };
+
+    map.fitBounds(bounds, { animate: false });
+    syncViewBounds();
+    map.on('resize', syncViewBounds);
+
+    return () => {
+      map.off('resize', syncViewBounds);
+    };
+  }, [map, mapConfig.id]);
+  return null;
+}
+
+function MapVisibilitySync({ isActive }: { isActive: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    if (isActive) {
+      map.invalidateSize();
+    }
+  }, [isActive, map]);
   return null;
 }
 
@@ -111,7 +237,7 @@ function DayZTileLayer({ mapId }: { mapId: string }) {
       opacity:   1.0,
       minZoom:   DETAIL_MIN_ZOOM,
       maxZoom:   maxTileZoom,
-      keepBuffer: 8,
+      keepBuffer: 2,
       updateWhenZooming: false,
       updateWhenIdle: true,
     });
@@ -500,10 +626,15 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
         ...(zoneTier && zoneTier !== 'unknown' ? [zoneTier] : []),
         ...b.tiers,
       ]);
+      const protoTiers = TIER_ORDER.filter(t => b.tiers.includes(t));
       let displayTiers = TIER_ORDER.filter(t => mergedSet.has(t));
+      let inferredTier: string | null = null;
       if (displayTiers.length === 0) {
         const fallback = usageTierMap.get(primaryUsage);
-        if (fallback) displayTiers = [fallback];
+        if (fallback) {
+          displayTiers = [fallback];
+          inferredTier = fallback;
+        }
       }
       if (displayTiers.length === 0) displayTiers = ['unknown'];
 
@@ -512,7 +643,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const latlng = gameToLeaflet(b.x, b.z, mapConfig);
       if (!viewportBounds.contains(latlng)) return [];
 
-      return [{ b, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng }];
+      return [{ b, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng, zoneTier, protoTiers, inferredTier }];
     });
   }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig, viewportBounds]);
 
@@ -565,7 +696,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       <>
         {clusters.map((cluster, idx) => {
           if (cluster.pointCount === 1 && cluster.sampleEntry) {
-            const { b, displayTiers, usageColor, latlng } = cluster.sampleEntry;
+            const { b, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier } = cluster.sampleEntry;
 
             return (
               <Marker
@@ -576,9 +707,11 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
                 <Popup maxWidth={320} autoPan={false}>
                   <BuildingPopup
                     building={b}
-                    spawnableTypes={mission?.spawnableTypes ?? new Map()}
                     types={mission?.types ?? new Map()}
                     tiers={displayTiers}
+                    zoneTier={zoneTier}
+                    protoTiers={protoTiers}
+                    inferredTier={inferredTier}
                   />
                 </Popup>
               </Marker>
@@ -623,7 +756,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
 
   return (
     <>
-      {visible.map(({ b, displayTiers, usageColor, latlng }) => (
+      {visible.map(({ b, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier }) => (
         <Marker
           key={`${b.typeName}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`}
           position={latlng}
@@ -632,9 +765,11 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
           <Popup maxWidth={320} autoPan={false}>
             <BuildingPopup
               building={b}
-              spawnableTypes={mission?.spawnableTypes ?? new Map()}
               types={mission?.types ?? new Map()}
               tiers={displayTiers}
+              zoneTier={zoneTier}
+              protoTiers={protoTiers}
+              inferredTier={inferredTier}
             />
           </Popup>
         </Marker>
@@ -715,8 +850,10 @@ async function pickMapImage(
 }
 
 export function MapView() {
-  const { markers, mapConfig } = useMapMarkers();
+  const activeTab         = useUiStore(s => s.activeTab);
   const activeMap         = useUiStore(s => s.activeMap);
+  const isMapActive       = activeTab === 'map';
+  const { markers, mapConfig } = useMapMarkers(isMapActive);
   const setMapImagePath   = useUiStore(s => s.setMapImagePath);
   const setMapImageSize   = useUiStore(s => s.setMapImageSize);
   const mapEventFilter    = useUiStore(s => s.mapEventFilter);
@@ -739,6 +876,52 @@ export function MapView() {
   const togglePlayerSpawns     = useUiStore(s => s.togglePlayerSpawns);
   const buildingInstances      = useServerStore(s => s.buildingInstances);
   const playerSpawnData        = useServerStore(s => s.playerSpawnData);
+  const [overlaysReady, setOverlaysReady] = useState(false);
+  const [mapHeavyReady, setMapHeavyReady] = useState(false);
+
+  useEffect(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    let cancelled = false;
+    let idleId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let delayId: ReturnType<typeof setTimeout> | null = null;
+    const activatedAt = performance.now();
+
+    if (!isMapActive) {
+      setMapHeavyReady(false);
+      setOverlaysReady(false);
+      return;
+    }
+
+    const ready = () => {
+      if (cancelled) return;
+      const elapsed = performance.now() - activatedAt;
+      const minDelayMs = 300;
+      const remaining = Math.max(0, minDelayMs - elapsed);
+      delayId = setTimeout(() => {
+        if (cancelled) return;
+        setMapHeavyReady(true);
+        setOverlaysReady(true);
+      }, remaining);
+    };
+
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(ready, { timeout: 1500 });
+    } else {
+      timeoutId = setTimeout(ready, 350);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId !== null) idleWindow.cancelIdleCallback?.(idleId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (delayId !== null) clearTimeout(delayId);
+    };
+  }, [isMapActive, activeMap]);
 
   const eventNames = useMemo(
     () => [...new Set(markers.map(m => m.eventName))].sort(),
@@ -777,7 +960,7 @@ export function MapView() {
 
   // Auto-download overview for known maps that don't have a cached image yet.
   useEffect(() => {
-    if (!isKnownMap || hasImage || downloading) return;
+    if (!isMapActive || !isKnownMap || hasImage || downloading) return;
 
     let cancelled = false;
 
@@ -808,7 +991,7 @@ export function MapView() {
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMap, hasImage]);
+  }, [activeMap, hasImage, isMapActive]);
 
   // ── Custom map: no image yet ──────────────────────────────────────────────
   if (isCustomMap && !hasImage) {
@@ -886,26 +1069,26 @@ export function MapView() {
         preferCanvas
         bounds={bounds}
         maxBoundsViscosity={1.0}
-        minZoom={-3}
         maxZoom={maxLeafletZoom}
-        zoomAnimation
-        fadeAnimation
+        zoomAnimation={false}
+        fadeAnimation={false}
         style={{ height: '100%', width: '100%', background: '#0f1117' }}
       >
         <MapFitBounds mapConfig={mapConfig} />
+        <MapVisibilitySync isActive={isMapActive} />
         <PopupAutoFlip />
 
         {/* Background overview — hidden once detail zoom takes over */}
         <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
 
         {/* Detail tile layer — capped per map at the highest available xam zoom */}
-        {isKnownMap && <DayZTileLayer mapId={activeMap} />}
+        {isMapActive && mapHeavyReady && isKnownMap && <DayZTileLayer mapId={activeMap} />}
 
-        {initializedEventSignature === eventSignature && (
+        {isMapActive && mapHeavyReady && initializedEventSignature === eventSignature && (
           <EventMarkers markers={markers} mapConfig={mapConfig} />
         )}
-        <BuildingMarkers mapConfig={mapConfig} />
-        <PlayerSpawnMarkers mapConfig={mapConfig} />
+        {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
+        {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
       </MapContainer>
 
       <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2 pointer-events-none">
