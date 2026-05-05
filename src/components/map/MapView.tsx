@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, ImageOverlay, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvent } from 'react-leaflet';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, ImageOverlay, Circle, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvent } from 'react-leaflet';
 import L from 'leaflet';
 import { CRS } from 'leaflet';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -17,6 +17,7 @@ import { TierLegend } from './TierLegend';
 import { MarkerPopup } from './MarkerPopup';
 import { BuildingPopup } from './BuildingPopup';
 import type { ResolvedMarker } from '../../lib/lootResolver';
+import type { BuildingInstance, DayZType } from '../../types/dayz';
 import type { MapConfig } from '../../types/map';
 
 const TILE_MAPS = new Set(['namalsk', 'chernarus', 'livonia', 'sakhal']);
@@ -237,9 +238,9 @@ function DayZTileLayer({ mapId }: { mapId: string }) {
       opacity:   1.0,
       minZoom:   DETAIL_MIN_ZOOM,
       maxZoom:   maxTileZoom,
-      keepBuffer: 2,
-      updateWhenZooming: false,
-      updateWhenIdle: true,
+      keepBuffer: 4,
+      updateWhenZooming: true,
+      updateWhenIdle: false,
     });
 
     (layer as any).createTile = function (
@@ -318,10 +319,10 @@ function DayZTileLayer({ mapId }: { mapId: string }) {
 
 function OverviewOverlay({ mapConfig, bounds }: { mapConfig: MapConfig; bounds: L.LatLngBoundsExpression }) {
   const map = useMap();
-  const [opacity, setOpacity] = useState(() => (map.getZoom() >= 1 ? 0.18 : 0.9));
+  const [opacity, setOpacity] = useState(() => (map.getZoom() >= 1 ? 0.4 : 0.9));
 
   useMapEvent('zoomend', () => {
-    setOpacity(map.getZoom() >= 1 ? 0.18 : 0.9);
+    setOpacity(map.getZoom() >= 1 ? 0.4 : 0.9);
   });
 
   return <ImageOverlay url={mapConfig.imageUrl} bounds={bounds} opacity={opacity} />;
@@ -529,20 +530,118 @@ function EventMarkers({ markers, mapConfig }: { markers: ResolvedMarker[]; mapCo
   );
 }
 
-function buildingMarkerIcon(usageColor: string): L.DivIcon {
+function buildingMarkerIcon(usageColor: string, hasUnsavedChanges = false): L.DivIcon {
+  const cacheKey = `${usageColor}|${hasUnsavedChanges ? 'dirty' : 'clean'}`;
+  const cached = buildingMarkerIconCache.get(cacheKey);
+  if (cached) return cached;
   const size = BUILDING_MARKER_SIZE;
   const cx = size / 2;
   const cy = size / 2;
   const fillR = 5.5;
   const outlineR = 7.5;
   const outlineWidth = 1.5;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${outlineR}" fill="#0f1117" fill-opacity="0.7" stroke="#f8fafc" stroke-width="${outlineWidth}"/><circle cx="${cx}" cy="${cy}" r="${fillR}" fill="${usageColor}" fill-opacity="0.9"/></svg>`;
-  return L.divIcon({ html: svg, className: '', iconSize: [size, size], iconAnchor: [cx, cy], popupAnchor: [0, -cy] });
+  const saveIndigo = '#4f46e5'; // Tailwind indigo-600 (same as Save button)
+  const fillColor = hasUnsavedChanges ? saveIndigo : usageColor;
+  const outlineColor = hasUnsavedChanges ? '#818cf8' : '#f8fafc';
+  const fillOpacity = hasUnsavedChanges ? '1' : '0.9';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${outlineR}" fill="#0f1117" fill-opacity="0.7" stroke="${outlineColor}" stroke-width="${outlineWidth}"/><circle cx="${cx}" cy="${cy}" r="${fillR}" fill="${fillColor}" fill-opacity="${fillOpacity}"/></svg>`;
+  const className = hasUnsavedChanges ? 'building-marker building-marker--unsaved' : 'building-marker';
+  const icon = L.divIcon({ html: svg, className, iconSize: [size, size], iconAnchor: [cx, cy], popupAnchor: [0, -cy] });
+  buildingMarkerIconCache.set(cacheKey, icon);
+  return icon;
 }
+
+const buildingMarkerIconCache = new Map<string, L.DivIcon>();
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
+  building,
+  displayTiers,
+  usageColor,
+  latlng,
+  zoneTier,
+  protoTiers,
+  inferredTier,
+  hasUnsavedChanges,
+}: {
+  building: BuildingInstance;
+  displayTiers: string[];
+  usageColor: string;
+  latlng: L.LatLngExpression;
+  zoneTier: string | null;
+  protoTiers: string[];
+  inferredTier: string | null;
+  hasUnsavedChanges: boolean;
+}) {
+  return (
+    <Marker
+      position={latlng}
+      icon={buildingMarkerIcon(usageColor, hasUnsavedChanges)}
+    >
+      <Popup maxWidth={460} autoPan={false}>
+        <BuildingPopup
+          building={building}
+          tiers={displayTiers}
+          zoneTier={zoneTier}
+          protoTiers={protoTiers}
+          inferredTier={inferredTier}
+        />
+      </Popup>
+    </Marker>
+  );
+}, (prev, next) => (
+  prev.building === next.building
+  && prev.usageColor === next.usageColor
+  && prev.hasUnsavedChanges === next.hasUnsavedChanges
+  && prev.zoneTier === next.zoneTier
+  && prev.inferredTier === next.inferredTier
+  && sameStringArray(prev.displayTiers, next.displayTiers)
+  && sameStringArray(prev.protoTiers, next.protoTiers)
+));
+
+function containerMatchesType(type: DayZType, containerTags: string[], containerCategories: string[]): boolean {
+  const isUnrestricted = type.usages.length === 0 || type.usages.every(u => u === '');
+  const normalizedTags = containerTags.map(tag => tag.toLowerCase());
+  const normalizedCategories = containerCategories.map(category => category.toLowerCase());
+  const usageMatch =
+    isUnrestricted
+    || normalizedTags.length === 0
+    || type.usages.some(u => normalizedTags.includes(u.toLowerCase()));
+  const catMatch =
+    normalizedCategories.length > 0
+    && type.category !== null
+    && normalizedCategories.includes(type.category.toLowerCase());
+  return usageMatch && catMatch;
+}
+
+function normalizeUsageKey(usage: string): string {
+  return usage.trim().toLowerCase();
+}
+
+const USAGE_TIER_ALIASES: Record<string, string[]> = {
+  medic: ['medical'],
+  coast: ['civilian', 'fishing'],
+  town: ['civilian'],
+  village: ['civilian'],
+  office: ['civilian'],
+  school: ['civilian'],
+  prison: ['police', 'civilian'],
+  firefighter: ['industrial', 'civilian'],
+  farm: ['hunting', 'civilian'],
+  seasonalevent: ['civilian'],
+};
 
 function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
   const buildingInstances   = useServerStore(s => s.buildingInstances);
+  const mapGroupProto       = useServerStore(s => s.mapGroupProto);
+  const originalMapGroupProto = useServerStore(s => s.originalMapGroupProto);
+  const originalTypes       = useServerStore(s => s.originalTypes);
+  const typeHistory         = useServerStore(s => s.typeHistory);
+  const dirtyMapGroupProto  = useServerStore(s => s.dirty.mapGroupProto);
   const mission             = useServerStore(s => s.mission);
   const showBuildings       = useUiStore(s => s.showBuildings);
   const clusterZoomThreshold = useUiStore(s => s.mapClusterZoomThreshold);
@@ -552,6 +651,75 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const hiddenUsages        = useUiStore(s => s.hiddenUsages);
   const hiddenTiers         = useUiStore(s => s.hiddenTiers);
   const tierZonesLoaded     = useUiStore(s => s.tierZonesLoaded);
+
+  const dirtyTypeAffectedBuildingKeys = useMemo(() => {
+    if (!mission || typeHistory.length === 0) return new Set<string>();
+
+    const changedNames = [...new Set(typeHistory.map(entry => entry.name))];
+    const changedTypes: Array<{ current: DayZType; original: DayZType | null }> = [];
+    for (const name of changedNames) {
+      const current = mission.types.get(name);
+      if (!current) continue;
+      const original = originalTypes.get(name) ?? null;
+      changedTypes.push({ current, original });
+    }
+
+    if (changedTypes.length === 0) return new Set<string>();
+
+    const affected = new Set<string>();
+    for (const b of buildingInstances) {
+      const key = b.typeName.trim().toLowerCase();
+      let buildingAffected = false;
+
+      for (const { current, original } of changedTypes) {
+        if (buildingAffected) break;
+        for (const container of b.containers) {
+          const currentMatch = containerMatchesType(current, container.tags, container.categories);
+          const originalMatch = original ? containerMatchesType(original, container.tags, container.categories) : false;
+          if (currentMatch || originalMatch) {
+            buildingAffected = true;
+            break;
+          }
+        }
+      }
+
+      if (buildingAffected) affected.add(key);
+    }
+
+    return affected;
+  }, [mission, typeHistory, originalTypes, buildingInstances]);
+
+  const dirtyBuildingKeys = useMemo(() => {
+    const keys = new Set<string>(dirtyTypeAffectedBuildingKeys);
+    if (!dirtyMapGroupProto) return keys;
+
+    const sameEntry = (
+      a: { usages: string[]; tiers: string[]; lootmax: number; containers: Array<{ categories: string[]; tags: string[] }> } | undefined,
+      b: { usages: string[]; tiers: string[]; lootmax: number; containers: Array<{ categories: string[]; tags: string[] }> } | undefined,
+    ) => {
+      if (!a || !b) return a === b;
+      if (a.lootmax !== b.lootmax) return false;
+      if (!sameStringArray(a.usages, b.usages)) return false;
+      if (!sameStringArray(a.tiers, b.tiers)) return false;
+      if (a.containers.length !== b.containers.length) return false;
+      for (let i = 0; i < a.containers.length; i++) {
+        const ac = a.containers[i];
+        const bc = b.containers[i];
+        if (!sameStringArray(ac.categories, bc.categories)) return false;
+        if (!sameStringArray(ac.tags, bc.tags)) return false;
+      }
+      return true;
+    };
+
+    for (const [key, entry] of mapGroupProto) {
+      const original = originalMapGroupProto.get(key);
+      if (!sameEntry(entry, original)) keys.add(key);
+    }
+    for (const key of originalMapGroupProto.keys()) {
+      if (!mapGroupProto.has(key)) keys.add(key);
+    }
+    return keys;
+  }, [dirtyMapGroupProto, mapGroupProto, originalMapGroupProto, dirtyTypeAffectedBuildingKeys]);
 
   const [viewportBounds, setViewportBounds] = useState(() => map.getBounds().pad(0.2));
   useEffect(() => {
@@ -566,20 +734,45 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const usageTierMap = useMemo(() => {
     if (!mission) return new Map<string, string>();
     const counts = new Map<string, Map<string, number>>();
+
+    const pushCount = (usage: string, tier: string) => {
+      const normalizedUsage = normalizeUsageKey(usage);
+      if (!normalizedUsage) return;
+      if (!counts.has(normalizedUsage)) counts.set(normalizedUsage, new Map());
+      const usageCounts = counts.get(normalizedUsage)!;
+      usageCounts.set(tier, (usageCounts.get(tier) ?? 0) + 1);
+    };
+
     for (const type of mission.types.values()) {
-      const dominant = TIER_ORDER.find(t => type.tiers.includes(t));
-      if (!dominant) continue;
+      const tiers = TIER_ORDER.filter(t => type.tiers.includes(t));
+      if (tiers.length === 0) continue;
       for (const usage of type.usages) {
-        if (!counts.has(usage)) counts.set(usage, new Map());
-        const m = counts.get(usage)!;
-        m.set(dominant, (m.get(dominant) ?? 0) + 1);
+        for (const tier of tiers) pushCount(usage, tier);
       }
     }
+
     const result = new Map<string, string>();
+    const pickBestTier = (tierCounts: Map<string, number>): string | null => {
+      const best = [...tierCounts.entries()].sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return TIER_ORDER.indexOf(a[0]) - TIER_ORDER.indexOf(b[0]);
+      })[0];
+      return best?.[0] ?? null;
+    };
+
     for (const [usage, tierCounts] of counts) {
-      const best = [...tierCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (best) result.set(usage, best[0]);
+      const best = pickBestTier(tierCounts);
+      if (best) result.set(usage, best);
     }
+
+    for (const [usage, aliases] of Object.entries(USAGE_TIER_ALIASES)) {
+      if (result.has(usage)) continue;
+      const aliasTier = aliases
+        .map(alias => result.get(alias))
+        .find((tier): tier is string => !!tier);
+      if (aliasTier) result.set(usage, aliasTier);
+    }
+
     return result;
   }, [mission]);
 
@@ -593,47 +786,53 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const canonicalUsages = new Set(
         [...mission.types.values()]
           .filter(t => t.name.toLowerCase().includes(q))
-          .flatMap(t => t.usages)
+          .flatMap(t => t.usages.map(usage => usage.trim().toLowerCase()))
+          .filter(Boolean)
       );
       const rawTagUsages = new Set(
         [...mission.spawnableTypes.values()]
           .filter(st => st.name.toLowerCase().includes(q))
-          .flatMap(st => st.usages)
+          .flatMap(st => st.usages.map(usage => usage.trim().toLowerCase()))
       );
       if (canonicalUsages.size === 0 && rawTagUsages.size === 0) {
         itemFilter = () => false;
       } else {
         itemFilter = b =>
-          (canonicalUsages.size > 0 && b.usages.some(u => canonicalUsages.has(u))) ||
-          (rawTagUsages.size > 0 && b.containers.some(c => c.tags.some(t => rawTagUsages.has(t))));
+          (canonicalUsages.size > 0 && b.usages.some(u => canonicalUsages.has(u.trim().toLowerCase()))) ||
+          (rawTagUsages.size > 0 && b.containers.some(c => c.tags.some(t => rawTagUsages.has(t.toLowerCase()))));
       }
     }
 
     const nameQ = buildingNameFilter.trim().toLowerCase();
+    const hiddenUsageSet = new Set(hiddenUsages.map(u => u.trim().toLowerCase()));
 
     return buildingInstances.flatMap(b => {
       const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
-      const visibleUsages = normalizedUsages.filter(u => !hiddenUsages.includes(u));
+      const visibleUsages = normalizedUsages.filter(u => !hiddenUsageSet.has(u.trim().toLowerCase()));
       if (visibleUsages.length === 0) return [];
       const primaryUsage = visibleUsages[0];
       if (nameQ && !b.typeName.toLowerCase().includes(nameQ)) return [];
       if (buildingMinLootmax > 0 && b.lootmax < buildingMinLootmax) return [];
       if (itemFilter !== null && !itemFilter(b)) return [];
 
-      // Merge zone tier (areaflags, in-bounds only) with proto container tiers
+      // When zone tiers are available, treat zone tier as canonical for marker tiering.
+      // Proto tiers are still shown in popups for reference.
       const zoneTier = tierZonesLoaded ? sampleTierAtPos(b.x, b.z) : null;
-      const mergedSet = new Set<string>([
-        ...(zoneTier && zoneTier !== 'unknown' ? [zoneTier] : []),
-        ...b.tiers,
-      ]);
       const protoTiers = TIER_ORDER.filter(t => b.tiers.includes(t));
-      let displayTiers = TIER_ORDER.filter(t => mergedSet.has(t));
+      let displayTiers = zoneTier && zoneTier !== 'unknown'
+        ? [zoneTier]
+        : protoTiers;
       let inferredTier: string | null = null;
       if (displayTiers.length === 0) {
-        const fallback = usageTierMap.get(primaryUsage);
-        if (fallback) {
-          displayTiers = [fallback];
-          inferredTier = fallback;
+        const inferredSet = new Set<string>(
+          visibleUsages
+            .map(usage => usageTierMap.get(normalizeUsageKey(usage)))
+            .filter((tier): tier is string => !!tier)
+        );
+        const inferredTiers = TIER_ORDER.filter(t => inferredSet.has(t));
+        if (inferredTiers.length > 0) {
+          displayTiers = inferredTiers;
+          inferredTier = inferredTiers[0];
         }
       }
       if (displayTiers.length === 0) displayTiers = ['unknown'];
@@ -642,10 +841,13 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
 
       const latlng = gameToLeaflet(b.x, b.z, mapConfig);
       if (!viewportBounds.contains(latlng)) return [];
+      const dirtyKey = b.typeName.trim().toLowerCase();
+      const markerKey = `${dirtyKey}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`;
+      const hasUnsavedChanges = dirtyBuildingKeys.has(dirtyKey);
 
-      return [{ b, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng, zoneTier, protoTiers, inferredTier }];
+      return [{ b, markerKey, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng, zoneTier, protoTiers, inferredTier, hasUnsavedChanges }];
     });
-  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig, viewportBounds]);
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig, viewportBounds, dirtyBuildingKeys]);
 
   const zoom = map.getZoom();
   const showClusters = zoom <= clusterZoomThreshold;
@@ -696,25 +898,20 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       <>
         {clusters.map((cluster, idx) => {
           if (cluster.pointCount === 1 && cluster.sampleEntry) {
-            const { b, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier } = cluster.sampleEntry;
+            const { b, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier, hasUnsavedChanges } = cluster.sampleEntry;
 
             return (
-              <Marker
+              <BuildingMarkerEntry
                 key={`${b.typeName}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`}
-                position={latlng}
-                icon={buildingMarkerIcon(usageColor)}
-              >
-                <Popup maxWidth={320} autoPan={false}>
-                  <BuildingPopup
-                    building={b}
-                    types={mission?.types ?? new Map()}
-                    tiers={displayTiers}
-                    zoneTier={zoneTier}
-                    protoTiers={protoTiers}
-                    inferredTier={inferredTier}
-                  />
-                </Popup>
-              </Marker>
+                building={b}
+                displayTiers={displayTiers}
+                usageColor={usageColor}
+                latlng={latlng}
+                zoneTier={zoneTier}
+                protoTiers={protoTiers}
+                inferredTier={inferredTier}
+                hasUnsavedChanges={hasUnsavedChanges}
+              />
             );
           }
 
@@ -756,23 +953,18 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
 
   return (
     <>
-      {visible.map(({ b, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier }) => (
-        <Marker
-          key={`${b.typeName}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`}
-          position={latlng}
-          icon={buildingMarkerIcon(usageColor)}
-        >
-          <Popup maxWidth={320} autoPan={false}>
-            <BuildingPopup
-              building={b}
-              types={mission?.types ?? new Map()}
-              tiers={displayTiers}
-              zoneTier={zoneTier}
-              protoTiers={protoTiers}
-              inferredTier={inferredTier}
-            />
-          </Popup>
-        </Marker>
+      {visible.map(({ b, markerKey, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier, hasUnsavedChanges }) => (
+        <BuildingMarkerEntry
+          key={markerKey}
+          building={b}
+          displayTiers={displayTiers}
+          usageColor={usageColor}
+          latlng={latlng}
+          zoneTier={zoneTier}
+          protoTiers={protoTiers}
+          inferredTier={inferredTier}
+          hasUnsavedChanges={hasUnsavedChanges}
+        />
       ))}
     </>
   );
@@ -800,6 +992,68 @@ function playerSpawnIcon(type: string): L.DivIcon {
     iconAnchor: [c, c],
     popupAnchor: [0, -c],
   });
+}
+
+function CeToolZoneOverlays({ mapConfig, show }: { mapConfig: MapConfig; show: boolean }) {
+  const ceToolProject = useServerStore(s => s.ceToolProject);
+  const map = useMap();
+  const [viewportBounds, setViewportBounds] = useState(() => map.getBounds().pad(0.2));
+
+  useEffect(() => {
+    const updateBounds = () => setViewportBounds(map.getBounds().pad(0.2));
+    map.on('moveend zoomend', updateBounds);
+    return () => {
+      map.off('moveend zoomend', updateBounds);
+    };
+  }, [map]);
+
+  const zones = useMemo(() => {
+    if (!show || !ceToolProject) return [];
+    const scale = mapConfig.imageWidth / mapConfig.worldWidth;
+    return ceToolProject.territories.flatMap(territory =>
+      territory.zones.flatMap(zone => {
+        const center = gameToLeaflet(zone.x, zone.z, mapConfig);
+        if (!viewportBounds.contains(center)) return [];
+        const radius = Math.max(2, zone.r * scale);
+        return [{
+          key: `${territory.type}-${territory.name}-${zone.name}-${zone.x.toFixed(2)}-${zone.z.toFixed(2)}`,
+          center,
+          radius,
+          territory,
+          zone,
+          color: getUsageColor(territory.type || territory.name || 'unknown'),
+        }];
+      })
+    );
+  }, [show, ceToolProject, mapConfig, viewportBounds]);
+
+  if (!show || zones.length === 0) return null;
+
+  return (
+    <>
+      {zones.map(entry => (
+        <Circle
+          key={entry.key}
+          center={entry.center}
+          radius={entry.radius}
+          pathOptions={{
+            color: entry.color,
+            fillColor: entry.color,
+            fillOpacity: 0.16,
+            opacity: 0.7,
+            weight: 1.2,
+          }}
+        >
+          <Tooltip sticky direction="top" opacity={0.95}>
+            <div className="text-xs">
+              <div className="font-medium text-slate-100">{entry.zone.name || 'Zone'}</div>
+              <div className="text-slate-300">{entry.territory.type} / {entry.territory.name}</div>
+            </div>
+          </Tooltip>
+        </Circle>
+      ))}
+    </>
+  );
 }
 
 function PlayerSpawnMarkers({ mapConfig }: { mapConfig: MapConfig }) {
@@ -876,6 +1130,8 @@ export function MapView() {
   const togglePlayerSpawns     = useUiStore(s => s.togglePlayerSpawns);
   const buildingInstances      = useServerStore(s => s.buildingInstances);
   const playerSpawnData        = useServerStore(s => s.playerSpawnData);
+  const ceToolProject          = useServerStore(s => s.ceToolProject);
+  const mission                = useServerStore(s => s.mission);
   const [overlaysReady, setOverlaysReady] = useState(false);
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
 
@@ -951,6 +1207,8 @@ export function MapView() {
   const [downloadError, setDownloadError]   = useState<string | null>(null);
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
+  const [showCeZones, setShowCeZones] = useState(false);
+  const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
   const isKnownMap  = TILE_MAPS.has(activeMap);
@@ -1070,8 +1328,12 @@ export function MapView() {
         bounds={bounds}
         maxBoundsViscosity={1.0}
         maxZoom={maxLeafletZoom}
-        zoomAnimation={false}
-        fadeAnimation={false}
+        zoomAnimation
+        fadeAnimation
+        markerZoomAnimation
+        zoomSnap={0.25}
+        zoomDelta={0.25}
+        wheelPxPerZoomLevel={120}
         style={{ height: '100%', width: '100%', background: '#0f1117' }}
       >
         <MapFitBounds mapConfig={mapConfig} />
@@ -1089,7 +1351,40 @@ export function MapView() {
         )}
         {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
         {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
+        {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
       </MapContainer>
+
+      {/* CE Tool not found notice */}
+      {mission && !ceToolProject && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-[420px] max-w-[90vw] bg-slate-900/95 border border-amber-700/60 rounded-xl shadow-xl backdrop-blur p-4 pointer-events-auto">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-amber-400 font-semibold text-sm mb-1">CE Tool data unavailable</p>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                CE Tool was not found for this mission, so tiers and usage zones cannot be shown. Place your CE Tool project folder inside this mission folder (named <span className="text-slate-200 font-mono">CETool</span> or <span className="text-slate-200 font-mono">Central Economy Tool</span>), or pick it manually.
+              </p>
+              <p className="text-slate-500 text-xs mt-1">
+                Don't have CE Tool?{' '}
+                <a
+                  href="https://github.com/BohemiaInteractive/DayZ-Central-Economy"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-indigo-400 hover:text-indigo-300 underline"
+                  onClick={e => e.stopPropagation()}
+                >
+                  Get it on GitHub
+                </a>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={async () => { await pickCeToolFolder?.(); }}
+            className="mt-3 w-full bg-amber-700/30 hover:bg-amber-700/50 border border-amber-700/60 text-amber-300 text-xs font-medium py-1.5 rounded-lg transition-colors"
+          >
+            Browse for CE Tool folder…
+          </button>
+        </div>
+      )}
 
       <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2 pointer-events-none">
         {/* Filters controls column */}
@@ -1203,6 +1498,17 @@ export function MapView() {
           </div>
         )}
 
+        {ceToolProject && ceToolProject.territories.length > 0 && (
+          <div className="pointer-events-auto">
+            <button
+              onClick={() => setShowCeZones(v => !v)}
+              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showCeZones ? 'border-cyan-500 text-cyan-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+            >
+              CE Zones
+            </button>
+          </div>
+        )}
+
         {/* Buildings controls column */}
         {buildingInstances.length > 0 && (
           <div className="flex flex-col items-end gap-2 pointer-events-auto">
@@ -1223,6 +1529,7 @@ export function MapView() {
         <div className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-1.5 backdrop-blur text-xs text-slate-400">
           {markers.length} events · {markers.reduce((s, m) => s + m.positions.length, 0)} spawn points
           {buildingInstances.length > 0 && ` · ${buildingInstances.length.toLocaleString()} buildings`}
+          {ceToolProject && ` · ${ceToolProject.territories.length} CE territories`}
         </div>
         <div className="flex items-center gap-2">
           <div className="h-8 bg-slate-900/90 border border-slate-700 rounded-lg px-2 backdrop-blur flex items-center gap-2">

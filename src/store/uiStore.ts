@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { MapId } from '../types/map';
 
-export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy';
+export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay';
 
 export interface BuildingLootOverride {
   blockItems: string[];
@@ -13,6 +13,7 @@ export interface BuildingLootOverride {
 interface UiState {
   activeTab: ActiveTab;
   activeMap: MapId;
+  showSaveReview: boolean;
   selectedEventName: string | null;
   typeFilter: string;
   categoryFilter: string;
@@ -41,6 +42,7 @@ interface UiState {
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
+  setShowSaveReview: (v: boolean) => void;
   setSelectedEvent: (name: string | null) => void;
   setTypeFilter: (v: string) => void;
   setCategoryFilter: (v: string) => void;
@@ -123,6 +125,7 @@ function readBuildingLootOverrides(): Record<string, BuildingLootOverride> {
 export const useUiStore = create<UiState>((set) => ({
   activeTab: 'map',
   activeMap: 'namalsk',
+  showSaveReview: false,
   selectedEventName: null,
   typeFilter: '',
   categoryFilter: '',
@@ -141,6 +144,7 @@ export const useUiStore = create<UiState>((set) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setActiveMap: (map) => set({ activeMap: map }),
+  setShowSaveReview: (v) => set({ showSaveReview: v }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
   setTypeFilter: (v) => set({ typeFilter: v }),
   setCategoryFilter: (v) => set({ categoryFilter: v }),

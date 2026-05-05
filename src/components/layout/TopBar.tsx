@@ -14,6 +14,8 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'events',        label: '⚡ Events' },
   { id: 'spawns',        label: '📍 Event Spawn Points' },
   { id: 'economy',       label: '⚙ Economy Core' },
+  { id: 'weather',       label: '🌤 Weather' },
+  { id: 'gameplay',      label: '⚗ Gameplay' },
 ];
 
 const MAPS: { id: MapId; label: string }[] = [
@@ -56,12 +58,26 @@ export function TopBar({
   const saveEvents = useServerStore(s => s.saveEvents);
   const saveSpawnableTypes = useServerStore(s => s.saveSpawnableTypes);
   const saveMapGroupProto = useServerStore(s => s.saveMapGroupProto);
+  const saveWeather = useServerStore(s => s.saveWeather);
+  const saveGameplay = useServerStore(s => s.saveGameplay);
+  const saveCheckpoints = useServerStore(s => s.saveCheckpoints);
+  const createSaveCheckpointFromDirty = useServerStore(s => s.createSaveCheckpointFromDirty);
+  const revertSaveCheckpoint = useServerStore(s => s.revertSaveCheckpoint);
+  const revertTypesSource = useServerStore(s => s.revertTypesSource);
+  const revertEventSpawns = useServerStore(s => s.revertEventSpawns);
+  const revertEvents = useServerStore(s => s.revertEvents);
+  const revertSpawnableTypes = useServerStore(s => s.revertSpawnableTypes);
+  const revertMapGroupProto = useServerStore(s => s.revertMapGroupProto);
+  const revertWeather = useServerStore(s => s.revertWeather);
+  const revertGameplay = useServerStore(s => s.revertGameplay);
   const undoType = useServerStore(s => s.undoType);
   const typeHistory = useServerStore(s => s.typeHistory);
   const activeTab = useUiStore(s => s.activeTab);
   const setActiveTab = useUiStore(s => s.setActiveTab);
   const activeMap = useUiStore(s => s.activeMap);
   const setActiveMap = useUiStore(s => s.setActiveMap);
+  const showSaveReview = useUiStore(s => s.showSaveReview);
+  const setShowSaveReview = useUiStore(s => s.setShowSaveReview);
   const isLoading = useUiStore(s => s.isLoading);
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [preparingOffline, setPreparingOffline] = useState(false);
@@ -69,6 +85,7 @@ export function TopBar({
   const [offlineStatus, setOfflineStatus] = useState<string | null>(null);
   const [offlineCurrentMap, setOfflineCurrentMap] = useState<string | null>(null);
   const [offlineStatuses, setOfflineStatuses] = useState<Record<string, OfflineCacheStatus>>({});
+  const offlineRefreshInFlightRef = useRef(false);
   const [savingPending, setSavingPending] = useState(false);
   const offlinePanelRef = useRef<HTMLDivElement | null>(null);
   const pendingTabRef = useRef<ActiveTab | null>(null);
@@ -90,17 +107,39 @@ export function TopBar({
     setActiveTab(targetTab);
   };
 
-  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto;
-  const pendingSummary: string[] = [];
-  if (dirty.typesSources.length > 0) pendingSummary.push(`${dirty.typesSources.length} types`);
-  if (dirty.eventSpawns) pendingSummary.push('spawns');
-  if (dirty.events) pendingSummary.push('events');
-  if (dirty.spawnableTypes) pendingSummary.push('spawnable');
-  if (dirty.mapGroupProto) pendingSummary.push('mapgroup');
+  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay;
+  const pendingItems: Array<{ id: string; label: string; detail: string; onRevert: () => void }> = [
+    ...dirty.typesSources.map(source => ({
+      id: `types:${source}`,
+      label: 'types.xml source',
+      detail: source.split(/[\\/]/).pop() ?? source,
+      onRevert: () => revertTypesSource(source),
+    })),
+    ...(dirty.eventSpawns
+      ? [{ id: 'eventSpawns', label: 'cfgeventspawns.xml', detail: 'Event spawn positions', onRevert: () => revertEventSpawns() }]
+      : []),
+    ...(dirty.events
+      ? [{ id: 'events', label: 'events.xml', detail: 'Event definitions', onRevert: () => revertEvents() }]
+      : []),
+    ...(dirty.spawnableTypes
+      ? [{ id: 'spawnableTypes', label: 'cfgspawnabletypes.xml', detail: 'Spawnable type sets', onRevert: () => revertSpawnableTypes() }]
+      : []),
+    ...(dirty.mapGroupProto
+      ? [{ id: 'mapGroupProto', label: 'mapgroupproto.xml', detail: 'Building category containers', onRevert: () => revertMapGroupProto() }]
+      : []),
+    ...(dirty.weather
+      ? [{ id: 'weather', label: 'weather.xml', detail: 'Weather configuration', onRevert: () => revertWeather() }]
+      : []),
+    ...(dirty.gameplay
+      ? [{ id: 'gameplay', label: 'gameplay.json', detail: 'Gameplay settings', onRevert: () => revertGameplay() }]
+      : []),
+  ];
   const isKnownMap = OFFLINE_MAP_ORDER.includes(activeMap);
   const currentMapReady = isKnownMap && !!offlineStatuses[activeMap]?.ready;
 
   const refreshOfflineStatuses = async () => {
+    if (offlineRefreshInFlightRef.current) return;
+    offlineRefreshInFlightRef.current = true;
     try {
       const statuses = await invoke<OfflineCacheStatus[]>('get_offline_cache_statuses');
       const next: Record<string, OfflineCacheStatus> = {};
@@ -108,6 +147,8 @@ export function TopBar({
       setOfflineStatuses(next);
     } catch {
       // Ignore status refresh errors in top bar.
+    } finally {
+      offlineRefreshInFlightRef.current = false;
     }
   };
 
@@ -172,6 +213,61 @@ export function TopBar({
   }, [showOfflinePanel, activeMap]);
 
   useEffect(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    let idleId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleRefresh = (immediate: boolean) => {
+      if (preparingOffline) return;
+
+      const run = () => {
+        if (document.hidden || preparingOffline) return;
+        void refreshOfflineStatuses();
+      };
+
+      if (immediate) {
+        run();
+        return;
+      }
+
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(run, { timeout: 1200 });
+        return;
+      }
+
+      timeoutId = setTimeout(run, 250);
+    };
+
+    // Seed quickly, then keep status reasonably fresh without frequent work.
+    scheduleRefresh(true);
+    const intervalId = setInterval(() => scheduleRefresh(false), 180000);
+
+    const onOnline = () => scheduleRefresh(true);
+    const onFocus = () => scheduleRefresh(false);
+    const onVisible = () => {
+      if (!document.hidden) scheduleRefresh(false);
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(intervalId);
+      if (idleId !== null) idleWindow.cancelIdleCallback?.(idleId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preparingOffline]);
+
+  useEffect(() => {
     let unlistenProgress: (() => void) | undefined;
     let unlistenMap: (() => void) | undefined;
     (async () => {
@@ -213,6 +309,12 @@ export function TopBar({
     });
   }, [activeTab]);
 
+  useEffect(() => {
+    if (showSaveReview && !hasDirty) {
+      setShowSaveReview(false);
+    }
+  }, [showSaveReview, hasDirty]);
+
   const handleTabClick = (tabId: ActiveTab) => {
     pendingTabRef.current = tabId;
 
@@ -239,11 +341,11 @@ export function TopBar({
 
   const savePendingChanges = async () => {
     if (savingPending || !hasDirty) return;
-    const proceed = window.confirm(`Save pending changes (${pendingSummary.join(', ')})?`);
-    if (!proceed) return;
 
     setSavingPending(true);
     try {
+      createSaveCheckpointFromDirty('TopBar save');
+      setShowSaveReview(false);
       if (dirty.mapGroupProto) await saveMapGroupProto();
       const typeSources = [...dirty.typesSources];
       for (const source of typeSources) {
@@ -252,9 +354,30 @@ export function TopBar({
       if (dirty.eventSpawns) await saveEventSpawns();
       if (dirty.events) await saveEvents();
       if (dirty.spawnableTypes) await saveSpawnableTypes();
+      if (dirty.weather) await saveWeather();
+      if (dirty.gameplay) await saveGameplay();
     } finally {
       setSavingPending(false);
     }
+  };
+
+  const undoLastSave = () => {
+    if (saveCheckpoints.length === 0) return;
+    const proceed = window.confirm('Revert the most recent saved changes?\n\nThis will restore previous values in the editor and stage them as pending changes.');
+    if (!proceed) return;
+    revertSaveCheckpoint();
+  };
+
+  const revertAllPending = () => {
+    for (const source of dirty.typesSources) {
+      revertTypesSource(source);
+    }
+    if (dirty.eventSpawns) revertEventSpawns();
+    if (dirty.events) revertEvents();
+    if (dirty.spawnableTypes) revertSpawnableTypes();
+    if (dirty.mapGroupProto) revertMapGroupProto();
+    if (dirty.weather) revertWeather();
+    if (dirty.gameplay) revertGameplay();
   };
 
   return (
@@ -334,7 +457,7 @@ export function TopBar({
               </button>
 
               {showOfflinePanel && (
-                <div className="absolute top-full right-0 mt-2 bg-slate-900/95 border border-slate-700 rounded-lg p-3 backdrop-blur w-[320px] z-20">
+                <div className="absolute top-full right-0 mt-2 bg-slate-900/95 border border-slate-700 rounded-lg p-3 backdrop-blur w-[320px] z-40">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <span className="text-xs font-medium text-slate-300">Offline Cache</span>
                     <span className="text-[11px] text-slate-500">{preparingOffline ? `${Math.round(offlineProgress * 100)}%` : 'Idle'}</span>
@@ -406,26 +529,89 @@ export function TopBar({
       </div>
 
       <div className="absolute bottom-2 right-4 z-30 flex items-center gap-1.5">
-        {typeHistory.length > 0 && (
-          <button
-            onClick={undoType}
-            title={`Undo (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})`}
-            className="h-8 px-3 rounded-lg border border-slate-600 bg-slate-800 text-slate-300 hover:text-slate-100 hover:border-slate-500 text-xs font-medium transition-colors"
-          >
-            ↩ Undo
-          </button>
-        )}
-        {hasDirty && (
-          <button
-            onClick={() => { void savePendingChanges(); }}
-            disabled={savingPending}
-            className="h-8 px-3 rounded-lg text-sm font-medium transition-all bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 flex items-center gap-2"
-          >
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            {savingPending ? 'Saving…' : 'Save'}
-          </button>
-        )}
+        <button
+          onClick={typeHistory.length > 0 ? undoType : undoLastSave}
+          disabled={typeHistory.length === 0 && saveCheckpoints.length === 0}
+          title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : 'Revert most recent saved change set'}
+          className="h-8 px-3 rounded-lg text-sm font-medium transition-all bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 flex items-center gap-1.5"
+        >
+          <span aria-hidden="true">↩</span>
+          Undo
+        </button>
+        <button
+          onClick={() => setShowSaveReview(true)}
+          disabled={savingPending || !hasDirty}
+          className="h-8 px-3 rounded-lg text-sm font-medium transition-all bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 flex items-center gap-2"
+        >
+          {hasDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+          <span aria-hidden="true">💾</span>
+          {savingPending ? 'Saving…' : 'Save'}
+        </button>
       </div>
+
+      {showSaveReview && hasDirty && (
+        <div className="fixed inset-0 z-[5000] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-lg overflow-hidden shadow-2xl">
+            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-100">Review Pending Changes</div>
+                <div className="text-xs text-slate-400">Selectively revert items or confirm save.</div>
+              </div>
+              <button
+                onClick={() => setShowSaveReview(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+                title="Close"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="max-h-[50vh] overflow-y-auto p-3 space-y-2">
+              {pendingItems.map(item => (
+                <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-xs text-slate-200 truncate">{item.label}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{item.detail}</div>
+                  </div>
+                  <button
+                    onClick={item.onRevert}
+                    disabled={savingPending}
+                    className="h-7 px-2 rounded border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200 text-xs disabled:opacity-50"
+                  >
+                    Revert
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-4 py-3 border-t border-slate-700 flex items-center justify-between gap-2">
+              <button
+                onClick={revertAllPending}
+                disabled={savingPending || pendingItems.length === 0}
+                className="h-8 px-3 rounded-lg border border-rose-700/70 bg-rose-900/30 text-rose-300 hover:text-rose-200 text-xs disabled:opacity-50"
+              >
+                Revert All
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowSaveReview(false)}
+                  disabled={savingPending}
+                  className="h-8 px-3 rounded-lg border border-slate-600 bg-slate-800 text-slate-300 hover:text-slate-100 text-xs disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { void savePendingChanges(); }}
+                  disabled={savingPending || pendingItems.length === 0}
+                  className="h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium disabled:opacity-50"
+                >
+                  {savingPending ? 'Saving…' : `Confirm Save (${pendingItems.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab row */}
       <div className="flex gap-1 px-4 pb-0">

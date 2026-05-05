@@ -15,22 +15,42 @@ export interface DayZType {
   min: number;
   quantmin: number;
   quantmax: number;
+  quantminPresent?: boolean;
+  quantmaxPresent?: boolean;
   cost: number;
   flags: DayZTypeFlags;
   category: string | null;
   usages: string[];
   tiers: string[];
+  tags?: string[];
   source: string;
 }
 
 export interface EventSpawnPos {
   x: number;
   z: number;
+  rawX?: string;
+  rawZ?: string;
+  extraAttrs?: Record<string, string>;
+}
+
+export interface EventSpawnZone {
+  smin: number;
+  smax: number;
+  dmin: number;
+  dmax: number;
+  r: number;
+  rawSmin?: string;
+  rawSmax?: string;
+  rawDmin?: string;
+  rawDmax?: string;
+  rawR?: string;
 }
 
 export interface EventSpawnDef {
   eventName: string;
   positions: EventSpawnPos[];
+  zones?: EventSpawnZone[];
 }
 
 export interface EventChild {
@@ -52,21 +72,35 @@ export interface DayZEvent {
   distanceradius: number;
   cleanupradius: number;
   active: 0 | 1;
+  flags?: {
+    deletable?: 0 | 1;
+    init_random?: 0 | 1;
+    remove_damaged?: 0 | 1;
+    sec_spawner?: 0 | 1;
+  };
+  position?: string;
+  limit?: string;
+  secondary?: string;
   children: EventChild[];
 }
 
 export interface SpawnableItem {
   name: string;
   chance: number;
+  rawChance?: string;
 }
 
 export interface SpawnableCargo {
   chance: number;
+  rawChance?: string;
+  preset?: string;
   items: SpawnableItem[];
 }
 
 export interface SpawnableAttachments {
   chance: number;
+  rawChance?: string;
+  preset?: string;
   items: SpawnableItem[];
 }
 
@@ -77,6 +111,9 @@ export interface SpawnableType {
   tags: string[];
   cargo: SpawnableCargo[];
   attachments: SpawnableAttachments[];
+  hoarder?: boolean;
+  damage?: { min: number; max: number; rawMin?: string; rawMax?: string };
+  source: string;
 }
 
 export interface ContainerDef {
@@ -107,6 +144,8 @@ export type DirtyFlags = {
   events: boolean;
   spawnableTypes: boolean;
   mapGroupProto: boolean;
+  weather: boolean;
+  gameplay: boolean;
 };
 
 export interface CeFile {
@@ -148,4 +187,99 @@ export interface BuildingInstance {
   containers: ContainerDef[];
   x: number;
   z: number;
+}
+
+export interface WeatherValue {
+  current: { actual: number; time: number; duration: number; rawActual?: string };
+  limits: { min: number; max: number; rawMin?: string; rawMax?: string };
+  timelimits?: { min: number; max: number };
+  changelimits?: { min: number; max: number; rawMin?: string; rawMax?: string };
+  thresholds?: { min: number; max: number; end: number };
+}
+
+export interface WeatherData {
+  reset: number;
+  enable: number;
+  overcast: WeatherValue;
+  fog: WeatherValue;
+  rain: WeatherValue;
+  windMagnitude: WeatherValue;
+  windDirection: WeatherValue;
+  snowfall: WeatherValue;
+  storm: { density: number; threshold: number; timeout: number; rawDensity?: string; rawThreshold?: string };
+  rawData?: Record<string, unknown>;
+}
+
+export interface GameplayStaminaData {
+  sprintStaminaModifierErc: number;
+  sprintStaminaModifierCro: number;
+  staminaWeightLimitThreshold: number;
+  staminaMax: number;
+  staminaKgToStaminaPercentPenalty: number;
+  staminaMinCap: number;
+  sprintSwimmingStaminaModifier: number;
+  sprintLadderStaminaModifier: number;
+  meleeStaminaModifier: number;
+  obstacleTraversalStaminaModifier: number;
+  holdBreathStaminaModifier: number;
+  rawValues?: Record<string, string>;
+}
+
+export interface GameplayPlayerData {
+  ShockHandlingData?: { shockRefillSpeedUnconscious: number; rawValue?: string };
+  StaminaData?: GameplayStaminaData;
+}
+
+export interface GameplayData {
+  version: number;
+  PlayerData?: GameplayPlayerData;
+  WorldsData?: {
+    environmentMinTemps?: number[];
+    environmentMaxTemps?: number[];
+    rawMinTemps?: string;
+    rawMaxTemps?: string;
+  };
+  rawData?: Record<string, unknown>;
+}
+
+export interface CeToolLayer {
+  name: string;
+  usageFlags: number;
+  valueFlags: number;
+  visible: boolean;
+  color: number;
+}
+
+export interface CeToolZone {
+  name: string;
+  x: number;
+  z: number;
+  r: number;
+  d: number;
+  smin: number;
+  smax: number;
+  dmin: number;
+  dmax: number;
+}
+
+export interface CeToolTerritory {
+  type: string;
+  name: string;
+  visible: boolean;
+  color: number;
+  zones: CeToolZone[];
+}
+
+export interface CeToolProject {
+  sourcePath: string;
+  projectName: string;
+  projectDir: string;
+  backgroundFile: string;
+  layerSize: number;
+  worldSize: number;
+  usages: string[];
+  values: string[];
+  layers: CeToolLayer[];
+  tierLayerNames: Partial<Record<string, string>>;
+  territories: CeToolTerritory[];
 }

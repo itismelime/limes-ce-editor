@@ -10,13 +10,18 @@ function PosRow({ pos, onUpdate, onDelete }: {
   onUpdate: (pos: EventSpawnPos) => void;
   onDelete: () => void;
 }) {
-  const [x, setX] = useState(String(pos.x));
-  const [z, setZ] = useState(String(pos.z));
+  const [x, setX] = useState(pos.rawX ?? String(pos.x));
+  const [z, setZ] = useState(pos.rawZ ?? String(pos.z));
+
+  useEffect(() => {
+    setX(pos.rawX ?? String(pos.x));
+    setZ(pos.rawZ ?? String(pos.z));
+  }, [pos.rawX, pos.rawZ, pos.x, pos.z]);
 
   const commit = () => {
     const nx = parseFloat(x);
     const nz = parseFloat(z);
-    if (!isNaN(nx) && !isNaN(nz)) onUpdate({ x: nx, z: nz });
+    if (!isNaN(nx) && !isNaN(nz)) onUpdate({ x: nx, z: nz, rawX: x.trim(), rawZ: z.trim() });
   };
 
   return (
@@ -82,7 +87,7 @@ export function EventSpawnsEditor() {
   const addPos = (eventName: string) => {
     const next = mission.eventSpawns.map(e => {
       if (e.eventName !== eventName) return e;
-      return { ...e, positions: [...e.positions, { x: 0, z: 0 }] };
+      return { ...e, positions: [...e.positions, { x: 0, z: 0, rawX: '0', rawZ: '0' }] };
     });
     setEventSpawns(next);
   };

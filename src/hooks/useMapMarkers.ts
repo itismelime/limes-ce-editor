@@ -4,8 +4,16 @@ import { useUiStore } from '../store/uiStore';
 import { resolveLoot } from '../lib/lootResolver';
 import { MAP_CONFIGS } from '../lib/mapConfig';
 
+const EMPTY_EVENTS = new Map();
+const EMPTY_SPAWNABLE_TYPES = new Map();
+const EMPTY_TYPES = new Map();
+
 export function useMapMarkers(enabled = true) {
-  const mission    = useServerStore(s => s.mission);
+  const missionName = useServerStore(s => s.mission?.missionName ?? '');
+  const eventSpawns = useServerStore(s => s.mission?.eventSpawns ?? []);
+  const events = useServerStore(s => s.mission?.events ?? EMPTY_EVENTS);
+  const spawnableTypes = useServerStore(s => s.mission?.spawnableTypes ?? EMPTY_SPAWNABLE_TYPES);
+  const originalTypes = useServerStore(s => s.originalTypes ?? EMPTY_TYPES);
   const activeMap  = useUiStore(s => s.activeMap);
   const mapImagePaths  = useUiStore(s => s.mapImagePaths);
   const mapImageSizes  = useUiStore(s => s.mapImageSizes);
@@ -29,11 +37,23 @@ export function useMapMarkers(enabled = true) {
     return { ...base, imageUrl, imageWidth, imageHeight };
   }, [activeMap, mapImagePaths, mapImageSizes, customMapUrl, customMapWidth, customMapHeight]);
 
+  const markerMission = useMemo(() => {
+    if (!missionName) return null;
+    return {
+      missionName,
+      eventSpawns,
+      events,
+      spawnableTypes,
+      // Keep event markers stable while unsaved types edits are being staged from building popups.
+      types: originalTypes,
+    };
+  }, [missionName, eventSpawns, events, spawnableTypes, originalTypes]);
+
   const markers = useMemo(() => {
-    if (!mission || !enabled) return [];
-    const result = resolveLoot(mission, mapConfig);
+    if (!markerMission || !enabled) return [];
+    const result = resolveLoot(markerMission, mapConfig);
     return result;
-  }, [mission, mapConfig, enabled]);
+  }, [markerMission, mapConfig, enabled]);
 
   return { markers, mapConfig };
 }

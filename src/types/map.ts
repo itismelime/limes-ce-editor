@@ -39,6 +39,30 @@ const TYPE_COLORS: Record<string, string> = {
   village: '#ec4899',
 };
 
+const CANONICAL_USAGE_LABELS: Record<string, string> = {
+  civilian: 'Civilian',
+  coast: 'Coast',
+  farm: 'Farm',
+  firefighter: 'Firefighter',
+  fishing: 'Fishing',
+  floor: 'Floor',
+  hunting: 'Hunting',
+  industrial: 'Industrial',
+  medic: 'Medic',
+  medical: 'Medical',
+  military: 'Military',
+  office: 'Office',
+  police: 'Police',
+  prison: 'Prison',
+  school: 'School',
+  seaice: 'SeaIce',
+  seasonalevent: 'SeasonalEvent',
+  shelves: 'Shelves',
+  town: 'Town',
+  village: 'Village',
+  unknown: 'Unknown',
+};
+
 // Fallback palette for unknown type names.
 const COLOR_PALETTE = [
   '#dc2626', '#3b82f6', '#0ea5e9', '#f59e0b', '#84cc16',
@@ -56,4 +80,10 @@ export function getUsageColor(usage: string): string {
   let h = 5381;
   for (let i = 0; i < normalizedUsage.length; i++) h = (((h << 5) + h) ^ normalizedUsage.charCodeAt(i)) >>> 0;
   return COLOR_PALETTE[h % COLOR_PALETTE.length];
+}
+
+export function formatUsageLabel(usage: string): string {
+  const normalized = usage.trim().toLowerCase();
+  if (!normalized) return 'Unknown';
+  return CANONICAL_USAGE_LABELS[normalized] ?? (normalized.charAt(0).toUpperCase() + normalized.slice(1));
 }

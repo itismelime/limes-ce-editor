@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData } from '../types/dayz';
+import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData, WeatherData, GameplayData, CeToolProject } from '../types/dayz';
 import {
   serializeTypesXml, serializeEventSpawnsXml,
   serializeEventsXml, serializeSpawnableTypesXml,
   serializeEconomyCoreXml, serializeMapGroupProtoXml,
+  serializeWeatherXml, serializeGameplayJson,
 } from '../lib/xmlParser';
 import { writeFile, createDir } from '../lib/fileDiscovery';
 import type { ContainerDef } from '../types/dayz';
@@ -16,13 +17,29 @@ interface FilePaths {
   spawnableTypesPath: string | null;
   economyCorePath: string | null;
   mapGroupProtoPath: string | null;
+  weatherPath: string | null;
+  gameplayPath: string | null;
 }
 
 type MapGroupProtoEntry = {
+  rawName?: string;
   usages: string[];
   tiers: string[];
+  valueUsers?: string[];
   lootmax: number;
   containers: ContainerDef[];
+  orderIndex?: number;
+};
+
+type SaveCheckpoint = {
+  id: string;
+  createdAt: number;
+  label: string;
+  typesBySource: Map<string, Map<string, DayZType>>;
+  events: Map<string, DayZEvent> | null;
+  eventSpawns: EventSpawnDef[] | null;
+  spawnableTypes: Map<string, SpawnableType> | null;
+  mapGroupProto: Map<string, MapGroupProtoEntry> | null;
 };
 
 interface ServerState {
@@ -35,7 +52,19 @@ interface ServerState {
   buildingInstances: BuildingInstance[];
   mapGroupProto: Map<string, MapGroupProtoEntry>;
   playerSpawnData: PlayerSpawnData | null;
+  ceToolProject: CeToolProject | null;
+  ceToolFolderOverride: string | null; // actually stores the project XML path when user manually picks
+  pickCeToolFolder?: () => Promise<void>; // callback from useServerFolder, optional for type safety
+  weather: WeatherData | null;
+  gameplay: GameplayData | null;
   originalTypes: Map<string, DayZType>;
+  originalEvents: Map<string, DayZEvent>;
+  originalEventSpawns: EventSpawnDef[];
+  originalSpawnableTypes: Map<string, SpawnableType>;
+  originalMapGroupProto: Map<string, MapGroupProtoEntry>;
+  originalWeather: WeatherData | null;
+  originalGameplay: GameplayData | null;
+  saveCheckpoints: SaveCheckpoint[];
   typeHistory: { name: string; prev: DayZType }[];
 
   setMission: (mission: MissionData) => void;
@@ -44,11 +73,26 @@ interface ServerState {
   setBuildingInstances: (instances: BuildingInstance[]) => void;
   setMapGroupProto: (proto: Map<string, MapGroupProtoEntry>) => void;
   setPlayerSpawnData: (data: PlayerSpawnData | null) => void;
+  setCeToolProject: (data: CeToolProject | null) => void;
+  setCeToolFolderOverride: (path: string | null) => void;
+  setPickCeToolFolder: (fn: (() => Promise<void>) | undefined) => void;
+  setWeather: (data: WeatherData | null) => void;
+  setGameplay: (data: GameplayData | null) => void;
+  updateGameplay: (data: GameplayData) => void;
   clearSaveError: () => void;
+  createSaveCheckpointFromDirty: (label?: string) => void;
+  revertSaveCheckpoint: (id?: string) => void;
+  clearSaveCheckpoints: () => void;
 
   updateType: (name: string, patch: Partial<DayZType>) => void;
   undoType: () => void;
   revertTypesSource: (sourcePath: string) => void;
+  revertEventSpawns: () => void;
+  revertEvents: () => void;
+  revertSpawnableTypes: () => void;
+  revertMapGroupProto: () => void;
+  revertWeather: () => void;
+  revertGameplay: () => void;
   updateEvent: (name: string, patch: Partial<DayZEvent>) => void;
   setEventSpawns: (spawns: EventSpawnDef[]) => void;
   updateSpawnableType: (name: string, patch: Partial<SpawnableType>) => void;
@@ -62,9 +106,31 @@ interface ServerState {
   saveEvents: () => Promise<void>;
   saveSpawnableTypes: () => Promise<void>;
   saveMapGroupProto: () => Promise<void>;
+  saveWeather: () => Promise<void>;
+  saveGameplay: () => Promise<void>;
 }
 
-const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false };
+const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false };
+
+function cloneMapGroupProto(proto: Map<string, MapGroupProtoEntry>): Map<string, MapGroupProtoEntry> {
+  const next = new Map<string, MapGroupProtoEntry>();
+  for (const [key, entry] of proto) {
+    next.set(key, {
+      rawName: entry.rawName,
+      usages: [...entry.usages],
+      tiers: [...entry.tiers],
+      valueUsers: entry.valueUsers ? [...entry.valueUsers] : undefined,
+      lootmax: entry.lootmax,
+      containers: entry.containers.map(c => ({
+        ...c,
+        categories: [...c.categories],
+        tags: [...c.tags],
+      })),
+      orderIndex: entry.orderIndex,
+    });
+  }
+  return next;
+}
 
 function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -77,7 +143,7 @@ function markSuccess(set: (fn: (s: ServerState) => Partial<ServerState>) => void
 
 export const useServerStore = create<ServerState>((set, get) => ({
   mission: null,
-  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null },
+  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null },
   dirty: emptyDirty,
   saveError: null,
   saveStatus: 'idle' as const,
@@ -85,16 +151,157 @@ export const useServerStore = create<ServerState>((set, get) => ({
   buildingInstances: [],
   mapGroupProto: new Map(),
   playerSpawnData: null,
+  ceToolProject: null,
+  ceToolFolderOverride: null,
+  pickCeToolFolder: undefined,
+  weather: null,
+  gameplay: null,
   originalTypes: new Map(),
+  originalEvents: new Map(),
+  originalEventSpawns: [],
+  originalSpawnableTypes: new Map(),
+  originalMapGroupProto: new Map(),
+  originalWeather: null,
+  originalGameplay: null,
+  saveCheckpoints: [],
   typeHistory: [],
 
-  setMission: (mission) => set({ mission, dirty: emptyDirty, originalTypes: new Map(mission.types), typeHistory: [] }),
+  setMission: (mission) => set({
+    mission,
+    dirty: emptyDirty,
+    originalTypes: new Map(mission.types),
+    originalEvents: new Map(mission.events),
+    originalEventSpawns: [...mission.eventSpawns],
+    originalSpawnableTypes: new Map(mission.spawnableTypes),
+    typeHistory: [],
+  }),
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
   setBuildingInstances: (instances) => set({ buildingInstances: instances }),
-  setMapGroupProto: (proto) => set({ mapGroupProto: new Map(proto) }),
+  setMapGroupProto: (proto) => set({ mapGroupProto: cloneMapGroupProto(proto), originalMapGroupProto: cloneMapGroupProto(proto) }),
   setPlayerSpawnData: (data) => set({ playerSpawnData: data }),
+  setCeToolProject: (data) => set({ ceToolProject: data }),
+  setCeToolFolderOverride: (path) => set({ ceToolFolderOverride: path }),
+  setPickCeToolFolder: (fn) => set({ pickCeToolFolder: fn }),
+  setWeather: (data) => set({ weather: data, originalWeather: data }),
+  setGameplay: (data) => set({ gameplay: data, originalGameplay: data }),
+  updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),
   clearSaveError: () => set({ saveError: null }),
+
+  createSaveCheckpointFromDirty: (label = 'Save') => set(s => {
+    if (!s.mission) return s;
+    const hasDirty = s.dirty.typesSources.length > 0 || s.dirty.eventSpawns || s.dirty.events || s.dirty.spawnableTypes || s.dirty.mapGroupProto;
+    if (!hasDirty) return s;
+
+    const typesBySource = new Map<string, Map<string, DayZType>>();
+    for (const source of s.dirty.typesSources) {
+      const sourceSnapshot = new Map<string, DayZType>();
+      for (const [name, type] of s.originalTypes) {
+        if (type.source === source) {
+          sourceSnapshot.set(name, type);
+        }
+      }
+      typesBySource.set(source, sourceSnapshot);
+    }
+
+    const checkpoint: SaveCheckpoint = {
+      id: `cp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: Date.now(),
+      label,
+      typesBySource,
+      events: s.dirty.events ? new Map(s.originalEvents) : null,
+      eventSpawns: s.dirty.eventSpawns ? [...s.originalEventSpawns] : null,
+      spawnableTypes: s.dirty.spawnableTypes ? new Map(s.originalSpawnableTypes) : null,
+      mapGroupProto: s.dirty.mapGroupProto ? cloneMapGroupProto(s.originalMapGroupProto) : null,
+    };
+
+    return { saveCheckpoints: [checkpoint, ...s.saveCheckpoints].slice(0, 30) };
+  }),
+
+  revertSaveCheckpoint: (id) => set(s => {
+    if (!s.mission || s.saveCheckpoints.length === 0) return s;
+    const checkpoint = id
+      ? s.saveCheckpoints.find(cp => cp.id === id)
+      : s.saveCheckpoints[0];
+    if (!checkpoint) return s;
+
+    const nextMission = { ...s.mission };
+    const nextTypes = new Map(nextMission.types);
+    const nextOriginalTypes = new Map(s.originalTypes);
+    let nextTypeHistory = s.typeHistory;
+    let nextDirtyTypes = [...s.dirty.typesSources];
+
+    for (const [source, snapshot] of checkpoint.typesBySource) {
+      for (const [name, current] of nextTypes) {
+        if (current.source === source && !snapshot.has(name)) {
+          nextTypes.delete(name);
+          nextOriginalTypes.delete(name);
+        }
+      }
+      for (const [name, prev] of snapshot) {
+        nextTypes.set(name, prev);
+        nextOriginalTypes.set(name, prev);
+      }
+      nextTypeHistory = nextTypeHistory.filter(h => snapshot.get(h.name)?.source !== source);
+      if (!nextDirtyTypes.includes(source)) nextDirtyTypes.push(source);
+    }
+
+    nextMission.types = nextTypes;
+
+    let nextOriginalEvents = s.originalEvents;
+    let nextOriginalEventSpawns = s.originalEventSpawns;
+    let nextOriginalSpawnableTypes = s.originalSpawnableTypes;
+    if (checkpoint.events) {
+      nextMission.events = new Map(checkpoint.events);
+      nextOriginalEvents = new Map(checkpoint.events);
+    }
+    if (checkpoint.eventSpawns) {
+      nextMission.eventSpawns = [...checkpoint.eventSpawns];
+      nextOriginalEventSpawns = [...checkpoint.eventSpawns];
+    }
+    if (checkpoint.spawnableTypes) {
+      nextMission.spawnableTypes = new Map(checkpoint.spawnableTypes);
+      nextOriginalSpawnableTypes = new Map(checkpoint.spawnableTypes);
+    }
+
+    let nextMapGroupProto = s.mapGroupProto;
+    let nextOriginalMapGroupProto = s.originalMapGroupProto;
+    let nextBuildingInstances = s.buildingInstances;
+    const nextDirty: DirtyFlags = {
+      ...s.dirty,
+      typesSources: nextDirtyTypes,
+      events: checkpoint.events ? true : s.dirty.events,
+      eventSpawns: checkpoint.eventSpawns ? true : s.dirty.eventSpawns,
+      spawnableTypes: checkpoint.spawnableTypes ? true : s.dirty.spawnableTypes,
+      mapGroupProto: checkpoint.mapGroupProto ? true : s.dirty.mapGroupProto,
+    };
+
+    if (checkpoint.mapGroupProto) {
+      nextMapGroupProto = cloneMapGroupProto(checkpoint.mapGroupProto);
+      nextBuildingInstances = s.buildingInstances.map(b => {
+        const key = b.typeName.trim().toLowerCase();
+        const entry = nextMapGroupProto.get(key);
+        return entry ? { ...b, containers: entry.containers } : b;
+      });
+    }
+
+    const saveCheckpoints = s.saveCheckpoints.filter(cp => cp.id !== checkpoint.id);
+    return {
+      mission: nextMission,
+      originalTypes: nextOriginalTypes,
+      originalEvents: nextOriginalEvents,
+      originalEventSpawns: nextOriginalEventSpawns,
+      originalSpawnableTypes: nextOriginalSpawnableTypes,
+      originalMapGroupProto: nextOriginalMapGroupProto,
+      typeHistory: nextTypeHistory,
+      dirty: nextDirty,
+      mapGroupProto: nextMapGroupProto,
+      buildingInstances: nextBuildingInstances,
+      saveCheckpoints,
+    };
+  }),
+
+  clearSaveCheckpoints: () => set({ saveCheckpoints: [] }),
 
   updateType: (name, patch) => set(s => {
     if (!s.mission) return s;
@@ -137,6 +344,50 @@ export const useServerStore = create<ServerState>((set, get) => ({
     return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources }, typeHistory };
   }),
 
+  revertEventSpawns: () => set(s => {
+    if (!s.mission) return s;
+    return {
+      mission: { ...s.mission, eventSpawns: [...s.originalEventSpawns] },
+      dirty: { ...s.dirty, eventSpawns: false },
+    };
+  }),
+
+  revertEvents: () => set(s => {
+    if (!s.mission) return s;
+    return {
+      mission: { ...s.mission, events: new Map(s.originalEvents) },
+      dirty: { ...s.dirty, events: false },
+    };
+  }),
+
+  revertSpawnableTypes: () => set(s => {
+    if (!s.mission) return s;
+    return {
+      mission: { ...s.mission, spawnableTypes: new Map(s.originalSpawnableTypes) },
+      dirty: { ...s.dirty, spawnableTypes: false },
+    };
+  }),
+
+  revertMapGroupProto: () => set(s => {
+    const proto = cloneMapGroupProto(s.originalMapGroupProto);
+    const buildingInstances = s.buildingInstances.map(b => {
+      const key = b.typeName.trim().toLowerCase();
+      const entry = proto.get(key);
+      return entry ? { ...b, containers: entry.containers } : b;
+    });
+    return { mapGroupProto: proto, buildingInstances, dirty: { ...s.dirty, mapGroupProto: false } };
+  }),
+
+  revertWeather: () => set(s => ({
+    weather: s.originalWeather,
+    dirty: { ...s.dirty, weather: false },
+  })),
+
+  revertGameplay: () => set(s => ({
+    gameplay: s.originalGameplay,
+    dirty: { ...s.dirty, gameplay: false },
+  })),
+
   updateEvent: (name, patch) => set(s => {
     if (!s.mission) return s;
     const next = new Map(s.mission.events);
@@ -160,13 +411,14 @@ export const useServerStore = create<ServerState>((set, get) => ({
 
   addBuildingCategory: (buildingType, category) => set(s => {
     const key = buildingType.trim().toLowerCase();
-    const cat = category.trim().toLowerCase();
-    if (!key || !cat || !s.mapGroupProto.has(key)) return s;
+    const cat = category.trim();
+    const normalizedCat = cat.toLowerCase();
+    if (!key || !normalizedCat || !s.mapGroupProto.has(key)) return s;
 
     const protoNext = new Map(s.mapGroupProto);
     const entry = protoNext.get(key)!;
     const containers = entry.containers.map(c => {
-      if (c.categories.includes(cat)) return c;
+      if (c.categories.some(existing => existing.trim().toLowerCase() === normalizedCat)) return c;
       return { ...c, categories: [...c.categories, cat] };
     });
 
@@ -187,7 +439,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
     const entry = protoNext.get(key)!;
     const containers = entry.containers.map(c => ({
       ...c,
-      categories: c.categories.filter(existing => existing !== cat),
+      categories: c.categories.filter(existing => existing.trim().toLowerCase() !== cat),
     }));
 
     protoNext.set(key, { ...entry, containers });
@@ -247,7 +499,16 @@ export const useServerStore = create<ServerState>((set, get) => ({
     set({ saveStatus: 'saving' });
     try {
       await writeFile(sourcePath, serializeTypesXml(sourceTypes));
-      set(s => ({ dirty: { ...s.dirty, typesSources: s.dirty.typesSources.filter(p => p !== sourcePath) } }));
+      set(s => {
+        const originalTypes = new Map(s.originalTypes);
+        for (const [name, type] of s.mission?.types ?? []) {
+          if (type.source === sourcePath) originalTypes.set(name, type);
+        }
+        return {
+          dirty: { ...s.dirty, typesSources: s.dirty.typesSources.filter(p => p !== sourcePath) },
+          originalTypes,
+        };
+      });
       markSuccess(set);
     } catch (err) {
       set({ saveError: `Failed to save ${sourcePath.split(/[\\/]/).pop()}: ${toMessage(err)}`, saveStatus: 'idle' });
@@ -260,7 +521,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
     set({ saveStatus: 'saving' });
     try {
       await writeFile(paths.eventSpawnsPath, serializeEventSpawnsXml(mission.eventSpawns));
-      set(s => ({ dirty: { ...s.dirty, eventSpawns: false } }));
+      set(s => ({ dirty: { ...s.dirty, eventSpawns: false }, originalEventSpawns: [...mission.eventSpawns] }));
       markSuccess(set);
     } catch (err) {
       set({ saveError: `Failed to save cfgeventspawns.xml: ${toMessage(err)}`, saveStatus: 'idle' });
@@ -273,7 +534,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
     set({ saveStatus: 'saving' });
     try {
       await writeFile(paths.eventsPath, serializeEventsXml(mission.events));
-      set(s => ({ dirty: { ...s.dirty, events: false } }));
+      set(s => ({ dirty: { ...s.dirty, events: false }, originalEvents: new Map(mission.events) }));
       markSuccess(set);
     } catch (err) {
       set({ saveError: `Failed to save events.xml: ${toMessage(err)}`, saveStatus: 'idle' });
@@ -282,11 +543,21 @@ export const useServerStore = create<ServerState>((set, get) => ({
 
   saveSpawnableTypes: async () => {
     const { mission, paths } = get();
-    if (!mission || !paths.spawnableTypesPath) return;
+    if (!mission) return;
+    const groupedBySource = new Map<string, Map<string, SpawnableType>>();
+    for (const [name, spawnableType] of mission.spawnableTypes) {
+      const sourcePath = spawnableType.source || paths.spawnableTypesPath || '';
+      if (!sourcePath) continue;
+      if (!groupedBySource.has(sourcePath)) groupedBySource.set(sourcePath, new Map<string, SpawnableType>());
+      groupedBySource.get(sourcePath)!.set(name, spawnableType);
+    }
+    if (groupedBySource.size === 0) return;
     set({ saveStatus: 'saving' });
     try {
-      await writeFile(paths.spawnableTypesPath, serializeSpawnableTypesXml(mission.spawnableTypes));
-      set(s => ({ dirty: { ...s.dirty, spawnableTypes: false } }));
+      for (const [sourcePath, spawnableTypes] of groupedBySource) {
+        await writeFile(sourcePath, serializeSpawnableTypesXml(spawnableTypes));
+      }
+      set(s => ({ dirty: { ...s.dirty, spawnableTypes: false }, originalSpawnableTypes: new Map(mission.spawnableTypes) }));
       markSuccess(set);
     } catch (err) {
       set({ saveError: `Failed to save cfgspawnabletypes.xml: ${toMessage(err)}`, saveStatus: 'idle' });
@@ -299,10 +570,36 @@ export const useServerStore = create<ServerState>((set, get) => ({
     set({ saveStatus: 'saving' });
     try {
       await writeFile(paths.mapGroupProtoPath, serializeMapGroupProtoXml(mapGroupProto));
-      set(s => ({ dirty: { ...s.dirty, mapGroupProto: false } }));
+      set(s => ({ dirty: { ...s.dirty, mapGroupProto: false }, originalMapGroupProto: cloneMapGroupProto(s.mapGroupProto) }));
       markSuccess(set);
     } catch (err) {
       set({ saveError: `Failed to save mapgroupproto.xml: ${toMessage(err)}`, saveStatus: 'idle' });
+    }
+  },
+
+  saveWeather: async () => {
+    const { weather, paths } = get();
+    if (!paths.weatherPath || !weather) return;
+    set({ saveStatus: 'saving' });
+    try {
+      await writeFile(paths.weatherPath, serializeWeatherXml(weather));
+      set(s => ({ dirty: { ...s.dirty, weather: false }, originalWeather: s.weather }));
+      markSuccess(set);
+    } catch (err) {
+      set({ saveError: `Failed to save cfgweather.xml: ${toMessage(err)}`, saveStatus: 'idle' });
+    }
+  },
+
+  saveGameplay: async () => {
+    const { gameplay, paths } = get();
+    if (!paths.gameplayPath || !gameplay) return;
+    set({ saveStatus: 'saving' });
+    try {
+      await writeFile(paths.gameplayPath, serializeGameplayJson(gameplay));
+      set(s => ({ dirty: { ...s.dirty, gameplay: false }, originalGameplay: s.gameplay }));
+      markSuccess(set);
+    } catch (err) {
+      set({ saveError: `Failed to save cfggameplay.json: ${toMessage(err)}`, saveStatus: 'idle' });
     }
   },
 }));

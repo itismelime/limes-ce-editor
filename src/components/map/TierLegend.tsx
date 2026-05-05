@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { TIER_COLORS, TIER_ORDER, getUsageColor } from '../../types/map';
+import { TIER_COLORS, TIER_ORDER, getUsageColor, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 
@@ -14,20 +14,25 @@ export function TierLegend() {
   const mission           = useServerStore(s => s.mission);
 
   const usageGroups = useMemo(() => {
-    const byLabel = new Map<string, Set<string>>();
+    const byKey = new Map<string, { label: string; rawUsages: Set<string> }>();
     const register = (rawUsage: string) => {
       const usage = rawUsage ?? '';
       const normalized = usage.trim().toLowerCase();
-      const label = normalized === '' || normalized === 'unknown' ? 'Unknown' : usage;
-      if (!byLabel.has(label)) byLabel.set(label, new Set());
-      byLabel.get(label)!.add(usage);
+      const key = normalized === '' || normalized === 'unknown' ? 'unknown' : normalized;
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          label: formatUsageLabel(key),
+          rawUsages: new Set<string>(),
+        });
+      }
+      byKey.get(key)!.rawUsages.add(usage);
     };
 
     for (const b of buildingInstances) b.usages.forEach(register);
     if (mission) for (const t of mission.types.values()) t.usages.forEach(register);
 
-    return [...byLabel.entries()]
-      .map(([label, rawUsages]) => ({ label, rawUsages: [...rawUsages] }))
+    return [...byKey.values()]
+      .map(group => ({ label: group.label, rawUsages: [...group.rawUsages] }))
       .sort((a, b) => {
         if (a.label === 'Unknown') return 1;
         if (b.label === 'Unknown') return -1;
@@ -36,10 +41,14 @@ export function TierLegend() {
   }, [buildingInstances, mission]);
 
   const allUsageKeys = useMemo(() => usageGroups.flatMap(g => g.rawUsages), [usageGroups]);
+  const hiddenUsageSet = useMemo(
+    () => new Set(hiddenUsages.map(u => u.trim().toLowerCase())),
+    [hiddenUsages],
+  );
 
   const allTiers = [...TIER_ORDER, 'unknown'];
   const allTiersHidden = allTiers.every(t => hiddenTiers.includes(t));
-  const allUsagesHidden = usageGroups.every(g => g.rawUsages.every(u => hiddenUsages.includes(u)));
+  const allUsagesHidden = usageGroups.every(g => g.rawUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase())));
 
   return (
     <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px] pointer-events-auto">
@@ -79,7 +88,7 @@ export function TierLegend() {
             >{allUsagesHidden ? 'Show all' : 'Hide all'}</button>
           </div>
           {usageGroups.map(group => {
-            const hidden = group.rawUsages.every(u => hiddenUsages.includes(u));
+            const hidden = group.rawUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase()));
             const color  = getUsageColor(group.rawUsages[0] ?? group.label);
             return (
               <button
@@ -87,7 +96,7 @@ export function TierLegend() {
                 onClick={() => {
                   const shouldHide = !hidden;
                   group.rawUsages.forEach(u => {
-                    const isHidden = hiddenUsages.includes(u);
+                    const isHidden = hiddenUsageSet.has(u.trim().toLowerCase());
                     if (shouldHide && !isHidden) toggleUsage(u);
                     if (!shouldHide && isHidden) toggleUsage(u);
                   });

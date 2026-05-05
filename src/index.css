@@ -95,3 +95,18 @@ body {
 .leaflet-tooltip.cluster-count-label::before {
   display: none;
 }
+
+@keyframes unsaved-marker-blink {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.building-marker--unsaved svg {
+  animation: unsaved-marker-blink 1.6s ease-in-out infinite;
+  will-change: opacity;
+}

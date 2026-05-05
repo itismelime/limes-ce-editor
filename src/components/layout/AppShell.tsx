@@ -14,6 +14,8 @@ const loadEventSpawnsEditor = () => import('../editors/EventSpawnsEditor');
 const loadSpawnableTypesEditor = () => import('../editors/SpawnableTypesEditor');
 const loadEconomyCoreEditor = () => import('../editors/EconomyCoreEditor');
 const loadPlayerSpawnsEditor = () => import('../editors/PlayerSpawnsEditor');
+const loadWeatherEditor = () => import('../editors/WeatherEditor');
+const loadGameplayEditor = () => import('../editors/GameplayEditor');
 
 const MapView = lazy(() => loadMapView().then(m => ({ default: m.MapView })));
 const TypesEditor = lazy(() => loadTypesEditor().then(m => ({ default: m.TypesEditor })));
@@ -22,6 +24,8 @@ const EventSpawnsEditor = lazy(() => loadEventSpawnsEditor().then(m => ({ defaul
 const SpawnableTypesEditor = lazy(() => loadSpawnableTypesEditor().then(m => ({ default: m.SpawnableTypesEditor })));
 const EconomyCoreEditor = lazy(() => loadEconomyCoreEditor().then(m => ({ default: m.EconomyCoreEditor })));
 const PlayerSpawnsEditor = lazy(() => loadPlayerSpawnsEditor().then(m => ({ default: m.PlayerSpawnsEditor })));
+const WeatherEditor = lazy(() => loadWeatherEditor().then(m => ({ default: m.WeatherEditor })));
+const GameplayEditor = lazy(() => loadGameplayEditor().then(m => ({ default: m.GameplayEditor })));
 
 const StableMapView = memo(MapView);
 const StableTypesEditor = memo(TypesEditor);
@@ -30,6 +34,8 @@ const StableEventSpawnsEditor = memo(EventSpawnsEditor);
 const StablePlayerSpawnsEditor = memo(PlayerSpawnsEditor);
 const StableSpawnableTypesEditor = memo(SpawnableTypesEditor);
 const StableEconomyCoreEditor = memo(EconomyCoreEditor);
+const StableWeatherEditor = memo(WeatherEditor);
+const StableGameplayEditor = memo(GameplayEditor);
 
 const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
   map: loadMapView,
@@ -39,6 +45,8 @@ const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
   playerSpawns: loadPlayerSpawnsEditor,
   spawnableTypes: loadSpawnableTypesEditor,
   economy: loadEconomyCoreEditor,
+  weather: loadWeatherEditor,
+  gameplay: loadGameplayEditor,
 };
 
 const IDLE_PREFETCH_TABS: ActiveTab[] = ['map', 'types'];
@@ -62,6 +70,51 @@ const FILE_DESCRIPTIONS: Record<string, string> = {
   'events.xml': 'Event definitions and child loot groups',
   'cfgspawnabletypes.xml': 'Items that spawn inside containers',
 };
+
+type LoadWarningKind = 'missing' | 'parse' | 'compat' | 'other';
+
+type ParsedLoadWarning = {
+  raw: string;
+  kind: LoadWarningKind;
+  file: string;
+  detail?: string;
+};
+
+function parseLoadWarning(raw: string): ParsedLoadWarning {
+  if (raw.startsWith('compat: ')) {
+    const rest = raw.slice('compat: '.length);
+    const unknownNodesIdx = rest.indexOf(' unknown nodes ');
+    if (unknownNodesIdx !== -1) {
+      return {
+        raw,
+        kind: 'compat',
+        file: rest.slice(0, unknownNodesIdx),
+        detail: rest.slice(unknownNodesIdx + ' unknown nodes '.length).replace(/^\(|\)$/g, ''),
+      };
+    }
+    return { raw, kind: 'compat', file: rest };
+  }
+
+  const parseMatch = raw.match(/^(.*) \(parse error(?:: (.*))?\)$/);
+  if (parseMatch) {
+    return {
+      raw,
+      kind: 'parse',
+      file: parseMatch[1],
+      detail: parseMatch[2],
+    };
+  }
+
+  if (FILE_DESCRIPTIONS[raw]) {
+    return { raw, kind: 'missing', file: raw };
+  }
+
+  if (raw.startsWith('ce file not found: ')) {
+    return { raw, kind: 'other', file: 'cfgeconomycore.xml', detail: raw.slice('ce file not found: '.length) };
+  }
+
+  return { raw, kind: 'other', file: raw };
+}
 
 function EmptyState() {
   const { loadError, loadWarnings } = useUiStore();
@@ -164,32 +217,44 @@ function EmptyState() {
 }
 
 function MissingFilesWarning({ warnings }: { warnings: string[] }) {
+  const parsed = warnings.map(parseLoadWarning);
+  const compatWarnings = parsed.filter(w => w.kind === 'compat');
   return (
     <div className="bg-amber-900/20 border border-amber-800/50 rounded-xl p-4 max-w-md w-full text-left">
       <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">
-        ⚠ Some files could not be loaded
+        ⚠ Load Notices
       </p>
       <div className="space-y-2">
-        {warnings.map(w => {
-          const isParse = w.includes('parse error');
-          const filename = w.replace(' (parse error)', '');
-          const desc = FILE_DESCRIPTIONS[filename];
+        {parsed.map(w => {
+          const desc = FILE_DESCRIPTIONS[w.file];
           return (
-            <div key={w} className="flex gap-2">
-              <span className="text-amber-600 flex-shrink-0">{isParse ? '💥' : '✗'}</span>
+            <div key={w.raw} className="flex gap-2">
+              <span className="text-amber-600 flex-shrink-0">
+                {w.kind === 'parse' ? '💥' : w.kind === 'compat' ? '🧩' : '✗'}
+              </span>
               <div>
-                <span className="font-mono text-xs text-amber-300">{filename}</span>
-                {isParse
-                  ? <p className="text-xs text-slate-500">XML is malformed — check the file for syntax errors</p>
-                  : <p className="text-xs text-slate-500">{desc ? `Not found — ${desc.toLowerCase()}` : 'Not found in the selected folder'}</p>
-                }
+                <span className="font-mono text-xs text-amber-300">{w.file}</span>
+                {w.kind === 'parse' && <p className="text-xs text-slate-500">File parse failed. Check syntax or encoding.</p>}
+                {w.kind === 'missing' && <p className="text-xs text-slate-500">{desc ? `Not found — ${desc.toLowerCase()}` : 'Not found in the selected folder'}</p>}
+                {w.kind === 'compat' && <p className="text-xs text-slate-500">Unknown structure detected and preserved where possible.</p>}
+                {w.kind === 'other' && w.detail && <p className="text-xs text-slate-500">{w.detail}</p>}
               </div>
             </div>
           );
         })}
       </div>
+      {compatWarnings.length > 0 && (
+        <div className="mt-3 pt-2 border-t border-amber-900/30">
+          <p className="text-xs text-amber-400 mb-1">Compatibility details</p>
+          <div className="space-y-1">
+            {compatWarnings.map(w => (
+              <p key={`compat-${w.raw}`} className="text-xs text-slate-500 font-mono break-words">{w.file}: {w.detail ?? 'unknown nodes present'}</p>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="text-xs text-slate-600 mt-3 pt-2 border-t border-amber-900/30">
-        The editor will still work with whatever files were found.
+        The editor will still load, and unknown structures are reported to help harden parsers safely.
       </p>
     </div>
   );
@@ -211,6 +276,12 @@ export function AppShell() {
   const [mountedTabs, setMountedTabs] = useState<Partial<Record<ActiveTab, true>>>({ [activeTab]: true });
   const [isStartupWarmup, setIsStartupWarmup] = useState(false);
   const [startupMessage, setStartupMessage] = useState('Preparing editor...');
+  const [showNoticeDetails, setShowNoticeDetails] = useState(false);
+
+  const parsedWarnings = loadWarnings.map(parseLoadWarning);
+  const compatWarnings = parsedWarnings.filter(w => w.kind === 'compat');
+  const parseWarnings = parsedWarnings.filter(w => w.kind === 'parse');
+  const missingWarnings = parsedWarnings.filter(w => w.kind === 'missing');
 
   useEffect(() => { autoLoad(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -256,7 +327,7 @@ export function AppShell() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (!mission || !missionPath) {
+    if (!missionPath) {
       setIsStartupWarmup(false);
       return;
     }
@@ -308,7 +379,7 @@ export function AppShell() {
       cancelled = true;
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [missionPath, mission, activeMap, mapImagePaths, setMapImagePath, setMapImageSize]);
+  }, [missionPath, activeMap, mapImagePaths, setMapImagePath, setMapImageSize]);
 
   const showNoFilesError = loadError === 'no_files_found' || loadError === 'permission_denied' || loadError?.startsWith('error:');
   const prefetchTab = (tab: ActiveTab) => {
@@ -340,18 +411,52 @@ export function AppShell() {
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden">
             {loadWarnings.length > 0 && (
-              <div className="bg-amber-900/20 border-b border-amber-800/40 px-4 py-2 flex items-center gap-3">
-                <span className="text-amber-400 text-xs">⚠</span>
-                <span className="text-amber-400 text-xs">
-                  Missing files: <span className="font-mono">{loadWarnings.join(', ')}</span>
-                  <span className="text-amber-600 ml-1">— those features will be empty</span>
-                </span>
-                <button
-                  onClick={() => useUiStore.getState().setLoadWarnings([])}
-                  className="ml-auto text-amber-800 hover:text-amber-600 text-sm"
-                >
-                  ×
-                </button>
+              <div className="bg-amber-900/20 border-b border-amber-800/40 px-4 py-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-amber-400 text-xs">⚠</span>
+                  <span className="text-amber-400 text-xs">
+                    Load notices: <span className="font-mono">{loadWarnings.length}</span>
+                    <span className="text-amber-600 ml-1">
+                      ({missingWarnings.length} missing, {parseWarnings.length} parse, {compatWarnings.length} compat)
+                    </span>
+                  </span>
+
+                  {(parseWarnings.length > 0 || compatWarnings.length > 0 || missingWarnings.length > 0) && (
+                    <button
+                      onClick={() => setShowNoticeDetails(v => !v)}
+                      className="text-xs text-amber-300 hover:text-amber-200 underline"
+                    >
+                      {showNoticeDetails ? 'Hide notice details' : 'Show notice details'}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => useUiStore.getState().setLoadWarnings([])}
+                    className="ml-auto text-amber-800 hover:text-amber-600 text-sm"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {showNoticeDetails && (parseWarnings.length > 0 || compatWarnings.length > 0 || missingWarnings.length > 0) && (
+                  <div className="mt-2 border-t border-amber-900/40 pt-2 space-y-1">
+                    {parseWarnings.map(w => (
+                      <p key={`top-parse-${w.raw}`} className="text-xs text-amber-200 break-words">
+                        <span className="font-mono text-amber-300">{w.file}</span>: <span className="font-mono">{w.detail ?? 'parse error'}</span>
+                      </p>
+                    ))}
+                    {compatWarnings.map(w => (
+                      <p key={`top-compat-${w.raw}`} className="text-xs text-amber-200 break-words">
+                        <span className="font-mono text-amber-300">{w.file}</span>: <span className="font-mono">{w.detail ?? 'unknown structure detected'}</span>
+                      </p>
+                    ))}
+                    {missingWarnings.map(w => (
+                      <p key={`top-missing-${w.raw}`} className="text-xs text-amber-200 break-words">
+                        <span className="font-mono text-amber-300">{w.file}</span>: <span className="font-mono">missing</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="flex-1 overflow-hidden relative">
@@ -389,6 +494,16 @@ export function AppShell() {
                 {mountedTabs.economy && (
                   <div className={tabPanelClass('economy')}>
                     <StableEconomyCoreEditor />
+                  </div>
+                )}
+                {mountedTabs.weather && (
+                  <div className={tabPanelClass('weather')}>
+                    <StableWeatherEditor />
+                  </div>
+                )}
+                {mountedTabs.gameplay && (
+                  <div className={tabPanelClass('gameplay')}>
+                    <StableGameplayEditor />
                   </div>
                 )}
               </Suspense>

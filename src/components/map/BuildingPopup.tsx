@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
-import { TIER_COLORS } from '../../types/map';
+import { TIER_COLORS, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 
 interface Props {
   building: BuildingInstance;
-  types: Map<string, DayZType>;
   tiers: string[];
   zoneTier?: string | null;
   protoTiers?: string[];
   inferredTier?: string | null;
 }
+
+const EMPTY_TYPES = new Map<string, DayZType>();
 
 function matchesContainer(
   type: DayZType,
@@ -20,13 +21,16 @@ function matchesContainer(
   containerCategories: string[],
 ): boolean {
   const isUnrestricted = type.usages.length === 0 || type.usages.every(u => u === '');
+  const normalizedTags = containerTags.map(tag => tag.toLowerCase());
+  const normalizedCategories = containerCategories.map(category => category.toLowerCase());
   const usageMatch =
     isUnrestricted ||
-    containerTags.length === 0 ||
-    type.usages.some(u => containerTags.includes(u.toLowerCase()));
+    normalizedTags.length === 0 ||
+    type.usages.some(u => normalizedTags.includes(u.toLowerCase()));
   const catMatch =
-    containerCategories.length === 0 ||
-    (type.category !== null && containerCategories.includes(type.category.toLowerCase()));
+    normalizedCategories.length > 0 &&
+    type.category !== null &&
+    normalizedCategories.includes(type.category.toLowerCase());
   return usageMatch && catMatch;
 }
 
@@ -34,35 +38,94 @@ function CategorySection({
   label,
   categoryKey,
   items,
+  tierOptions,
   autoExpand,
   onBlockCategory,
+  onSetItemNominal,
+  onSetItemMin,
+  onToggleItemTier,
   onOpenAddModal,
   onOpenTierModal,
 }: {
   label: string;
   categoryKey: string;
   items: DayZType[];
+  tierOptions: string[];
   autoExpand?: boolean;
   onBlockCategory: (category: string) => void;
+  onSetItemNominal: (itemName: string, nominal: number) => void;
+  onSetItemMin: (itemName: string, min: number) => void;
+  onToggleItemTier: (itemName: string, tier: string) => void;
   onOpenAddModal: (category: string) => void;
   onOpenTierModal: (category: string) => void;
 }) {
   const [open, setOpen]         = useState(autoExpand ?? false);
   const [search, setSearch]     = useState('');
   const [activeOnly, setActiveOnly] = useState(true);
+  const [sortMode, setSortMode] = useState<'az' | 'nominal' | 'min'>('az');
+  const [openTierDropdown, setOpenTierDropdown] = useState<string | null>(null);
+  const [nominalDraftByItem, setNominalDraftByItem] = useState<Record<string, string>>({});
+  const [minDraftByItem, setMinDraftByItem] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!openTierDropdown) return;
+    const close = () => setOpenTierDropdown(null);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [openTierDropdown]);
 
   const activeCount = items.filter(t => t.nominal > 0).length;
-  const filtered = items.filter(t => {
-    if (activeOnly && t.nominal === 0) return false;
-    if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = useMemo(() => {
+    const next = items.filter(t => {
+      if (activeOnly && t.nominal === 0) return false;
+      if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+
+    next.sort((a, b) => {
+      if (sortMode === 'nominal') {
+        return b.nominal - a.nominal || a.name.localeCompare(b.name);
+      }
+      if (sortMode === 'min') {
+        return b.min - a.min || a.name.localeCompare(b.name);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return next;
+  }, [items, activeOnly, search, sortMode]);
+
+  const getNominalDraft = (item: DayZType) => nominalDraftByItem[item.name] ?? String(item.nominal);
+  const getMinDraft = (item: DayZType) => minDraftByItem[item.name] ?? String(item.min);
+
+  const commitNominal = (item: DayZType) => {
+    const raw = (nominalDraftByItem[item.name] ?? String(item.nominal)).trim();
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      setNominalDraftByItem(prev => ({ ...prev, [item.name]: String(item.nominal) }));
+      return;
+    }
+    onSetItemNominal(item.name, Math.max(0, parsed));
+  };
+
+  const commitMin = (item: DayZType) => {
+    const raw = (minDraftByItem[item.name] ?? String(item.min)).trim();
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      setMinDraftByItem(prev => ({ ...prev, [item.name]: String(item.min) }));
+      return;
+    }
+    onSetItemMin(item.name, Math.max(0, parsed));
+  };
 
   return (
     <div className="mb-2 border border-slate-800 rounded-lg overflow-hidden">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/60 hover:bg-slate-800 transition-colors text-left"
+        onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/60 hover:bg-slate-800 transition-colors text-left cursor-pointer"
       >
         <span className="text-slate-200 font-semibold text-xs">{label}</span>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -99,7 +162,7 @@ function CategorySection({
             x
           </button>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-slate-800">
@@ -111,6 +174,16 @@ function CategorySection({
               placeholder="Filter…"
               className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
+            <select
+              value={sortMode}
+              onChange={e => setSortMode(e.target.value as 'az' | 'nominal' | 'min')}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300"
+              title="Sort items"
+            >
+              <option value="az">A-Z</option>
+              <option value="nominal">Highest nominal</option>
+              <option value="min">Highest min</option>
+            </select>
             <label className="flex items-center gap-1 text-xs text-slate-400 whitespace-nowrap cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -132,10 +205,76 @@ function CategorySection({
                       key={item.name}
                       className={`flex items-center justify-between gap-2 px-3 py-1 hover:bg-slate-800/30 ${item.nominal === 0 ? 'opacity-40' : ''}`}
                     >
-                      <span className="text-slate-300 text-xs truncate">{item.name}</span>
-                      <div className="text-right flex-shrink-0 text-xs flex items-center gap-2">
-                        <span className={item.nominal > 0 ? 'text-slate-400' : 'text-slate-700'}>{item.nominal} nom</span>
-                        <span className="text-slate-600"> · {item.min} min</span>
+                      <span className="text-slate-300 text-xs truncate" title={item.name}>{item.name}</span>
+                      <div className="text-right flex-shrink-0 text-xs flex items-center gap-1">
+                        <div className="flex items-center gap-1" title="Nominal">
+                          <span className="text-[10px] text-slate-500">N</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={getNominalDraft(item)}
+                            onChange={e => setNominalDraftByItem(prev => ({ ...prev, [item.name]: e.target.value }))}
+                            onBlur={() => commitNominal(item)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') commitNominal(item);
+                            }}
+                            className="h-5 w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-slate-300"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1" title="Minimum">
+                          <span className="text-[10px] text-slate-500">M</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={getMinDraft(item)}
+                            onChange={e => setMinDraftByItem(prev => ({ ...prev, [item.name]: e.target.value }))}
+                            onBlur={() => commitMin(item)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') commitMin(item);
+                            }}
+                            className="h-5 w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-slate-300"
+                          />
+                        </div>
+                        {tierOptions.length > 0 && (
+                          <div className="relative">
+                            <button
+                              onClick={() => setOpenTierDropdown(openTierDropdown === item.name ? null : item.name)}
+                              className="h-5 px-1.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300 hover:border-slate-500 whitespace-nowrap"
+                            >
+                              {item.tiers.length === 0
+                                ? 'Tiers ▾'
+                                : item.tiers.map(t => t.replace(/^Tier/i, 'T')).join(', ') + ' ▾'}
+                            </button>
+                            {openTierDropdown === item.name && (
+                              <div
+                                className="absolute right-0 top-6 z-50 bg-slate-900 border border-slate-700 rounded shadow-lg py-1 min-w-[80px]"
+                                onMouseDown={e => e.stopPropagation()}
+                              >
+                                {tierOptions.map(tier => {
+                                  const hasTier = item.tiers.some(t => t.toLowerCase() === tier.toLowerCase());
+                                  return (
+                                    <label
+                                      key={tier}
+                                      className="flex items-center gap-2 px-3 py-1 text-[11px] text-slate-300 hover:bg-slate-800 cursor-pointer"
+                                      onMouseDown={e => {
+                                        e.preventDefault();
+                                        onToggleItemTier(item.name, tier);
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        readOnly
+                                        checked={hasTier}
+                                        className="accent-indigo-500"
+                                      />
+                                      {tier}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -258,7 +397,7 @@ function TierGateModal({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }
 
@@ -282,16 +421,17 @@ function AddLootModal({
 
   useEffect(() => {
     if (open) {
-      setCategoryFilter(defaultCategory);
+      const matchedDefault = categories.find(cat => cat.toLowerCase() === defaultCategory.toLowerCase()) ?? defaultCategory;
+      setCategoryFilter(matchedDefault);
       setSearch('');
     }
-  }, [open, defaultCategory]);
+  }, [open, defaultCategory, categories]);
 
   const filteredItems = useMemo(() => {
     const rows: DayZType[] = [];
     for (const type of types.values()) {
-      const categoryKey = (type.category ?? '__none__').toLowerCase();
-      if (categoryFilter && categoryKey !== categoryFilter) continue;
+      const categoryKey = type.category ?? '__none__';
+      if (categoryFilter && categoryKey.toLowerCase() !== categoryFilter.toLowerCase()) continue;
       if (search && !type.name.toLowerCase().includes(search.toLowerCase())) continue;
       rows.push(type);
     }
@@ -360,7 +500,7 @@ function AddLootModal({
             <div className="px-3 py-3 text-xs text-slate-500">No matching loot types.</div>
           ) : (
             filteredItems.map(type => {
-              const cat = (type.category ?? '__none__').toLowerCase();
+              const cat = type.category ?? '__none__';
               return (
                 <div key={type.name} className="px-3 py-1.5 border-b border-slate-800/60 flex items-center gap-2">
                   <div className="min-w-0 flex-1">
@@ -383,14 +523,22 @@ function AddLootModal({
 }
 
 
-export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [], inferredTier }: Props) {
+export function BuildingPopup({ building: buildingProp, tiers, zoneTier, protoTiers = [], inferredTier }: Props) {
+  const types = useServerStore(s => s.mission?.types ?? EMPTY_TYPES);
   const categoryFilter  = useUiStore(s => s.categoryFilter);
   const dirty = useServerStore(s => s.dirty);
+  // Read live building from store so category edits are reflected immediately without
+  // relying on Leaflet re-opening the popup with updated props.
+  const liveBuildingInstances = useServerStore(s => s.buildingInstances);
+  const building = useMemo(() => {
+    const key = buildingProp.typeName.trim().toLowerCase();
+    return liveBuildingInstances.find(b => b.typeName.trim().toLowerCase() === key) ?? buildingProp;
+  }, [buildingProp, liveBuildingInstances]);
+  const originalMapGroupProto = useServerStore(s => s.originalMapGroupProto);
   const addBuildingCategory = useServerStore(s => s.addBuildingCategory);
   const removeBuildingCategory = useServerStore(s => s.removeBuildingCategory);
-  const saveMapGroupProto = useServerStore(s => s.saveMapGroupProto);
   const updateType = useServerStore(s => s.updateType);
-  const saveTypesSource = useServerStore(s => s.saveTypesSource);
+  const setShowSaveReview = useUiStore(s => s.setShowSaveReview);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalCategory, setAddModalCategory] = useState('');
   const [showTierModal, setShowTierModal] = useState(false);
@@ -399,36 +547,61 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
   const [tierApplying, setTierApplying] = useState(false);
   const [tierStatus, setTierStatus] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
-  const [savingPending, setSavingPending] = useState(false);
 
   // Aggregate all eligible items across all containers, deduplicated
   const allItems = useMemo(() => {
+    const key = building.typeName.trim().toLowerCase();
+    const originalEntry = originalMapGroupProto.get(key);
     const seen = new Set<string>();
     const result: DayZType[] = [];
-    for (const container of building.containers) {
+    for (let i = 0; i < building.containers.length; i++) {
+      const container = building.containers[i];
+      // If this container originally had categories but now has none, the user explicitly
+      // removed them all — treat as "no items" rather than "unrestricted".
+      const originalCategories = originalEntry?.containers[i]?.categories ?? [];
+      if (container.categories.length === 0 && originalCategories.length > 0) continue;
       for (const type of types.values()) {
-        if (!seen.has(type.name) && matchesContainer(type, container.tags, container.categories)) {
-          seen.add(type.name);
-          result.push(type);
-        }
+        if (seen.has(type.name)) continue;
+        if (!matchesContainer(type, container.tags, container.categories)) continue;
+        seen.add(type.name);
+        result.push(type);
       }
     }
     return result.sort((a, b) => b.nominal - a.nominal);
-  }, [building.containers, types]);
+  }, [building.containers, types, originalMapGroupProto, building.typeName]);
 
   const effectiveItems = allItems;
 
   const selectableCategories = useMemo(() => {
-    const keys = new Set<string>();
+    const keys = new Map<string, string>();
     for (const type of types.values()) {
-      keys.add((type.category ?? '__none__').toLowerCase());
+      const raw = type.category ?? '__none__';
+      const normalized = raw.toLowerCase();
+      if (!keys.has(normalized)) keys.set(normalized, raw);
     }
-    return [...keys].sort((a, b) => {
-      if (a === '__none__') return 1;
-      if (b === '__none__') return -1;
+    return [...keys.values()].sort((a, b) => {
+      if (a.toLowerCase() === '__none__') return 1;
+      if (b.toLowerCase() === '__none__') return -1;
       return a.localeCompare(b);
     });
   }, [types]);
+
+  const availableTierOptions = useMemo(() => {
+    let maxTier = 4;
+    for (const tier of tiers) {
+      const n = tierNum(tier);
+      if (n !== null && n > maxTier) maxTier = n;
+    }
+    for (const type of types.values()) {
+      for (const tier of type.tiers) {
+        const n = tierNum(tier);
+        if (n !== null && n > maxTier) maxTier = n;
+      }
+    }
+    // Always show at least Tier1–Tier7 so users can assign any tier
+    if (maxTier < 7) maxTier = 7;
+    return Array.from({ length: maxTier }, (_, i) => `Tier${i + 1}`);
+  }, [types, tiers]);
 
   // Group by derived display category
   const byCategory = useMemo(() => {
@@ -478,6 +651,43 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
     setSaveStatus('Category change staged.');
   };
 
+  const handleSetItemNominal = (itemName: string, nominal: number) => {
+    const type = types.get(itemName);
+    if (!type) return;
+    const nextNominal = Math.max(0, nominal);
+    if (type.nominal === nextNominal) {
+      setSaveStatus(`${itemName} nominal already ${nextNominal}.`);
+      return;
+    }
+    updateType(itemName, { nominal: nextNominal });
+    setSaveStatus(`${itemName} nominal set to ${nextNominal}.`);
+  };
+
+  const handleSetItemMin = (itemName: string, min: number) => {
+    const type = types.get(itemName);
+    if (!type) return;
+    const nextMin = Math.max(0, min);
+    if (type.min === nextMin) {
+      setSaveStatus(`${itemName} min already ${nextMin}.`);
+      return;
+    }
+    updateType(itemName, { min: nextMin });
+    setSaveStatus(`${itemName} min set to ${nextMin}.`);
+  };
+
+  const handleToggleItemTier = (itemName: string, tier: string) => {
+    const type = types.get(itemName);
+    if (!type || !tier) return;
+    const hasTier = type.tiers.some((t: string) => t.toLowerCase() === tier.toLowerCase());
+    if (hasTier) {
+      updateType(itemName, { tiers: type.tiers.filter((t: string) => t.toLowerCase() !== tier.toLowerCase()) });
+      setSaveStatus(`Removed ${tier} from ${itemName}.`);
+      return;
+    }
+    updateType(itemName, { tiers: [...type.tiers, tier] });
+    setSaveStatus(`Added ${tier} to ${itemName}.`);
+  };
+
   const tierPreview = useMemo(() => {
     if (!tierModalCategory || !tierModalTier) {
       return { patches: [] as TierPatch[], noTierCount: 0, noHigherCount: 0 };
@@ -502,7 +712,7 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
         continue;
       }
 
-      const hasHigherTier = type.tiers.some(t => {
+      const hasHigherTier = type.tiers.some((t: string) => {
         const n = tierNum(t);
         return n != null && n > targetNum;
       });
@@ -512,7 +722,7 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
         continue;
       }
 
-      const newTiers = type.tiers.filter(t => t !== tierModalTier);
+      const newTiers = type.tiers.filter((t: string) => t !== tierModalTier);
       if (newTiers.length === 0) {
         noHigherCount += 1;
         continue;
@@ -564,31 +774,6 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
   const pendingMapProto = dirty.mapGroupProto;
   const hasPending = pendingMapProto || pendingTypeSources > 0;
 
-  const savePendingChanges = async () => {
-    if (!hasPending || savingPending) return;
-    const parts: string[] = [];
-    if (pendingMapProto) parts.push('mapgroupproto.xml');
-    if (pendingTypeSources > 0) parts.push(`${pendingTypeSources} types.xml source file(s)`);
-
-    const proceed = window.confirm(`Save pending changes?\n\nThis will write: ${parts.join(' + ')}`);
-    if (!proceed) return;
-
-    setSavingPending(true);
-    setSaveStatus(null);
-    try {
-      if (pendingMapProto) await saveMapGroupProto();
-      const sources = [...dirty.typesSources];
-      for (const source of sources) {
-        await saveTypesSource(source);
-      }
-      setSaveStatus('Pending changes saved.');
-    } catch {
-      setSaveStatus('Failed to save pending changes.');
-    } finally {
-      setSavingPending(false);
-    }
-  };
-
 
   return (
     <div className="relative text-xs w-80 max-h-[480px] overflow-y-auto">
@@ -605,7 +790,7 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
           >{t}</span>
         ))}
         {building.usages.length > 0 && (
-          <span className="text-slate-400">{building.usages.join(' · ')}</span>
+          <span className="text-slate-400">{building.usages.map(formatUsageLabel).join(' · ')}</span>
         )}
       </div>
       {(hasZoneTier || orderedProtoTiers.length > 0 || hasInferredTier) && (
@@ -640,12 +825,12 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
             </span>
           )}
           <button
-            onClick={() => { void savePendingChanges(); }}
-            disabled={!hasPending || savingPending}
+            onClick={() => setShowSaveReview(true)}
+            disabled={!hasPending}
             className="px-2 py-0.5 rounded border border-indigo-700/70 bg-indigo-900/40 text-indigo-300 disabled:opacity-50"
-            title="Save all pending XML changes"
+            title="Review and save all pending XML changes"
           >
-            {savingPending ? 'Saving...' : 'Save Pending'}
+            Save Pending
           </button>
         </div>
       </div>
@@ -661,8 +846,12 @@ export function BuildingPopup({ building, types, tiers, zoneTier, protoTiers = [
               categoryKey={cat.toLowerCase()}
               label={cat === '__none__' ? 'Uncategorized' : cat}
               items={byCategory.get(cat)!}
+              tierOptions={availableTierOptions}
               autoExpand={!!categoryFilter && cat === categoryFilter}
               onBlockCategory={(category) => { void handleRemoveCategory(category); }}
+              onSetItemNominal={handleSetItemNominal}
+              onSetItemMin={handleSetItemMin}
+              onToggleItemTier={handleToggleItemTier}
               onOpenAddModal={(category) => openAddModal(category)}
               onOpenTierModal={(category) => openTierModal(category)}
             />

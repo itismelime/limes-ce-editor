@@ -8,7 +8,7 @@ import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
-import { TIER_COLORS, getUsageColor } from '../../types/map';
+import { TIER_COLORS, getUsageColor, formatUsageLabel } from '../../types/map';
 import { readFile, writeFile } from '../../lib/fileDiscovery';
 import { CATEGORY_LABELS, CATEGORY_OPTIONS, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
 
@@ -54,7 +54,7 @@ function UsageBadge({ usage }: { usage: string }) {
       className="text-xs px-1.5 py-0.5 rounded font-medium"
       style={{ backgroundColor: `${color}22`, color, border: `1px solid ${color}44` }}
     >
-      {usage}
+      {formatUsageLabel(usage)}
     </span>
   );
 }
@@ -256,7 +256,7 @@ function DetailPanel({
             {type.usages.length === 0 && <span className="text-xs text-slate-700">none</span>}
             {type.usages.map(u => (
               <span key={u} className="flex items-center gap-1 text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
-                {u}
+                {formatUsageLabel(u)}
                 <button onClick={() => removeUsage(u)} className="text-slate-600 hover:text-red-400 leading-none">x</button>
               </span>
             ))}
@@ -268,7 +268,7 @@ function DetailPanel({
               className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-400 focus:outline-none focus:border-indigo-500"
             >
               <option value="" disabled>Add usage...</option>
-              {availableUsages.map(u => <option key={u} value={u}>{u}</option>)}
+              {availableUsages.map(u => <option key={u} value={u}>{formatUsageLabel(u)}</option>)}
             </select>
           )}
         </div>
@@ -624,7 +624,7 @@ export function TypesEditor() {
           >
             <option value="">All usages</option>
             {allUsages.map(u => (
-              <option key={u} value={u}>{u}</option>
+              <option key={u} value={u}>{formatUsageLabel(u)}</option>
             ))}
           </select>
 

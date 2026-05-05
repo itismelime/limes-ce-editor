@@ -7,13 +7,22 @@
 //     col = floor(worldX / worldW * gridW)
 //     row = floor((1 - worldZ / worldH) * gridH)   ← Z=worldH is north (row 0), Z=0 is south
 
+import { IS_COMPAT_MODE } from './ceMode';
+import { isTga, parseTgaRgba } from './tgaParser';
+
 interface AreaFlagsData {
+  source: 'areaflags' | 'layers';
   data: Uint8Array;
   gridW: number;
   gridH: number;
   worldW: number;
   worldH: number;
   tierNames: string[];
+  areaflagsFormat?: 'nibble' | 'planes';
+  planeStride?: number;
+  planeCount?: number;
+  tierPlaneOrder?: number[];
+  masks?: Record<string, Uint8Array>;
 }
 
 let _cfg: AreaFlagsData | null = null;
@@ -24,12 +33,189 @@ export function loadAreaFlags(raw: Uint8Array): void {
   const gridH  = view.getUint32(4, true);
   const worldW = view.getUint32(8, true);
   const worldH = view.getUint32(12, true);
-  const layers = view.getUint32(20, true);
+  const payload = raw.subarray(24);
+  const pixelCount = gridW * gridH;
+  const nibbleBytes = Math.ceil(pixelCount / 2);
+  const layers = 4;
+  // Compat mode preserves legacy fallback interpretation of v16/v20.
+  // Official missions still use 4-bit tier masks regardless of these fields.
+  const compatLayers = (() => {
+    const v16 = view.getUint32(16, true);
+    const v20 = view.getUint32(20, true);
+    return (v20 > 0 ? v20 : (v16 > 0 ? v16 : 4));
+  })();
+  const tierCount = IS_COMPAT_MODE ? compatLayers : layers;
+
+  if (payload.length === nibbleBytes) {
+    _cfg = {
+      source: 'areaflags',
+      areaflagsFormat: 'nibble',
+      data: payload,
+      gridW,
+      gridH,
+      worldW,
+      worldH,
+      tierNames: Array.from({ length: tierCount }, (_, i) => `Tier${i + 1}`),
+    };
+    return;
+  }
+
+  if (payload.length >= pixelCount && payload.length % pixelCount === 0) {
+    const planeCount = Math.floor(payload.length / pixelCount);
+    const planeCounts = Array.from({ length: planeCount }, () => 0);
+    for (let plane = 0; plane < planeCount; plane++) {
+      const start = plane * pixelCount;
+      const end = start + pixelCount;
+      let count = 0;
+      for (let i = start; i < end; i++) {
+        if (payload[i] !== 0) count++;
+      }
+      planeCounts[plane] = count;
+    }
+
+    // For 5-plane files, one plane is often an aggregate/aux plane.
+    // Keep the best tierCount planes by excluding the densest extras.
+    const allPlanes = Array.from({ length: planeCount }, (_, i) => i);
+    const sortedByDensityAsc = [...allPlanes].sort((a, b) => planeCounts[a] - planeCounts[b]);
+    const keptPlanes = sortedByDensityAsc.slice(0, Math.min(tierCount, sortedByDensityAsc.length));
+    // Map largest coverage -> Tier1, smallest -> highest tier (Tier4+).
+    const tierPlaneOrder = keptPlanes.sort((a, b) => planeCounts[b] - planeCounts[a]);
+
+    _cfg = {
+      source: 'areaflags',
+      areaflagsFormat: 'planes',
+      data: payload,
+      gridW,
+      gridH,
+      worldW,
+      worldH,
+      tierNames: Array.from({ length: tierPlaneOrder.length }, (_, i) => `Tier${i + 1}`),
+      planeStride: pixelCount,
+      planeCount,
+      tierPlaneOrder,
+    };
+    console.info('[areaflags planes] plane nonzero counts:', planeCounts.join(', '), 'tierPlaneOrder:', tierPlaneOrder.join(','));
+    return;
+  }
+
   _cfg = {
-    data: raw.subarray(24),
-    gridW, gridH, worldW, worldH,
-    tierNames: Array.from({ length: layers }, (_, i) => `Tier${i + 1}`),
+    source: 'areaflags',
+    areaflagsFormat: 'nibble',
+    data: payload,
+    gridW,
+    gridH,
+    worldW,
+    worldH,
+    tierNames: Array.from({ length: tierCount }, (_, i) => `Tier${i + 1}`),
   };
+}
+
+async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height: number; mask: Uint8Array }> {
+  // TGA files are not supported by createImageBitmap — use the custom parser.
+  if (isTga(raw)) {
+    const { width, height, rgba } = parseTgaRgba(raw);
+    const bpp = raw[16]; // bits per pixel from TGA header
+    const mask = new Uint8Array(width * height);
+    let activeCount = 0;
+    for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
+      const r = rgba[i];
+      const g = rgba[i + 1];
+      const b = rgba[i + 2];
+      const a = rgba[i + 3];
+      // For black & white TGA: white = high brightness (avg RGB > 128)
+      const brightness = (r + g + b) / 3;
+      let active: boolean;
+      if (bpp === 32) {
+        // RGBA: require both alpha > 64 AND brightness > 128
+        active = a > 64 && brightness > 128;
+      } else {
+        // RGB or grayscale: brightness only
+        active = brightness > 128;
+      }
+      if (active) { mask[p] = 1; activeCount++; }
+    }
+    console.debug(`[tier TGA] ${width}×${height} bpp=${bpp} activePixels=${activeCount}/${width * height}`);
+    return { width, height, mask };
+  }
+
+  // PNG / BMP — decode via canvas
+  const copy = new Uint8Array(raw.byteLength);
+  copy.set(raw);
+  const blob = new Blob([copy.buffer]);
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('image decode context unavailable');
+    ctx.drawImage(bitmap, 0, 0);
+    const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const mask = new Uint8Array(bitmap.width * bitmap.height);
+    let activeCount = 0;
+    for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
+      const r = rgba[i];
+      const g = rgba[i + 1];
+      const b = rgba[i + 2];
+      const a = rgba[i + 3];
+      // For black & white PNG: white = high brightness (avg RGB > 128)
+      const brightness = (r + g + b) / 3;
+      const active = a > 64 && brightness > 128;
+      if (active) { mask[p] = 1; activeCount++; }
+    }
+    console.debug(`[tier PNG/BMP] ${bitmap.width}×${bitmap.height} activePixels=${activeCount}/${bitmap.width * bitmap.height}`);
+    return { width: bitmap.width, height: bitmap.height, mask };
+  } finally {
+    bitmap.close();
+  }
+}
+
+export async function loadTierLayers(
+  layers: Partial<Record<string, Uint8Array>>,
+  worldW: number,
+  worldH: number,
+): Promise<boolean> {
+  const decoded = await Promise.all(
+    Object.entries(layers).map(async ([tier, raw]) => {
+      if (!raw) return null;
+      const d = await decodeImageMask(raw);
+      return { tier, ...d };
+    })
+  );
+
+  const valid = decoded.filter((d): d is NonNullable<typeof d> => Boolean(d));
+  if (valid.length === 0) return false;
+
+  const gridW = valid[0].width;
+  const gridH = valid[0].height;
+  const masks: Record<string, Uint8Array> = {};
+
+  for (const layer of valid) {
+    if (layer.width !== gridW || layer.height !== gridH) continue;
+    masks[layer.tier] = layer.mask;
+  }
+
+  const tierNames = Object.keys(masks)
+    .filter(t => /^Tier\d+$/i.test(t))
+    .sort((a, b) => Number(a.replace(/\D+/g, '')) - Number(b.replace(/\D+/g, '')));
+
+  if (tierNames.length === 0) return false;
+
+  console.info('[tier layers] Loaded:', tierNames.map(t => `${t}:${Object.values(masks[t] ?? []).filter(v => v).length}px`).join(', '),
+    `grid=${gridW}x${gridH} world=${worldW}x${worldH}`);
+
+  _cfg = {
+    source: 'layers',
+    data: new Uint8Array(0),
+    gridW,
+    gridH,
+    worldW,
+    worldH,
+    tierNames,
+    masks,
+  };
+
+  return true;
 }
 
 export function clearAreaFlags(): void {
@@ -40,27 +226,55 @@ export function hasAreaFlags(): boolean {
   return _cfg !== null;
 }
 
-function sampleNibble(x: number, z: number): { nibble: number; pixIdx: number } | null {
-  if (!_cfg) return null;
-  const { data, gridW, gridH, worldW, worldH } = _cfg;
+function sampleAreaFlags(x: number, z: number): { tier: string } | null {
+  if (!_cfg || _cfg.source !== 'areaflags') return null;
+  const { data, gridW, gridH, worldW, worldH, tierNames, areaflagsFormat } = _cfg;
   if (x < 0 || x >= worldW || z < 0 || z >= worldH) return null;
   const col    = Math.min(Math.floor(x / worldW * gridW), gridW - 1);
   const row    = Math.min(Math.floor((1 - z / worldH) * gridH), gridH - 1);
   const pixIdx = row * gridW + col;
+
+  if (areaflagsFormat === 'planes') {
+    const planeStride = _cfg.planeStride ?? (gridW * gridH);
+    const tierPlaneOrder = _cfg.tierPlaneOrder ?? tierNames.map((_, i) => i);
+    const tierCount = Math.min(tierNames.length, tierPlaneOrder.length);
+    for (let tierIdx = tierCount - 1; tierIdx >= 0; tierIdx--) {
+      const plane = tierPlaneOrder[tierIdx];
+      if (data[plane * planeStride + pixIdx] !== 0) {
+        return { tier: tierNames[tierIdx] };
+      }
+    }
+    return null;
+  }
+
   const byte   = data[Math.floor(pixIdx / 2)];
   const nibble = (pixIdx % 2 === 0) ? (byte >> 4) : (byte & 0xF);
-  return { nibble, pixIdx };
+  for (let bit = tierNames.length - 1; bit >= 0; bit--) {
+    if (nibble & (1 << bit)) return { tier: tierNames[bit] };
+  }
+  return null;
+}
+
+function sampleLayerTier(x: number, z: number): string | null {
+  if (!_cfg || _cfg.source !== 'layers' || !_cfg.masks) return null;
+  const { masks, gridW, gridH, worldW, worldH, tierNames } = _cfg;
+  if (x < 0 || x >= worldW || z < 0 || z >= worldH) return null;
+  const col = Math.min(Math.floor(x / worldW * gridW), gridW - 1);
+  const row = Math.min(Math.floor((1 - z / worldH) * gridH), gridH - 1);
+  const idx = row * gridW + col;
+  for (let i = tierNames.length - 1; i >= 0; i--) {
+    const tier = tierNames[i];
+    if (masks[tier]?.[idx]) return tier;
+  }
+  // Return null (not 'unknown') so sampleTierAtPos can fall back to areaflags
+  return null;
 }
 
 export function sampleTierAtPos(x: number, z: number): string {
-  const s = sampleNibble(x, z);
-  if (!s || !_cfg) return 'unknown';
-  const { nibble } = s;
-  const { tierNames } = _cfg;
-  // Highest tier wins
-  for (let bit = tierNames.length - 1; bit >= 0; bit--) {
-    if (nibble & (1 << bit)) return tierNames[bit];
-  }
+  const layerTier = sampleLayerTier(x, z);
+  if (layerTier !== null) return layerTier;  // could be a tier name; null = not in layers or no layers loaded
+  const areaFlagsTier = sampleAreaFlags(x, z);
+  if (areaFlagsTier) return areaFlagsTier.tier;
   return 'unknown';
 }
 
