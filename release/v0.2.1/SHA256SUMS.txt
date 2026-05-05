@@ -1,0 +1,3 @@
+44f3d9216535bedc4699e09dec88605acb2b4268193627bd3521d39d4582bd39  DayZ-Loot-Editor_0.2.1_x64_en-US.msi
+35eb335dee262bc9d065faa0b9a04fc14c3b65396940d1573fba8a2e195c97b9  DayZ-Loot-Editor_0.2.1_x64-portable.exe
+760e2b7ce804bfb808f146e15bbe18ccf95511ca32a07fc8710d980a5699c76a  DayZ-Loot-Editor_0.2.1_x64-setup.exe

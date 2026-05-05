@@ -1,0 +1,17 @@
+﻿{
+  "version": 1,
+  "exportedAt": "2026-05-04T00:00:00.000Z",
+  "overrides": {
+    "cpb_fnevoly": "lmgs",
+    "cpb_m134_black": "lmgs",
+    "cpb_pkm": "lmgs",
+    "cpb_rpd": "lmgs",
+    "cpb_rpk16_black": "lmgs",
+    "cpb_rpk16_green": "lmgs",
+    "cpb_rpk16_tan": "lmgs",
+    "cpb_fnevoly_magazine": "magazines",
+    "cpb_mag_pkm_100rnd": "magazines",
+    "cpb_m134_belt_200rnd": "magazines",
+    "rpd_100rnd_drummagazine": "magazines"
+  }
+}
