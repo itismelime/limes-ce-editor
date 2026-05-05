@@ -613,11 +613,10 @@ export function parseMapGroupProtoXml(raw: string): Map<string, MapGroupProtoXml
 
     const groupUsageArr = toObjectArray(group.usage);
     const groupUsages = groupUsageArr.map(u => strAttr(u, 'name')).filter(Boolean);
-    const usages = uniqueCaseInsensitive(
-      groupUsages.length > 0
-        ? groupUsages
-        : (IS_COMPAT_MODE ? containers.flatMap(c => c.tags) : [])
-    );
+    const containerTags = containers.flatMap(c => c.tags).filter(Boolean);
+    // Building usage classification should come only from mapgroupproto tag names
+    // (e.g. military/civilian/industrial), not container categories.
+    const usages = uniqueCaseInsensitive(containerTags.length > 0 ? containerTags : groupUsages);
 
     const valueArr = toObjectArray(group.value);
     const valueUsers = valueArr

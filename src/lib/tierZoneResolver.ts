@@ -18,11 +18,13 @@ interface AreaFlagsData {
   worldW: number;
   worldH: number;
   tierNames: string[];
+  usageNames?: string[];
   areaflagsFormat?: 'nibble' | 'planes';
   planeStride?: number;
   planeCount?: number;
   tierPlaneOrder?: number[];
   masks?: Record<string, Uint8Array>;
+  usageMasks?: Record<string, Uint8Array>;
 }
 
 let _cfg: AreaFlagsData | null = null;
@@ -174,8 +176,9 @@ export async function loadTierLayers(
   layers: Partial<Record<string, Uint8Array>>,
   worldW: number,
   worldH: number,
+  usageLayers: Partial<Record<string, Uint8Array>> = {},
 ): Promise<boolean> {
-  const decoded = await Promise.all(
+  const decodedTier = await Promise.all(
     Object.entries(layers).map(async ([tier, raw]) => {
       if (!raw) return null;
       const d = await decodeImageMask(raw);
@@ -183,26 +186,44 @@ export async function loadTierLayers(
     })
   );
 
-  const valid = decoded.filter((d): d is NonNullable<typeof d> => Boolean(d));
-  if (valid.length === 0) return false;
+  const decodedUsage = await Promise.all(
+    Object.entries(usageLayers).map(async ([usage, raw]) => {
+      if (!raw) return null;
+      const d = await decodeImageMask(raw);
+      return { usage, ...d };
+    })
+  );
 
-  const gridW = valid[0].width;
-  const gridH = valid[0].height;
+  const validTier = decodedTier.filter((d): d is NonNullable<typeof d> => Boolean(d));
+  const validUsage = decodedUsage.filter((d): d is NonNullable<typeof d> => Boolean(d));
+  if (validTier.length === 0 && validUsage.length === 0) return false;
+
+  const ref = validTier[0] ?? validUsage[0];
+  const gridW = ref.width;
+  const gridH = ref.height;
   const masks: Record<string, Uint8Array> = {};
+  const usageMasks: Record<string, Uint8Array> = {};
 
-  for (const layer of valid) {
+  for (const layer of validTier) {
     if (layer.width !== gridW || layer.height !== gridH) continue;
     masks[layer.tier] = layer.mask;
+  }
+
+  for (const layer of validUsage) {
+    if (layer.width !== gridW || layer.height !== gridH) continue;
+    usageMasks[layer.usage] = layer.mask;
   }
 
   const tierNames = Object.keys(masks)
     .filter(t => /^Tier\d+$/i.test(t))
     .sort((a, b) => Number(a.replace(/\D+/g, '')) - Number(b.replace(/\D+/g, '')));
 
-  if (tierNames.length === 0) return false;
+  const usageNames = Object.keys(usageMasks);
+
+  if (tierNames.length === 0 && usageNames.length === 0) return false;
 
   console.info('[tier layers] Loaded:', tierNames.map(t => `${t}:${Object.values(masks[t] ?? []).filter(v => v).length}px`).join(', '),
-    `grid=${gridW}x${gridH} world=${worldW}x${worldH}`);
+    `usageLayers=${usageNames.length} grid=${gridW}x${gridH} world=${worldW}x${worldH}`);
 
   _cfg = {
     source: 'layers',
@@ -212,7 +233,9 @@ export async function loadTierLayers(
     worldW,
     worldH,
     tierNames,
+    usageNames,
     masks,
+    usageMasks,
   };
 
   return true;
@@ -268,6 +291,24 @@ function sampleLayerTier(x: number, z: number): string | null {
   }
   // Return null (not 'unknown') so sampleTierAtPos can fall back to areaflags
   return null;
+}
+
+function sampleLayerUsage(x: number, z: number): string | null {
+  if (!_cfg || _cfg.source !== 'layers' || !_cfg.usageMasks || !_cfg.usageNames) return null;
+  const { usageMasks, usageNames, gridW, gridH, worldW, worldH } = _cfg;
+  if (x < 0 || x >= worldW || z < 0 || z >= worldH) return null;
+  const col = Math.min(Math.floor(x / worldW * gridW), gridW - 1);
+  const row = Math.min(Math.floor((1 - z / worldH) * gridH), gridH - 1);
+  const idx = row * gridW + col;
+  for (let i = 0; i < usageNames.length; i++) {
+    const usage = usageNames[i];
+    if (usageMasks[usage]?.[idx]) return usage;
+  }
+  return null;
+}
+
+export function sampleUsageAtPos(x: number, z: number): string | null {
+  return sampleLayerUsage(x, z);
 }
 
 export function sampleTierAtPos(x: number, z: number): string {

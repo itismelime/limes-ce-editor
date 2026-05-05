@@ -347,6 +347,7 @@ export function useServerFolder() {
                   console.warn('[tiers] Failed to load layer:', tier, layerName);
                 }
               }
+
             } catch (err) {
               console.error('[tiers] CE project parse error:', err);
               allWarnings.push(`CETool project parse error (${err instanceof Error ? err.message : String(err)})`);
