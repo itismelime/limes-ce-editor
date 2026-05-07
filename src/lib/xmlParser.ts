@@ -620,7 +620,7 @@ export function parseMapGroupProtoXml(raw: string): Map<string, MapGroupProtoXml
 
     const valueArr = toObjectArray(group.value);
     const valueUsers = valueArr
-      .map(v => (IS_COMPAT_MODE ? strAttrs(v, ['user', 'name']) : strAttr(v, 'name')))
+      .map(v => strAttrs(v, ['user', 'name']))
       .filter(Boolean);
     const tiers = [...new Set(valueUsers.flatMap(parseTierValue))];
 

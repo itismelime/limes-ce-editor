@@ -617,23 +617,6 @@ function containerMatchesType(type: DayZType, containerTags: string[], container
   return usageMatch && catMatch;
 }
 
-function normalizeUsageKey(usage: string): string {
-  return usage.trim().toLowerCase();
-}
-
-const USAGE_TIER_ALIASES: Record<string, string[]> = {
-  medic: ['medical'],
-  coast: ['civilian', 'fishing'],
-  town: ['civilian'],
-  village: ['civilian'],
-  office: ['civilian'],
-  school: ['civilian'],
-  prison: ['police', 'civilian'],
-  firefighter: ['industrial', 'civilian'],
-  farm: ['hunting', 'civilian'],
-  seasonalevent: ['civilian'],
-};
-
 function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
   const buildingInstances   = useServerStore(s => s.buildingInstances);
@@ -731,50 +714,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   }, [map]);
 
   // Fallback: infer tier from dominant item tier per usage tag
-  const usageTierMap = useMemo(() => {
-    if (!mission) return new Map<string, string>();
-    const counts = new Map<string, Map<string, number>>();
 
-    const pushCount = (usage: string, tier: string) => {
-      const normalizedUsage = normalizeUsageKey(usage);
-      if (!normalizedUsage) return;
-      if (!counts.has(normalizedUsage)) counts.set(normalizedUsage, new Map());
-      const usageCounts = counts.get(normalizedUsage)!;
-      usageCounts.set(tier, (usageCounts.get(tier) ?? 0) + 1);
-    };
-
-    for (const type of mission.types.values()) {
-      const tiers = TIER_ORDER.filter(t => type.tiers.includes(t));
-      if (tiers.length === 0) continue;
-      for (const usage of type.usages) {
-        for (const tier of tiers) pushCount(usage, tier);
-      }
-    }
-
-    const result = new Map<string, string>();
-    const pickBestTier = (tierCounts: Map<string, number>): string | null => {
-      const best = [...tierCounts.entries()].sort((a, b) => {
-        if (b[1] !== a[1]) return b[1] - a[1];
-        return TIER_ORDER.indexOf(a[0]) - TIER_ORDER.indexOf(b[0]);
-      })[0];
-      return best?.[0] ?? null;
-    };
-
-    for (const [usage, tierCounts] of counts) {
-      const best = pickBestTier(tierCounts);
-      if (best) result.set(usage, best);
-    }
-
-    for (const [usage, aliases] of Object.entries(USAGE_TIER_ALIASES)) {
-      if (result.has(usage)) continue;
-      const aliasTier = aliases
-        .map(alias => result.get(alias))
-        .find((tier): tier is string => !!tier);
-      if (aliasTier) result.set(usage, aliasTier);
-    }
-
-    return result;
-  }, [mission]);
 
   const visible = useMemo(() => {
     if (!showBuildings) return [];
@@ -815,27 +755,12 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       if (buildingMinLootmax > 0 && b.lootmax < buildingMinLootmax) return [];
       if (itemFilter !== null && !itemFilter(b)) return [];
 
-      // When zone tiers are available, treat zone tier as canonical for marker tiering.
-      // Proto tiers are still shown in popups for reference.
       const zoneTier = tierZonesLoaded ? sampleTierAtPos(b.x, b.z) : null;
       const protoTiers = TIER_ORDER.filter(t => b.tiers.includes(t));
-      let displayTiers = zoneTier && zoneTier !== 'unknown'
-        ? [zoneTier]
-        : protoTiers;
-      let inferredTier: string | null = null;
-      if (displayTiers.length === 0) {
-        const inferredSet = new Set<string>(
-          visibleUsages
-            .map(usage => usageTierMap.get(normalizeUsageKey(usage)))
-            .filter((tier): tier is string => !!tier)
-        );
-        const inferredTiers = TIER_ORDER.filter(t => inferredSet.has(t));
-        if (inferredTiers.length > 0) {
-          displayTiers = inferredTiers;
-          inferredTier = inferredTiers[0];
-        }
-      }
-      if (displayTiers.length === 0) displayTiers = ['unknown'];
+      // Merge: CE Tool zone tier first, then any proto tiers not already included.
+      const zoneTierArr = zoneTier && zoneTier !== 'unknown' ? [zoneTier] : [];
+      const mergedTiers = TIER_ORDER.filter(t => zoneTierArr.includes(t) || protoTiers.includes(t));
+      let displayTiers = mergedTiers.length > 0 ? mergedTiers : ['unknown'];
 
       if (displayTiers.every(t => hiddenTiers.includes(t))) return [];
 
@@ -845,9 +770,9 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const markerKey = `${dirtyKey}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`;
       const hasUnsavedChanges = dirtyBuildingKeys.has(dirtyKey);
 
-      return [{ b, markerKey, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng, zoneTier, protoTiers, inferredTier, hasUnsavedChanges }];
+      return [{ b, markerKey, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng, zoneTier, protoTiers, inferredTier: null, hasUnsavedChanges }];
     });
-  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, usageTierMap, tierZonesLoaded, mapConfig, viewportBounds, dirtyBuildingKeys]);
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, tierZonesLoaded, mapConfig, viewportBounds, dirtyBuildingKeys]);
 
   const zoom = map.getZoom();
   const showClusters = zoom <= clusterZoomThreshold;
