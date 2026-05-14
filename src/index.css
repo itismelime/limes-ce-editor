@@ -1,37 +1,37 @@
 @import "tailwindcss";
 
 :root {
-  --app-bg: #020617;
-  --app-fg: #e2e8f0;
-  --app-scrollbar-thumb: #334155;
-  --app-scrollbar-thumb-hover: #475569;
-  --leaflet-bg: #1a1f2e;
-  --leaflet-zoom-bg: #1e2433;
-  --leaflet-zoom-text: #94a3b8;
-  --leaflet-zoom-border: #374151;
-  --leaflet-zoom-bg-hover: #2d3748;
-  --leaflet-zoom-text-hover: #e2e8f0;
-  --leaflet-popup-bg: #0f172a;
-  --leaflet-popup-text: #e2e8f0;
-  --leaflet-popup-border: #334155;
-  --leaflet-popup-close: #94a3b8;
+  --app-bg: #0a0a0a;
+  --app-fg: #f0f0f0;
+  --app-scrollbar-thumb: #404040;
+  --app-scrollbar-thumb-hover: #525252;
+  --leaflet-bg: #141414;
+  --leaflet-zoom-bg: #1f1f1f;
+  --leaflet-zoom-text: #d0d0d0;
+  --leaflet-zoom-border: #3a3a3a;
+  --leaflet-zoom-bg-hover: #2a2a2a;
+  --leaflet-zoom-text-hover: #f0f0f0;
+  --leaflet-popup-bg: #141414;
+  --leaflet-popup-text: #f0f0f0;
+  --leaflet-popup-border: #333333;
+  --leaflet-popup-close: #b0b0b0;
 }
 
 html[data-theme='light'] {
-  --app-bg: #eff4fb;
-  --app-fg: #0f172a;
-  --app-scrollbar-thumb: #94a3b8;
-  --app-scrollbar-thumb-hover: #64748b;
-  --leaflet-bg: #dfe8f4;
-  --leaflet-zoom-bg: #f8fafc;
-  --leaflet-zoom-text: #334155;
-  --leaflet-zoom-border: #94a3b8;
-  --leaflet-zoom-bg-hover: #e2e8f0;
-  --leaflet-zoom-text-hover: #0f172a;
-  --leaflet-popup-bg: #ffffff;
-  --leaflet-popup-text: #0f172a;
-  --leaflet-popup-border: #cbd5e1;
-  --leaflet-popup-close: #475569;
+  --app-bg: #f5f5f5;
+  --app-fg: #1a1a1a;
+  --app-scrollbar-thumb: #b0b0b0;
+  --app-scrollbar-thumb-hover: #808080;
+  --leaflet-bg: #e8e8e8;
+  --leaflet-zoom-bg: #fafafa;
+  --leaflet-zoom-text: #2a2a2a;
+  --leaflet-zoom-border: #ccc;
+  --leaflet-zoom-bg-hover: #e8e8e8;
+  --leaflet-zoom-text-hover: #1a1a1a;
+  --leaflet-popup-bg: #fafafa;
+  --leaflet-popup-text: #1a1a1a;
+  --leaflet-popup-border: #ddd;
+  --leaflet-popup-close: #555;
 }
 
 
@@ -152,33 +152,54 @@ body {
   will-change: opacity;
 }
 
-/*
-  Light theme utility remap: the UI uses slate utility classes heavily, so
-  these overrides let us switch palettes globally without rewriting every component.
-*/
-html[data-theme='light'] .bg-slate-950 { background-color: #eff4fb !important; }
-html[data-theme='light'] .bg-slate-900 { background-color: #f8fafc !important; }
-html[data-theme='light'] .bg-slate-900\/20 { background-color: rgb(148 163 184 / 0.15) !important; }
-html[data-theme='light'] .bg-slate-800 { background-color: #e2e8f0 !important; }
-html[data-theme='light'] .bg-slate-800\/60 { background-color: rgb(226 232 240 / 0.7) !important; }
-html[data-theme='light'] .bg-slate-700 { background-color: #cbd5e1 !important; }
-html[data-theme='light'] .hover\:bg-slate-800:hover { background-color: #dbe4ef !important; }
-html[data-theme='light'] .hover\:bg-slate-700:hover { background-color: #bac8dc !important; }
-html[data-theme='light'] .hover\:bg-slate-600:hover { background-color: #a8b8ce !important; }
+/* Grey/Black palette remaps for dark and light themes */
+html[data-theme='dark'] .bg-slate-950 { background-color: #0a0a0a !important; }
+html[data-theme='dark'] .bg-slate-900 { background-color: #171717 !important; }
+html[data-theme='dark'] .bg-slate-900\/20 { background-color: rgb(100 100 100 / 0.15) !important; }
+html[data-theme='dark'] .bg-slate-800 { background-color: #262626 !important; }
+html[data-theme='dark'] .bg-slate-800\/60 { background-color: rgb(38 38 38 / 0.72) !important; }
+html[data-theme='dark'] .bg-slate-700 { background-color: #333333 !important; }
+html[data-theme='dark'] .hover\:bg-slate-800:hover { background-color: #2a2a2a !important; }
+html[data-theme='dark'] .hover\:bg-slate-700:hover { background-color: #3a3a3a !important; }
+html[data-theme='dark'] .hover\:bg-slate-600:hover { background-color: #454545 !important; }
 
-html[data-theme='light'] .text-slate-100 { color: #0f172a !important; }
-html[data-theme='light'] .text-slate-200 { color: #1e293b !important; }
-html[data-theme='light'] .text-slate-300 { color: #334155 !important; }
-html[data-theme='light'] .text-slate-400 { color: #475569 !important; }
-html[data-theme='light'] .text-slate-500 { color: #64748b !important; }
-html[data-theme='light'] .text-slate-600 { color: #94a3b8 !important; }
+html[data-theme='dark'] .text-slate-100 { color: #f5f5f5 !important; }
+html[data-theme='dark'] .text-slate-200 { color: #e0e0e0 !important; }
+html[data-theme='dark'] .text-slate-300 { color: #d0d0d0 !important; }
+html[data-theme='dark'] .text-slate-400 { color: #b0b0b0 !important; }
+html[data-theme='dark'] .text-slate-500 { color: #909090 !important; }
+html[data-theme='dark'] .text-slate-600 { color: #707070 !important; }
 
-html[data-theme='light'] .border-slate-900 { border-color: #dbe4ef !important; }
-html[data-theme='light'] .border-slate-800 { border-color: #d5deea !important; }
-html[data-theme='light'] .border-slate-700 { border-color: #c3cfdf !important; }
-html[data-theme='light'] .border-slate-600 { border-color: #acbbd0 !important; }
+html[data-theme='dark'] .border-slate-900 { border-color: #1a1a1a !important; }
+html[data-theme='dark'] .border-slate-800 { border-color: #262626 !important; }
+html[data-theme='dark'] .border-slate-700 { border-color: #333333 !important; }
+html[data-theme='dark'] .border-slate-600 { border-color: #4a4a4a !important; }
+html[data-theme='dark'] .hover\:border-slate-500:hover { border-color: #606060 !important; }
 
-html[data-theme='light'] .hover\:border-slate-500:hover { border-color: #7b8ea8 !important; }
+html[data-theme='light'] .bg-slate-950 { background-color: #f5f5f5 !important; }
+html[data-theme='light'] .bg-slate-900 { background-color: #fafafa !important; }
+html[data-theme='light'] .bg-slate-900\/20 { background-color: rgb(100 100 100 / 0.12) !important; }
+html[data-theme='light'] .bg-slate-800 { background-color: #e8e8e8 !important; }
+html[data-theme='light'] .bg-slate-800\/60 { background-color: rgb(232 232 232 / 0.75) !important; }
+html[data-theme='light'] .bg-slate-700 { background-color: #d0d0d0 !important; }
+html[data-theme='light'] .hover\:bg-slate-800:hover { background-color: #ddd !important; }
+html[data-theme='light'] .hover\:bg-slate-700:hover { background-color: #c8c8c8 !important; }
+html[data-theme='light'] .hover\:bg-slate-600:hover { background-color: #b5b5b5 !important; }
 
-html[data-theme='light'] .shadow-2xl { box-shadow: 0 24px 60px rgb(15 23 42 / 0.15) !important; }
+html[data-theme='light'] .text-slate-100 { color: #1a1a1a !important; }
+html[data-theme='light'] .text-slate-200 { color: #2a2a2a !important; }
+html[data-theme='light'] .text-slate-300 { color: #3a3a3a !important; }
+html[data-theme='light'] .text-slate-400 { color: #555 !important; }
+html[data-theme='light'] .text-slate-500 { color: #777 !important; }
+html[data-theme='light'] .text-slate-600 { color: #999 !important; }
+
+html[data-theme='light'] .border-slate-900 { border-color: #ddd !important; }
+html[data-theme='light'] .border-slate-800 { border-color: #d5d5d5 !important; }
+html[data-theme='light'] .border-slate-700 { border-color: #c5c5c5 !important; }
+html[data-theme='light'] .border-slate-600 { border-color: #b0b0b0 !important; }
+
+html[data-theme='light'] .hover\:border-slate-500:hover { border-color: #999 !important; }
+
+html[data-theme='light'] .shadow-2xl { box-shadow: 0 24px 60px rgb(0 0 0 / 0.1) !important; }
+html[data-theme='dark'] .shadow-2xl { box-shadow: 0 24px 60px rgb(0 0 0 / 0.5) !important; }
 

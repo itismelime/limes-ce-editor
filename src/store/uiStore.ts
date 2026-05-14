@@ -17,6 +17,7 @@ interface UiState {
   theme: ThemeId;
   showSaveReview: boolean;
   selectedEventName: string | null;
+  selectedBuildingType: string | null;
   typeFilter: string;
   categoryFilter: string;
   eventFilter: string;
@@ -48,6 +49,7 @@ interface UiState {
   setActiveMap: (map: MapId) => void;
   setTheme: (theme: ThemeId) => void;
   setShowSaveReview: (v: boolean) => void;
+  setSelectedBuilding: (type: string | null) => void;
   setSelectedEvent: (name: string | null) => void;
   setTypeFilter: (v: string) => void;
   setCategoryFilter: (v: string) => void;
@@ -143,6 +145,7 @@ export const useUiStore = create<UiState>((set) => ({
   })(),
   showSaveReview: false,
   selectedEventName: null,
+  selectedBuildingType: null,
   typeFilter: '',
   categoryFilter: '',
   eventFilter: '',
@@ -166,6 +169,7 @@ export const useUiStore = create<UiState>((set) => ({
   }),
   setShowSaveReview: (v) => set({ showSaveReview: v }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
+  setSelectedBuilding: (type) => set({ selectedBuildingType: type }),
   setTypeFilter: (v) => set({ typeFilter: v }),
   setCategoryFilter: (v) => set({ categoryFilter: v }),
   setEventFilter: (v) => set({ eventFilter: v }),

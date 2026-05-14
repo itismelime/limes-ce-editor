@@ -6,7 +6,6 @@ import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet } from '../../lib/coordinateTransform';
 import { TIER_ORDER, getUsageColor } from '../../types/map';
-import { BuildingPopup } from './BuildingPopup';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
 import type { MapConfig } from '../../types/map';
 
@@ -56,51 +55,29 @@ function containerMatchesType(type: DayZType, containerTags: string[], container
 
 const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
   building,
-  displayTiers,
   usageColor,
   latlng,
-  zoneTier,
-  zoneUsage,
-  protoTiers,
-  inferredTier,
   hasUnsavedChanges,
 }: {
   building: BuildingInstance;
-  displayTiers: string[];
   usageColor: string;
   latlng: L.LatLngExpression;
-  zoneTier: string | null;
-  zoneUsage: string | null;
-  protoTiers: string[];
-  inferredTier: string | null;
   hasUnsavedChanges: boolean;
 }) {
+  const setSelectedBuilding = useUiStore(s => s.setSelectedBuilding);
   return (
     <Marker
       position={latlng}
       icon={buildingMarkerIcon(usageColor, hasUnsavedChanges)}
-    >
-      <Popup maxWidth={460} autoPan={false}>
-        <BuildingPopup
-          building={building}
-          tiers={displayTiers}
-          zoneTier={zoneTier}
-          zoneUsage={zoneUsage}
-          protoTiers={protoTiers}
-          inferredTier={inferredTier}
-        />
-      </Popup>
-    </Marker>
+      eventHandlers={{
+        click: () => setSelectedBuilding(building.typeName),
+      }}
+    />
   );
 }, (prev, next) => (
   prev.building === next.building
   && prev.usageColor === next.usageColor
   && prev.hasUnsavedChanges === next.hasUnsavedChanges
-  && prev.zoneTier === next.zoneTier
-  && prev.zoneUsage === next.zoneUsage
-  && prev.inferredTier === next.inferredTier
-  && sameStringArray(prev.displayTiers, next.displayTiers)
-  && sameStringArray(prev.protoTiers, next.protoTiers)
 ));
 
 export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
@@ -261,7 +238,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const hasUnsavedChanges = dirtyBuildingKeys.has(dirtyKey);
 
       const markerUsage = zoneUsage ?? primaryUsage;
-      return [{ b, markerKey, primaryUsage, zoneUsage, displayTiers, usageColor: getUsageColor(markerUsage), latlng, zoneTier, protoTiers, inferredTier: null, hasUnsavedChanges }];
+      return [{ b, markerKey, primaryUsage, usageColor: getUsageColor(markerUsage), latlng, hasUnsavedChanges }];
     });
   }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, tierZonesLoaded, mapConfig, viewportBounds, dirtyBuildingKeys]);
 
@@ -314,19 +291,14 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       <>
         {clusters.map((cluster, idx) => {
           if (cluster.pointCount === 1 && cluster.sampleEntry) {
-            const { b, displayTiers, usageColor, latlng, zoneTier, zoneUsage, protoTiers, inferredTier, hasUnsavedChanges } = cluster.sampleEntry;
+            const { b, usageColor, latlng, hasUnsavedChanges } = cluster.sampleEntry;
 
             return (
               <BuildingMarkerEntry
                 key={`${b.typeName}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`}
                 building={b}
-                displayTiers={displayTiers}
                 usageColor={usageColor}
                 latlng={latlng}
-                zoneTier={zoneTier}
-                zoneUsage={zoneUsage}
-                protoTiers={protoTiers}
-                inferredTier={inferredTier}
                 hasUnsavedChanges={hasUnsavedChanges}
               />
             );
@@ -370,17 +342,12 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
 
   return (
     <>
-      {visible.map(({ b, markerKey, displayTiers, usageColor, latlng, zoneTier, zoneUsage, protoTiers, inferredTier, hasUnsavedChanges }) => (
+      {visible.map(({ b, markerKey, usageColor, latlng, hasUnsavedChanges }) => (
         <BuildingMarkerEntry
           key={markerKey}
           building={b}
-          displayTiers={displayTiers}
           usageColor={usageColor}
           latlng={latlng}
-          zoneTier={zoneTier}
-          zoneUsage={zoneUsage}
-          protoTiers={protoTiers}
-          inferredTier={inferredTier}
           hasUnsavedChanges={hasUnsavedChanges}
         />
       ))}

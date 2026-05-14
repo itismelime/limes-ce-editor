@@ -429,7 +429,7 @@ export function AppShell() {
   };
   const tabPanelClass = (tab: ActiveTab) => {
     if (activeTab === tab) {
-      if (tab === 'map') return 'fixed inset-0 z-10';
+      if (tab === 'map') return 'absolute inset-0 z-10';
       return 'h-full w-full relative z-10';
     }
     return 'hidden';

@@ -9,16 +9,16 @@ import type { ActiveTab } from '../../store/uiStore';
 import type { MapId } from '../../types/map';
 
 const TABS: { id: ActiveTab; label: string }[] = [
-  { id: 'map',           label: '🗺 Map' },
-  { id: 'types',         label: '🎒 Loot Types' },
-  { id: 'spawnableTypes', label: '📦 Spawnable Types' },
-  { id: 'playerSpawns',  label: '🧍 Player Spawn Points' },
-  { id: 'events',        label: '⚡ Events' },
-  { id: 'spawns',        label: '📍 Event Spawn Points' },
-  { id: 'economy',       label: '⚙ Economy Core' },
-  { id: 'weather',       label: '🌤 Weather' },
-  { id: 'gameplay',      label: '⚗ Gameplay' },
-  { id: 'settings',     label: '⚙ Settings' },
+  { id: 'map',           label: 'Map' },
+  { id: 'types',         label: 'Loot Types' },
+  { id: 'spawnableTypes', label: 'Spawnable Types' },
+  { id: 'playerSpawns',  label: 'Player Spawns' },
+  { id: 'events',        label: 'Events' },
+  { id: 'spawns',        label: 'Event Spawns' },
+  { id: 'economy',       label: 'Economy Core' },
+  { id: 'weather',       label: 'Weather' },
+  { id: 'gameplay',      label: 'Gameplay' },
+  { id: 'settings',      label: 'Settings' },
 ];
 
 const MAPS: { id: MapId; label: string }[] = [

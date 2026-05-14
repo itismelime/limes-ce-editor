@@ -16,6 +16,7 @@ import { getUsageColor } from '../../types/map';
 import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
 import { BuildingMarkers } from './BuildingMarkers';
+import { BuildingSidebar } from './BuildingSidebar';
 import type { MapConfig } from '../../types/map';
 
 const TILE_MAPS = new Set(['namalsk', 'chernarus', 'livonia', 'sakhal']);
@@ -738,42 +739,44 @@ export function MapView() {
 
   // ── Map ready ─────────────────────────────────────────────────────────────
   return (
-    <div className="relative h-full">
-      <MapContainer
-        crs={CRS.Simple}
-        preferCanvas
-        bounds={bounds}
-        maxBoundsViscosity={1.0}
-        maxZoom={maxLeafletZoom}
-        zoomAnimation
-        fadeAnimation
-        markerZoomAnimation
-        zoomSnap={0.25}
-        zoomDelta={0.25}
-        wheelPxPerZoomLevel={120}
-        style={{ height: '100%', width: '100%', background: '#0f1117' }}
-      >
-        <MapFitBounds mapConfig={mapConfig} />
-        <MapVisibilitySync isActive={isMapActive} />
-        <PopupAutoFlip />
+    <div className="h-full flex bg-slate-950">
+      <BuildingSidebar />
+      <div className="flex-1 relative">
+        <MapContainer
+          crs={CRS.Simple}
+          preferCanvas
+          bounds={bounds}
+          maxBoundsViscosity={1.0}
+          maxZoom={maxLeafletZoom}
+          zoomAnimation
+          fadeAnimation
+          markerZoomAnimation
+          zoomSnap={0.25}
+          zoomDelta={0.25}
+          wheelPxPerZoomLevel={120}
+          style={{ height: '100%', width: '100%', background: '#141414' }}
+        >
+          <MapFitBounds mapConfig={mapConfig} />
+          <MapVisibilitySync isActive={isMapActive} />
+          <PopupAutoFlip />
 
-        {/* Background overview — hidden once detail zoom takes over */}
-        <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
+          {/* Background overview — hidden once detail zoom takes over */}
+          <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
 
-        {/* Detail tile layer — capped per map at the highest available xam zoom */}
-        {isMapActive && mapHeavyReady && isKnownMap && <DayZTileLayer mapId={activeMap} />}
+          {/* Detail tile layer — capped per map at the highest available xam zoom */}
+          {isMapActive && mapHeavyReady && isKnownMap && <DayZTileLayer mapId={activeMap} />}
 
-        {isMapActive && mapHeavyReady && initializedEventSignature === eventSignature && (
-          <EventMarkers markers={markers} mapConfig={mapConfig} />
-        )}
-        {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
-        {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
-        {isMapActive && mapHeavyReady && overlaysReady && <UsageLayerOverlays bounds={bounds} show={showUsageZones} />}
-        {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
-      </MapContainer>
+          {isMapActive && mapHeavyReady && initializedEventSignature === eventSignature && (
+            <EventMarkers markers={markers} mapConfig={mapConfig} />
+          )}
+          {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
+          {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
+          {isMapActive && mapHeavyReady && overlaysReady && <UsageLayerOverlays bounds={bounds} show={showUsageZones} />}
+          {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
+        </MapContainer>
 
-      {/* CE Tool not found notice */}
-      {mission && !ceToolProject && (
+        {/* CE Tool not found notice */}
+        {mission && !ceToolProject && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-[420px] max-w-[90vw] bg-slate-900/95 border border-amber-700/60 rounded-xl shadow-xl backdrop-blur p-4 pointer-events-auto">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
@@ -987,6 +990,7 @@ export function MapView() {
             </button>
           )}
         </div>
+      </div>
       </div>
 
     </div>

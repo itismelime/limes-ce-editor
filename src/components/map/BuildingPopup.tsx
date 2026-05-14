@@ -12,6 +12,7 @@ interface Props {
   zoneUsage?: string | null;
   protoTiers?: string[];
   inferredTier?: string | null;
+  embedded?: boolean;
 }
 
 const EMPTY_TYPES = new Map<string, DayZType>();
@@ -173,7 +174,7 @@ function CategorySection({
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Filter…"
-              className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-500"
             />
             <select
               value={sortMode}
@@ -190,7 +191,7 @@ function CategorySection({
                 type="checkbox"
                 checked={activeOnly}
                 onChange={e => setActiveOnly(e.target.checked)}
-                className="accent-indigo-500"
+                className="accent-slate-500"
               />
               Active only
             </label>
@@ -266,7 +267,7 @@ function CategorySection({
                                         type="checkbox"
                                         readOnly
                                         checked={hasTier}
-                                        className="accent-indigo-500"
+                                        className="accent-slate-500"
                                       />
                                       {tier}
                                     </label>
@@ -524,7 +525,15 @@ function AddLootModal({
 }
 
 
-export function BuildingPopup({ building: buildingProp, tiers, zoneTier, zoneUsage, protoTiers = [], inferredTier }: Props) {
+export function BuildingPopup({
+  building: buildingProp,
+  tiers,
+  zoneTier,
+  zoneUsage,
+  protoTiers = [],
+  inferredTier,
+  embedded = false,
+}: Props) {
   const types = useServerStore(s => s.mission?.types ?? EMPTY_TYPES);
   const categoryFilter  = useUiStore(s => s.categoryFilter);
   const dirty = useServerStore(s => s.dirty);
@@ -628,6 +637,36 @@ export function BuildingPopup({ building: buildingProp, tiers, zoneTier, zoneUsa
   const hasZoneTier = !!zoneTier && zoneTier !== 'unknown';
   const orderedProtoTiers = [...new Set(protoTiers)];
   const hasInferredTier = !!inferredTier && inferredTier !== 'unknown';
+  const displaySourceSignals = useMemo(() => {
+    const normalizedTiers = [...new Set(tiers.map(t => t.trim()).filter(Boolean))];
+    const normalizedUsages = [...new Set(building.usages.map(u => u.trim()).filter(Boolean))];
+    const normalizedZoneUsage = zoneUsage?.trim() ?? '';
+
+    const hasKnownTier = normalizedTiers.some(t => t.toLowerCase() !== 'unknown');
+    const hasKnownUsage = normalizedUsages.some(u => u.toLowerCase() !== 'unknown');
+    const hasKnownZoneUsage = normalizedZoneUsage !== '' && normalizedZoneUsage.toLowerCase() !== 'unknown';
+    const hasKnownSignal = hasKnownTier || hasKnownUsage || hasKnownZoneUsage;
+
+    const visibleTiers = hasKnownSignal
+      ? normalizedTiers.filter(t => t.toLowerCase() !== 'unknown')
+      : normalizedTiers;
+
+    const visibleUsages = hasKnownSignal
+      ? normalizedUsages.filter(u => u.toLowerCase() !== 'unknown')
+      : normalizedUsages;
+
+    const showZoneUsageBadge = normalizedZoneUsage !== '' && (
+      normalizedZoneUsage.toLowerCase() !== 'unknown' || !hasKnownSignal
+    );
+
+    return {
+      visibleTiers,
+      visibleUsages,
+      showZoneUsageBadge,
+      zoneUsageValue: normalizedZoneUsage,
+    };
+  }, [tiers, building.usages, zoneUsage]);
+
   const openAddModal = (category = '') => {
     setAddModalCategory(category);
     setShowAddModal(true);
@@ -777,28 +816,28 @@ export function BuildingPopup({ building: buildingProp, tiers, zoneTier, zoneUsa
 
 
   return (
-    <div className="relative text-xs w-80 max-h-[480px] overflow-y-auto">
+    <div className={embedded ? 'relative text-xs h-full overflow-y-auto p-3' : 'relative text-xs w-80 max-h-[480px] overflow-y-auto'}>
       <div className="flex items-start justify-between gap-2 mb-2">
         <p className="font-mono font-semibold text-slate-100 break-all">{building.typeName}</p>
         <span className="text-slate-500 whitespace-nowrap">lootmax {building.lootmax}</span>
       </div>
       <div className="flex flex-wrap items-center gap-1 mb-3">
-        {tiers.map(t => (
+        {displaySourceSignals.visibleTiers.map(t => (
           <span
             key={t}
             className="px-1.5 py-0.5 rounded text-white text-xs font-semibold"
             style={{ backgroundColor: TIER_COLORS[t] ?? TIER_COLORS.unknown }}
           >{t}</span>
         ))}
-        {zoneUsage && (
+        {displaySourceSignals.showZoneUsageBadge && (
           <span
             className="px-1.5 py-0.5 rounded text-white text-xs font-semibold"
-            style={{ backgroundColor: getUsageColor(zoneUsage) }}
+            style={{ backgroundColor: getUsageColor(displaySourceSignals.zoneUsageValue) }}
             title="CE zone type (from usage layer)"
-          >{formatUsageLabel(zoneUsage)}</span>
+          >{formatUsageLabel(displaySourceSignals.zoneUsageValue)}</span>
         )}
-        {building.usages.length > 0 && (
-          <span className="text-slate-400">{building.usages.map(formatUsageLabel).join(' · ')}</span>
+        {displaySourceSignals.visibleUsages.length > 0 && (
+          <span className="text-slate-400">{displaySourceSignals.visibleUsages.map(formatUsageLabel).join(' · ')}</span>
         )}
       </div>
       {(hasZoneTier || orderedProtoTiers.length > 0 || hasInferredTier) && (
@@ -835,7 +874,7 @@ export function BuildingPopup({ building: buildingProp, tiers, zoneTier, zoneUsa
           <button
             onClick={() => setShowSaveReview(true)}
             disabled={!hasPending}
-            className="px-2 py-0.5 rounded border border-indigo-700/70 bg-indigo-900/40 text-indigo-300 disabled:opacity-50"
+            className="px-2 py-0.5 rounded border border-slate-600 bg-slate-800 text-slate-200 disabled:opacity-50"
             title="Review and save all pending XML changes"
           >
             Save Pending
