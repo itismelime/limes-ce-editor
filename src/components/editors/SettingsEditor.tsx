@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
-import { readFile, writeFile } from '../../lib/fileDiscovery';
+import { readFile, writeFile, clearCeToolCaches } from '../../lib/fileDiscovery';
 import { CATEGORY_OPTIONS } from '../../lib/itemClassifier';
+import { BUNDLED_CE_MAPS, deployBundledCeProject } from '../../lib/ceToolBundle';
 
 const KNOWN_MAPS: { id: string; label: string }[] = [
   { id: 'namalsk',   label: 'Namalsk' },
@@ -48,9 +50,15 @@ export function SettingsEditor() {
   const setRememberLastFolder = useUiStore(s => s.setRememberLastFolder);
 
   // CE Tool
-  const ceToolFolderOverride  = useServerStore(s => s.ceToolFolderOverride);
+  const ceToolFolderOverride    = useServerStore(s => s.ceToolFolderOverride);
   const setCeToolFolderOverride = useServerStore(s => s.setCeToolFolderOverride);
-  const pickCeToolFolder      = useServerStore(s => s.pickCeToolFolder);
+  const pickCeToolFolder        = useServerStore(s => s.pickCeToolFolder);
+  const ceSources               = useServerStore(s => s.ceSources);
+  const setCeSource             = useServerStore(s => s.setCeSource);
+  const reloadCeToolData        = useServerStore(s => s.reloadCeToolData);
+  const missionPath             = useServerStore(s => s.paths.missionPath);
+  const activeMap               = useUiStore(s => s.activeMap);
+  const [deployingMap, setDeployingMap] = useState<string | null>(null);
 
   // Map image cache
   const mapImagePaths   = useUiStore(s => s.mapImagePaths);
@@ -113,6 +121,29 @@ export function SettingsEditor() {
     clearCategoryOverrides();
   }
 
+  async function handleDeploy(mapId: string) {
+    if (!missionPath) return;
+    const entry = BUNDLED_CE_MAPS[mapId];
+    if (!entry) return;
+    const confirmed = window.confirm(
+      `Deploy bundled CE project for ${entry.label} to your mission folder?\n\n` +
+      `${entry.files.length} files will be copied to:\n${missionPath}\\CETool\\${entry.folder}\\\n\n` +
+      `Existing files will be overwritten.`
+    );
+    if (!confirmed) return;
+    setDeployingMap(mapId);
+    try {
+      await deployBundledCeProject(mapId, missionPath);
+      clearCeToolCaches();
+      setCeSource(mapId, 'user');
+      if (activeMap === mapId) await reloadCeToolData?.();
+    } catch (err) {
+      useServerStore.setState({ saveError: `Failed to deploy CE project for ${entry.label}: ${err instanceof Error ? err.message : String(err)}` });
+    } finally {
+      setDeployingMap(null);
+    }
+  }
+
   function handleClearMapCache(mapId: string) {
     clearMapImagePath(mapId);
   }
@@ -161,9 +192,40 @@ export function SettingsEditor() {
         <section>
           <SectionHeading>CE Tool Integration</SectionHeading>
           <div className="bg-slate-900 border border-slate-800 rounded-xl px-4">
+
+            {Object.entries(BUNDLED_CE_MAPS).map(([mapId, entry]) => {
+              const source = ceSources[mapId] ?? null;
+              const isDeploying = deployingMap === mapId;
+              return (
+                <SettingRow
+                  key={mapId}
+                  title={entry.label}
+                  description={
+                    source === 'user'
+                      ? 'CE project files found in your mission folder. Edits you make there will be read automatically on reload.'
+                      : source === 'bundled'
+                      ? 'Using bundled default zone data. Deploy to your mission folder to start customizing.'
+                      : 'Status unknown — load this map to check.'
+                  }
+                >
+                  <span className={`text-xs ${source === 'user' ? 'text-emerald-400' : source === 'bundled' ? 'text-slate-500' : 'text-slate-600'}`}>
+                    {source === 'user' ? 'Custom' : source === 'bundled' ? 'Bundled' : '—'}
+                  </span>
+                  <button
+                    onClick={() => void handleDeploy(mapId)}
+                    disabled={isDeploying || !missionPath}
+                    title={!missionPath ? 'Load a server folder first' : undefined}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isDeploying ? 'Deploying…' : 'Deploy to mission'}
+                  </button>
+                </SettingRow>
+              );
+            })}
+
             <SettingRow
-              title="CE Tool project folder"
-              description="The CE Tool project used for tier and usage zone overlays on the map. When set manually this overrides the auto-detected project inside your mission folder."
+              title="Project XML override"
+              description="Manually point to a CE Tool project file. Overrides auto-detection for all maps. Use this for custom maps or non-standard project locations."
             >
               <PathDisplay path={ceToolFolderOverride} />
               <button
@@ -181,6 +243,7 @@ export function SettingsEditor() {
                 </button>
               )}
             </SettingRow>
+
           </div>
         </section>
 

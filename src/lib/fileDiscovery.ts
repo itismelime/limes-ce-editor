@@ -324,3 +324,8 @@ export async function writeFile(path: string, text: string): Promise<void> {
 export async function createDir(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
 }
+
+export function clearCeToolCaches(): void {
+  CETOOL_PROJECT_CACHE.clear();
+  TIER_LAYER_CACHE.clear();
+}

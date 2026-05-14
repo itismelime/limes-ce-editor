@@ -56,7 +56,9 @@ interface ServerState {
   serverRootPath: string | null;
   openServerFolder?: () => Promise<void>;
   ceToolFolderOverride: string | null; // actually stores the project XML path when user manually picks
-  pickCeToolFolder?: () => Promise<void>; // callback from useServerFolder, optional for type safety
+  pickCeToolFolder?: () => Promise<void>;
+  ceSources: Record<string, 'bundled' | 'user' | null>;
+  reloadCeToolData?: () => Promise<void>;
   weather: WeatherData | null;
   gameplay: GameplayData | null;
   originalTypes: Map<string, DayZType>;
@@ -80,6 +82,8 @@ interface ServerState {
   setOpenServerFolder: (fn: (() => Promise<void>) | undefined) => void;
   setCeToolFolderOverride: (path: string | null) => void;
   setPickCeToolFolder: (fn: (() => Promise<void>) | undefined) => void;
+  setCeSource: (mapId: string, source: 'bundled' | 'user' | null) => void;
+  setReloadCeToolData: (fn: (() => Promise<void>) | undefined) => void;
   setWeather: (data: WeatherData | null) => void;
   setGameplay: (data: GameplayData | null) => void;
   updateGameplay: (data: GameplayData) => void;
@@ -171,6 +175,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   ceToolProject: null,
   ceToolFolderOverride: null,
   pickCeToolFolder: undefined,
+  ceSources: {},
+  reloadCeToolData: undefined,
   weather: null,
   gameplay: null,
   originalTypes: new Map(),
@@ -202,6 +208,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   setOpenServerFolder: (fn) => set({ openServerFolder: fn }),
   setCeToolFolderOverride: (path) => set({ ceToolFolderOverride: path }),
   setPickCeToolFolder: (fn) => set({ pickCeToolFolder: fn }),
+  setCeSource: (mapId, source) => set(s => ({ ceSources: { ...s.ceSources, [mapId]: source } })),
+  setReloadCeToolData: (fn) => set({ reloadCeToolData: fn }),
   setWeather: (data) => set({ weather: data, originalWeather: data }),
   setGameplay: (data) => set({ gameplay: data, originalGameplay: data }),
   updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),

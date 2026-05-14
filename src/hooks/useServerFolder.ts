@@ -133,13 +133,13 @@ async function loadCeToolTierData(opts: {
   activeMap: string;
   ceToolFolderOverride: string | null;
   serverRootPath: string | null;
-}): Promise<{ ceProject: CeToolProject | null; loaded: boolean; warnings: string[] }> {
+}): Promise<{ ceProject: CeToolProject | null; loaded: boolean; ceSource: 'bundled' | 'user' | null; warnings: string[] }> {
   const { missionPath, activeMap, ceToolFolderOverride, serverRootPath } = opts;
   const warnings: string[] = [];
 
   if (!serverRootPath) {
     console.warn('[tiers] No rootPath available');
-    return { ceProject: null, loaded: false, warnings };
+    return { ceProject: null, loaded: false, ceSource: null, warnings };
   }
 
   const mapCfg = MAP_CONFIGS[activeMap as keyof typeof MAP_CONFIGS];
@@ -234,15 +234,15 @@ async function loadCeToolTierData(opts: {
       console.info('[tiers] Calling loadTierLayers with', Object.keys(layers).length, 'layers,', Object.keys(usageLayers).length, 'usage types, worldSize:', worldSize);
       const loaded = await loadTierLayers(layers, worldSize, worldSize, usageLayers);
       console.info('[tiers] loadTierLayers returned:', loaded);
-      return { ceProject, loaded, warnings };
+      return { ceProject, loaded, ceSource: usingBundledCeTool ? 'bundled' : 'user', warnings };
     }
 
     console.warn('[tiers] No layers found after discovery');
-    return { ceProject, loaded: false, warnings };
+    return { ceProject, loaded: false, ceSource: usingBundledCeTool ? 'bundled' : 'user', warnings };
 
   } catch (e) {
     console.error('[cetool tiers] load failed:', e);
-    return { ceProject, loaded: false, warnings };
+    return { ceProject, loaded: false, ceSource: null, warnings };
   }
 }
 
@@ -339,6 +339,8 @@ export function useServerFolder() {
   const setPickCeToolFolder  = useServerStore(s => s.setPickCeToolFolder);
   const setServerRootPath    = useServerStore(s => s.setServerRootPath);
   const setOpenServerFolder  = useServerStore(s => s.setOpenServerFolder);
+  const setCeSource          = useServerStore(s => s.setCeSource);
+  const setReloadCeToolData  = useServerStore(s => s.setReloadCeToolData);
   const ceToolFolderOverride  = useServerStore(s => s.ceToolFolderOverride);
   const setWeather           = useServerStore(s => s.setWeather);
   const setGameplay          = useServerStore(s => s.setGameplay);
@@ -414,13 +416,14 @@ export function useServerFolder() {
       clearAreaFlags();
       setTierZonesLoaded(false);
       setCeToolProject(null);
-      const { ceProject, loaded: tiersLoaded, warnings: tierWarnings } = await loadCeToolTierData({
+      const { ceProject, loaded: tiersLoaded, ceSource, warnings: tierWarnings } = await loadCeToolTierData({
         missionPath: m.missionPath,
         activeMap,
         ceToolFolderOverride,
         serverRootPath: serverRootRef.current,
       });
       setCeToolProject(ceProject);
+      setCeSource(activeMap, ceSource);
       if (tiersLoaded) setTierZonesLoaded(true);
       if (!tiersLoaded) console.info('[tiers] No CE Tool tier layers found for this map.');
       else console.info('[tiers] Tier zones loaded successfully');
@@ -457,7 +460,7 @@ export function useServerFolder() {
     } finally {
       setLoading(false);
     }
-  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject]);
+  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource]);
 
   // Keep ref current every render so the effect below always has the latest version.
   selectMissionRef.current = selectMission;
@@ -575,6 +578,25 @@ export function useServerFolder() {
     if (current) await selectMission(current);
   }, [activeMap, setCeToolFolderOverride, allMissions, selectMission]);
 
+  const reloadCeToolData = useCallback(async () => {
+    const missionPath = useServerStore.getState().paths.missionPath;
+    if (!missionPath) return;
+    clearAreaFlags();
+    setTierZonesLoaded(false);
+    setCeToolProject(null);
+    const { ceProject, loaded, ceSource, warnings } = await loadCeToolTierData({
+      missionPath,
+      activeMap,
+      ceToolFolderOverride,
+      serverRootPath: serverRootRef.current,
+    });
+    setCeToolProject(ceProject);
+    setCeSource(activeMap, ceSource);
+    if (loaded) setTierZonesLoaded(true);
+    if (warnings.length > 0) setLoadWarnings([...useUiStore.getState().loadWarnings, ...warnings]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMap, ceToolFolderOverride, setCeToolProject, setTierZonesLoaded, setCeSource, setLoadWarnings]);
+
   // Expose callbacks through store so other components can access them without calling hook twice
   useEffect(() => {
     setPickCeToolFolder(pickCeToolFolder);
@@ -584,6 +606,11 @@ export function useServerFolder() {
     setOpenServerFolder(openFolder);
     return () => setOpenServerFolder(undefined);
   }, [openFolder, setOpenServerFolder]);
+
+  useEffect(() => {
+    setReloadCeToolData(reloadCeToolData);
+    return () => setReloadCeToolData(undefined);
+  }, [reloadCeToolData, setReloadCeToolData]);
 
   const cancelPicker = useCallback(() => {
     setPendingMissions(null);
