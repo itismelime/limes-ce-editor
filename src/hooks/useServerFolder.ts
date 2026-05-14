@@ -17,7 +17,7 @@ import { clearAreaFlags, loadTierLayers } from '../lib/tierZoneResolver';
 import { readBinaryFile } from '../lib/fileDiscovery';
 import { MAP_CONFIGS } from '../lib/mapConfig';
 import { parseCeToolProjectXml } from '../lib/ceToolParser';
-import type { MissionData, CeEntry } from '../types/dayz';
+import type { MissionData, CeEntry, CeToolProject, DayZType, SpawnableType } from '../types/dayz';
 import { useServerStore } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
 
@@ -90,6 +90,161 @@ async function loadBundledLayerByName(projectDir: string, layerName: string): Pr
     }
   }
   return null;
+}
+
+async function mergeEconomyCoreFiles(
+  missionPath: string,
+  entries: CeEntry[],
+  baseTypes: Map<string, DayZType>,
+  baseSpawnables: Map<string, SpawnableType>,
+): Promise<{ types: Map<string, DayZType>; spawnableTypes: Map<string, SpawnableType>; warnings: string[] }> {
+  const types = new Map(baseTypes);
+  const spawnableTypes = new Map(baseSpawnables);
+  const warnings: string[] = [];
+
+  for (const entry of entries) {
+    for (const file of entry.files) {
+      const filePath = `${missionPath}/${entry.folder}/${file.name}`;
+      try {
+        if (file.type === 'types') {
+          const raw = await readFile(filePath);
+          for (const [name, type] of parseTypesXml(raw, filePath)) types.set(name, type);
+        } else if (file.type === 'spawnabletypes' || file.type === 'cfgspawnabletypes') {
+          const raw = await readFile(filePath);
+          const parsed = parseSpawnableTypesXml(raw, filePath);
+          if (parsed.size === 0 && /<types[\s>]/i.test(raw)) {
+            for (const [name, type] of parseTypesXml(raw, filePath)) types.set(name, type);
+          } else {
+            for (const [name, st] of parsed) spawnableTypes.set(name, st);
+          }
+        } else {
+          warnings.push(`ce file not found: ${entry.folder}/${file.name} (unknown type: "${file.type}")`);
+        }
+      } catch (err) {
+        warnings.push(`ce file not found: ${entry.folder}/${file.name} (${err instanceof Error ? err.message : String(err)})`);
+      }
+    }
+  }
+
+  return { types, spawnableTypes, warnings };
+}
+
+async function loadCeToolTierData(opts: {
+  missionPath: string | null;
+  activeMap: string;
+  ceToolFolderOverride: string | null;
+  serverRootPath: string | null;
+}): Promise<{ ceProject: CeToolProject | null; loaded: boolean; warnings: string[] }> {
+  const { missionPath, activeMap, ceToolFolderOverride, serverRootPath } = opts;
+  const warnings: string[] = [];
+
+  if (!serverRootPath) {
+    console.warn('[tiers] No rootPath available');
+    return { ceProject: null, loaded: false, warnings };
+  }
+
+  const mapCfg = MAP_CONFIGS[activeMap as keyof typeof MAP_CONFIGS];
+  let worldSize = mapCfg.worldWidth;
+  const layers: Partial<Record<string, Uint8Array>> = {};
+  const usageLayers: Partial<Record<string, Uint8Array[]>> = {};
+  let ceProject: CeToolProject | null = null;
+
+  console.info('[tiers] Starting tier load for map:', activeMap, 'root:', serverRootPath, 'override:', ceToolFolderOverride);
+
+  try {
+    const ceProjectPath = ceToolFolderOverride
+      ? ceToolFolderOverride
+      : missionPath
+        ? await findCeToolProjectXmlInMission(missionPath, activeMap)
+        : null;
+    console.info('[tiers] Found CE project XML at:', ceProjectPath);
+
+    let resolvedProjectPath = ceProjectPath;
+    let usingBundledCeTool = false;
+
+    if (!resolvedProjectPath) {
+      const bundled = BUNDLED_CETOOL_PROJECTS[activeMap];
+      if (bundled) {
+        resolvedProjectPath = bundled.xmlPath;
+        usingBundledCeTool = true;
+        console.info('[tiers] Using bundled CE project XML:', resolvedProjectPath);
+      }
+    }
+
+    if (resolvedProjectPath) {
+      try {
+        const projectRaw = usingBundledCeTool
+          ? await readBundledText(resolvedProjectPath)
+          : await readFile(resolvedProjectPath);
+        ceProject = parseCeToolProjectXml(projectRaw, resolvedProjectPath);
+        console.info('[tiers] Parsed CE project, worldSize:', ceProject.worldSize, 'tierLayerNames:', ceProject.tierLayerNames);
+        if (ceProject.worldSize > 0) worldSize = ceProject.worldSize;
+
+        for (const [tier, layerName] of Object.entries(ceProject.tierLayerNames)) {
+          if (!layerName) continue;
+          console.info('[tiers] Loading layer:', tier, '=', layerName);
+          const raw = usingBundledCeTool
+            ? await loadBundledLayerByName(ceProject.projectDir, layerName)
+            : await loadLayerByName(ceProject.projectDir, layerName);
+          if (raw) {
+            console.info('[tiers] Loaded layer:', tier, 'size:', raw.byteLength, 'bytes');
+            layers[tier] = raw;
+          } else {
+            console.warn('[tiers] Failed to load layer:', tier, layerName);
+          }
+        }
+
+        for (const [usage, layerNames] of Object.entries(ceProject.usageLayerNames ?? {})) {
+          if (!layerNames?.length) continue;
+          const raws: Uint8Array[] = [];
+          for (const layerName of layerNames) {
+            const raw = usingBundledCeTool
+              ? await loadBundledLayerByName(ceProject.projectDir, layerName)
+              : await loadLayerByName(ceProject.projectDir, layerName);
+            if (raw) raws.push(raw);
+          }
+          if (raws.length > 0) usageLayers[usage] = raws;
+        }
+        console.info('[tiers] Usage layers collected:', Object.keys(usageLayers).length, 'types');
+
+      } catch (err) {
+        console.error('[tiers] CE project parse error:', err);
+        warnings.push(`CETool project parse error (${err instanceof Error ? err.message : String(err)})`);
+      }
+    } else {
+      console.warn('[tiers] No CE project XML found');
+    }
+
+    if (Object.keys(layers).length === 0) {
+      console.info('[tiers] Trying fallback layer discovery in mission path:', missionPath);
+      const layerPaths = await findCeToolTierLayers(missionPath ?? '', activeMap);
+      const layerEntries = Object.entries(layerPaths).filter((entry): entry is [string, string] => Boolean(entry[1]));
+      console.info('[tiers] Fallback found', layerEntries.length, 'layers:', layerEntries.map(e => e[0]));
+      for (const [tier, path] of layerEntries) {
+        try {
+          const raw = await readBinaryFile(path);
+          console.info('[tiers] Loaded fallback layer:', tier, 'from', path, 'size:', raw.byteLength);
+          layers[tier] = raw;
+        } catch (e) {
+          console.error('[tiers] Failed to read fallback layer:', tier, e);
+        }
+      }
+    }
+
+    if (Object.keys(layers).length > 0) {
+      console.info('[tiers] Calling loadTierLayers with', Object.keys(layers).length, 'layers,', Object.keys(usageLayers).length, 'usage types, worldSize:', worldSize);
+      const loaded = await loadTierLayers(layers, worldSize, worldSize, usageLayers);
+      console.info('[tiers] loadTierLayers returned:', loaded);
+      return { ceProject, loaded, warnings };
+    }
+
+    console.warn('[tiers] No layers found after discovery');
+    return { ceProject, loaded: false, warnings };
+
+  } catch (e) {
+    console.error('[cetool tiers] load failed:', e);
+    return { ceProject, loaded: false, warnings };
+  }
 }
 
 function autoSelectMission(missions: MissionFiles[], activeMap: string): MissionFiles | null {
@@ -225,236 +380,79 @@ export function useServerFolder() {
       setLoadWarnings(allWarnings);
       setMission(mission);
 
+      // Economy core
       let economyCoreEntries: CeEntry[] = [];
       if (m.economyCorePath) {
         try {
-          const raw = await readFile(m.economyCorePath);
-          economyCoreEntries = parseEconomyCoreXml(raw);
+          economyCoreEntries = parseEconomyCoreXml(await readFile(m.economyCorePath));
           setEconomyCore(economyCoreEntries);
         } catch { }
       }
-
-      // Load and merge all economy core files (types + spawnabletypes)
       if (economyCoreEntries.length > 0) {
-        const mergedTypes = new Map(mission.types);
-        const mergedSpawnables = new Map(mission.spawnableTypes);
-        const ceWarnings: string[] = [];
-        for (const entry of economyCoreEntries) {
-          for (const file of entry.files) {
-            const filePath = `${m.missionPath}/${entry.folder}/${file.name}`;
-            try {
-              if (file.type === 'types') {
-                const raw = await readFile(filePath);
-                for (const [name, type] of parseTypesXml(raw, filePath)) mergedTypes.set(name, type);
-              } else if (file.type === 'spawnabletypes' || file.type === 'cfgspawnabletypes') {
-                const raw = await readFile(filePath);
-                const parsed = parseSpawnableTypesXml(raw, filePath);
-                if (parsed.size === 0 && /<types[\s>]/i.test(raw)) {
-                  for (const [name, type] of parseTypesXml(raw, filePath)) mergedTypes.set(name, type);
-                } else {
-                  for (const [name, st] of parsed) mergedSpawnables.set(name, st);
-                }
-              } else {
-                ceWarnings.push(`${entry.folder}/${file.name} (unknown type: "${file.type}")`);
-              }
-            } catch (err) {
-              ceWarnings.push(`${entry.folder}/${file.name} (${err instanceof Error ? err.message : String(err)})`);
-            }
-          }
-        }
-        if (ceWarnings.length > 0) {
-          allWarnings.push(...ceWarnings.map(f => `ce file not found: ${f}`));
-          setLoadWarnings([...allWarnings]);
-        }
-        const updated = {
-          ...mission,
-          types: mergedTypes,
-          spawnableTypes: mergedSpawnables,
-        };
-        setMission(updated);
+        const { types, spawnableTypes, warnings: ceWarnings } = await mergeEconomyCoreFiles(
+          m.missionPath, economyCoreEntries, mission.types, mission.spawnableTypes,
+        );
+        if (ceWarnings.length > 0) { allWarnings.push(...ceWarnings); setLoadWarnings([...allWarnings]); }
+        setMission({ ...mission, types, spawnableTypes });
       }
 
-      // Load building spawn layer
+      // Map group proto (building spawn layer)
       if (m.mapGroupProtoPath && m.mapGroupPosPath) {
         try {
-          const [protoRaw, posRaw] = await Promise.all([
-            readFile(m.mapGroupProtoPath),
-            readFile(m.mapGroupPosPath),
-          ]);
+          const [protoRaw, posRaw] = await Promise.all([readFile(m.mapGroupProtoPath), readFile(m.mapGroupPosPath)]);
           const proto = parseMapGroupProtoXml(protoRaw);
-          const positions = parseMapGroupPosXml(posRaw);
           setMapGroupProto(proto);
-          setBuildingInstances(joinMapGroups(proto, positions));
+          setBuildingInstances(joinMapGroups(proto, parseMapGroupPosXml(posRaw)));
         } catch { /* optional layer — silently skip */ }
       } else {
         setMapGroupProto(new Map());
         setBuildingInstances([]);
       }
 
-      // Load CE Tool project metadata + tier layers as canonical tier source
+      // CE Tool tiers
       clearAreaFlags();
       setTierZonesLoaded(false);
-      let loadedTierZones = false;
       setCeToolProject(null);
+      const { ceProject, loaded: tiersLoaded, warnings: tierWarnings } = await loadCeToolTierData({
+        missionPath: m.missionPath,
+        activeMap,
+        ceToolFolderOverride,
+        serverRootPath: serverRootRef.current,
+      });
+      setCeToolProject(ceProject);
+      if (tiersLoaded) setTierZonesLoaded(true);
+      if (!tiersLoaded) console.info('[tiers] No CE Tool tier layers found for this map.');
+      else console.info('[tiers] Tier zones loaded successfully');
+      if (tierWarnings.length > 0) { allWarnings.push(...tierWarnings); setLoadWarnings([...allWarnings]); }
 
-      const rootPath = serverRootRef.current;
-      console.info('[tiers] Starting tier load for map:', activeMap, 'root:', rootPath, 'override:', ceToolFolderOverride);
-      if (rootPath) {
-        try {
-          // Try override (direct XML path from manual pick) or mission-scoped discovery.
-          // Intentionally no global server root scan — it risks picking up a CETool project
-          // for a different map when multiple missions co-exist under the same server root.
-          const ceProjectPath = ceToolFolderOverride
-            ? ceToolFolderOverride
-            : m.missionPath
-              ? await findCeToolProjectXmlInMission(m.missionPath, activeMap)
-              : null;
-          console.info('[tiers] Found CE project XML at:', ceProjectPath);
-          const mapCfg = MAP_CONFIGS[activeMap];
-          let worldSize = mapCfg.worldWidth;
-          const layers: Partial<Record<string, Uint8Array>> = {};
-          const usageLayers: Partial<Record<string, Uint8Array[]>> = {};
-          let usingBundledCeTool = false;
-          let resolvedProjectPath = ceProjectPath;
-
-          if (!resolvedProjectPath) {
-            const bundled = BUNDLED_CETOOL_PROJECTS[activeMap];
-            if (bundled) {
-              resolvedProjectPath = bundled.xmlPath;
-              usingBundledCeTool = true;
-              console.info('[tiers] Using bundled CE project XML:', resolvedProjectPath);
-            }
-          }
-
-          if (resolvedProjectPath) {
-            try {
-              const projectRaw = usingBundledCeTool
-                ? await readBundledText(resolvedProjectPath)
-                : await readFile(resolvedProjectPath);
-              const ceProject = parseCeToolProjectXml(projectRaw, resolvedProjectPath);
-              console.info('[tiers] Parsed CE project, worldSize:', ceProject.worldSize, 'tierLayerNames:', ceProject.tierLayerNames);
-              setCeToolProject(ceProject);
-              if (ceProject.worldSize > 0) worldSize = ceProject.worldSize;
-
-              for (const [tier, layerName] of Object.entries(ceProject.tierLayerNames)) {
-                if (!layerName) continue;
-                console.info('[tiers] Loading layer:', tier, '=', layerName);
-                const raw = usingBundledCeTool
-                  ? await loadBundledLayerByName(ceProject.projectDir, layerName)
-                  : await loadLayerByName(ceProject.projectDir, layerName);
-                if (raw) {
-                  console.info('[tiers] Loaded layer:', tier, 'size:', raw.byteLength, 'bytes');
-                  layers[tier] = raw;
-                } else {
-                  console.warn('[tiers] Failed to load layer:', tier, layerName);
-                }
-              }
-
-              for (const [usage, layerNames] of Object.entries(ceProject.usageLayerNames ?? {})) {
-                if (!layerNames?.length) continue;
-                const raws: Uint8Array[] = [];
-                for (const layerName of layerNames) {
-                  const raw = usingBundledCeTool
-                    ? await loadBundledLayerByName(ceProject.projectDir, layerName)
-                    : await loadLayerByName(ceProject.projectDir, layerName);
-                  if (raw) raws.push(raw);
-                }
-                if (raws.length > 0) usageLayers[usage] = raws;
-              }
-              console.info('[tiers] Usage layers collected:', Object.keys(usageLayers).length, 'types');
-
-            } catch (err) {
-              console.error('[tiers] CE project parse error:', err);
-              allWarnings.push(`CETool project parse error (${err instanceof Error ? err.message : String(err)})`);
-            }
-          } else {
-            console.warn('[tiers] No CE project XML found');
-          }
-
-          // Fallback CE layer discovery for maps with non-standard project layer names.
-          if (Object.keys(layers).length === 0) {
-            console.info('[tiers] Trying fallback layer discovery in mission path:', m.missionPath);
-            const layerPaths = await findCeToolTierLayers(m.missionPath, activeMap);
-            const layerEntries = Object.entries(layerPaths).filter((entry): entry is [string, string] => Boolean(entry[1]));
-            console.info('[tiers] Fallback found', layerEntries.length, 'layers:', layerEntries.map(e => e[0]));
-            if (layerEntries.length > 0) {
-              for (const [tier, path] of layerEntries) {
-                try { 
-                  const raw = await readBinaryFile(path);
-                  console.info('[tiers] Loaded fallback layer:', tier, 'from', path, 'size:', raw.byteLength);
-                  layers[tier] = raw;
-                }
-                catch (e) { 
-                  console.error('[tiers] Failed to read fallback layer:', tier, e);
-                }
-              }
-            }
-          }
-
-          if (Object.keys(layers).length > 0) {
-            console.info('[tiers] Calling loadTierLayers with', Object.keys(layers).length, 'layers,', Object.keys(usageLayers).length, 'usage types, worldSize:', worldSize);
-            loadedTierZones = await loadTierLayers(layers, worldSize, worldSize, usageLayers);
-            console.info('[tiers] loadTierLayers returned:', loadedTierZones);
-            if (loadedTierZones) {
-              setTierZonesLoaded(true);
-            }
-          } else {
-            console.warn('[tiers] No layers found after discovery');
-          }
-
-        } catch (e) {
-          console.error('[cetool tiers] load failed:', e);
-        }
-      } else {
-        console.warn('[tiers] No rootPath available');
-      }
-
-      if (!loadedTierZones) {
-        console.info('[tiers] No CE Tool tier layers found for this map.');
-      } else {
-        console.info('[tiers] Tier zones loaded successfully');
-      }
-
-      // Load player spawn points
+      // Optional files
       setPlayerSpawnData(null);
       if (m.playerSpawnPointsPath) {
-        try {
-          const raw = await readFile(m.playerSpawnPointsPath);
-          setPlayerSpawnData(parsePlayerSpawnPointsXml(raw));
-        } catch { /* optional — silently skip */ }
+        try { setPlayerSpawnData(parsePlayerSpawnPointsXml(await readFile(m.playerSpawnPointsPath))); }
+        catch { /* optional — silently skip */ }
       }
 
-      // Load weather
       setWeather(null);
       if (m.weatherPath) {
-        try {
-          const raw = await readFile(m.weatherPath);
-          setWeather(parseWeatherXml(raw));
-        } catch (err) {
+        try { setWeather(parseWeatherXml(await readFile(m.weatherPath))); }
+        catch (err) {
           allWarnings.push(`cfgweather.xml (parse error: ${err instanceof Error ? err.message : String(err)})`);
           setLoadWarnings([...allWarnings]);
         }
       }
 
-      // Load gameplay settings
       setGameplay(null);
       if (m.gameplayPath) {
-        try {
-          const raw = await readFile(m.gameplayPath);
-          setGameplay(parseGameplayJson(raw));
-        } catch (err) {
+        try { setGameplay(parseGameplayJson(await readFile(m.gameplayPath))); }
+        catch (err) {
           allWarnings.push(`cfggameplay.json (parse error: ${err instanceof Error ? err.message : String(err)})`);
           setLoadWarnings([...allWarnings]);
         }
       }
 
-      if (m.mapImagePath) {
-        setMapImagePath(activeMap, convertFileSrc(m.mapImagePath));
-      }
+      if (m.mapImagePath) setMapImagePath(activeMap, convertFileSrc(m.mapImagePath));
     } catch (err) {
-      if (err instanceof Error) {
-        setLoadError(`error:${err.message}`);
-      }
+      if (err instanceof Error) setLoadError(`error:${err.message}`);
     } finally {
       setLoading(false);
     }
