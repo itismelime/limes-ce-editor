@@ -120,9 +120,19 @@ function parseLoadWarning(raw: string): ParsedLoadWarning {
   return { raw, kind: 'other', file: raw };
 }
 
-function EmptyState() {
+function folderDisplayName(path: string): string {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path;
+}
+
+function folderDisplayPath(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.length >= 2 ? `…/${parts.slice(-2).join('/')}` : path;
+}
+
+function EmptyState({ onOpenFolder, onOpenFromPath }: { onOpenFolder: () => void; onOpenFromPath: (path: string) => void }) {
   const { loadError, loadWarnings } = useUiStore();
   const setLoadError = useUiStore(s => s.setLoadError);
+  const recentFolders = useUiStore(s => s.recentFolders);
 
   if (loadError === 'no_files_found') {
     return (
@@ -201,17 +211,44 @@ function EmptyState() {
     <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center px-8">
       <div className="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center text-4xl">🗺</div>
       <div>
-        <h2 className="text-xl font-semibold text-slate-200 mb-2">No server loaded</h2>
+        <h2 className="text-xl font-semibold text-slate-200 mb-2">Open a server folder</h2>
         <p className="text-slate-500 text-sm max-w-sm">
-          Click <span className="text-slate-300 font-medium">Open Server Folder</span> and select your DayZ server or mission directory.
-          The app will automatically find your loot files.
+          Select your DayZ server or mission directory. The app will automatically find your loot files.
         </p>
       </div>
-      <div className="flex flex-wrap justify-center gap-2 text-xs text-slate-600 max-w-md">
-        {Object.keys(FILE_DESCRIPTIONS).map(f => (
-          <span key={f} className="bg-slate-800 px-3 py-1 rounded-full">{f}</span>
-        ))}
-      </div>
+
+      <button
+        onClick={onOpenFolder}
+        className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+        </svg>
+        Browse for folder…
+      </button>
+
+      {recentFolders.length > 0 && (
+        <div className="w-full max-w-sm">
+          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Recent</p>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            {recentFolders.map(path => (
+              <button
+                key={path}
+                onClick={() => onOpenFromPath(path)}
+                className="w-full text-left px-4 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800 last:border-0 flex items-center gap-3"
+              >
+                <svg className="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-200 font-medium truncate">{folderDisplayName(path)}</p>
+                  <p className="text-xs text-slate-500 font-mono truncate">{folderDisplayPath(path)}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loadWarnings.length > 0 && (
         <MissingFilesWarning warnings={loadWarnings} />
@@ -276,7 +313,7 @@ export function AppShell() {
   const loadError = useUiStore(s => s.loadError);
   const loadWarnings = useUiStore(s => s.loadWarnings);
   const isLoading = useUiStore(s => s.isLoading);
-  const { openFolder, autoLoad, pendingMissions, selectMission, cancelPicker } = useServerFolder();
+  const { openFolder, openFromPath, autoLoad, pendingMissions, selectMission, cancelPicker } = useServerFolder();
   const [mountedTabs, setMountedTabs] = useState<Partial<Record<ActiveTab, true>>>({ [activeTab]: true });
   const [isStartupWarmup, setIsStartupWarmup] = useState(false);
   const [startupMessage, setStartupMessage] = useState('Preparing editor...');
@@ -400,7 +437,7 @@ export function AppShell() {
 
   return (
     <div className="relative flex flex-col h-screen bg-slate-950">
-      <TopBar onOpenFolder={openFolder} onPrefetchTab={prefetchTab} />
+      <TopBar onOpenFolder={openFolder} onOpenFromPath={openFromPath} onPrefetchTab={prefetchTab} />
       {pendingMissions && (
         <MissionPicker
           missions={pendingMissions}
@@ -411,7 +448,7 @@ export function AppShell() {
 
       <div className="flex-1 flex overflow-hidden">
         {!mission || showNoFilesError ? (
-          <EmptyState />
+          <EmptyState onOpenFolder={openFolder} onOpenFromPath={openFromPath} />
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden">
             {loadWarnings.length > 0 && (

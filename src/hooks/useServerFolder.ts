@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { pickAndDiscoverServer, scanFolder, readFile, findCeToolTierLayers, findCeToolProjectXmlInMission, pickCeToolFolder as pickCeToolFolderDialog, type MissionFiles } from '../lib/fileDiscovery';
 
-const LAST_FOLDER_KEY = 'lastServerFolder';
 import {
   parseTypesXml, parseEventSpawnsXml,
   parseEventsXml, parseSpawnableTypesXml,
@@ -511,7 +510,7 @@ export function useServerFolder() {
 
       serverRootRef.current = result.path;
       setServerRootPath(result.path);
-      localStorage.setItem(LAST_FOLDER_KEY, result.path);
+      useUiStore.getState().addRecentFolder(result.path);
       await loadFromMissions(result.missions);
     } catch (err) {
       if (err instanceof Error) {
@@ -526,7 +525,8 @@ export function useServerFolder() {
   }, [activeMap, selectMission, setLoading, setLoadError, setLoadWarnings]);
 
   const autoLoad = useCallback(async () => {
-    const saved = localStorage.getItem(LAST_FOLDER_KEY);
+    if (!useUiStore.getState().rememberLastFolder) return;
+    const saved = useUiStore.getState().recentFolders[0] ?? null;
     if (!saved) return;
 
     setLoading(true);
@@ -542,6 +542,28 @@ export function useServerFolder() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap, selectMission]);
+
+  const openFromPath = useCallback(async (path: string) => {
+    setLoading(true);
+    setLoadError(null);
+    setLoadWarnings([]);
+    try {
+      serverRootRef.current = path;
+      setServerRootPath(path);
+      useUiStore.getState().addRecentFolder(path);
+      const missions = await scanFolder(path);
+      await loadFromMissions(missions);
+    } catch (err) {
+      if (err instanceof Error) {
+        setLoadError(err.message.toLowerCase().includes('permission')
+          ? 'permission_denied'
+          : `error:${err.message}`
+        );
+      }
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMap, selectMission, setLoading, setLoadError, setLoadWarnings]);
 
   const pickCeToolFolder = useCallback(async () => {
     const projectPath = await pickCeToolFolderDialog(activeMap);
@@ -567,5 +589,5 @@ export function useServerFolder() {
     setPendingMissions(null);
   }, []);
 
-  return { openFolder, autoLoad, pendingMissions, selectMission, cancelPicker };
+  return { openFolder, openFromPath, autoLoad, pendingMissions, selectMission, cancelPicker };
 }

@@ -62,13 +62,25 @@ function Row({ label, value, mono, href }: { label: string; value: string; mono?
   );
 }
 
+function folderLabel(path: string): string {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path;
+}
+
+function folderSubLabel(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.length >= 2 ? `…/${parts.slice(-2).join('/')}` : path;
+}
+
 export function TopBar({
   onOpenFolder,
+  onOpenFromPath,
   onPrefetchTab,
 }: {
   onOpenFolder: () => void;
+  onOpenFromPath: (path: string) => void;
   onPrefetchTab: (tab: ActiveTab) => void;
 }) {
+  const serverRootPath = useServerStore(s => s.serverRootPath);
   const mission = useServerStore(s => s.mission);
   const dirty = useServerStore(s => s.dirty);
   const saveError = useServerStore(s => s.saveError);
@@ -100,7 +112,10 @@ export function TopBar({
   const showSaveReview = useUiStore(s => s.showSaveReview);
   const setShowSaveReview = useUiStore(s => s.setShowSaveReview);
   const isLoading = useUiStore(s => s.isLoading);
+  const recentFolders = useUiStore(s => s.recentFolders);
   const [showAbout, setShowAbout] = useState(false);
+  const [showServerMenu, setShowServerMenu] = useState(false);
+  const serverMenuRef = useRef<HTMLDivElement | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [preparingOffline, setPreparingOffline] = useState(false);
@@ -325,6 +340,20 @@ export function TopBar({
   }, [showOfflinePanel]);
 
   useEffect(() => {
+    if (!showServerMenu) return;
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (serverMenuRef.current && target && !serverMenuRef.current.contains(target)) {
+        setShowServerMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [showServerMenu]);
+
+  useEffect(() => {
     if (!tabSwitchInFlightRef.current) return;
     requestAnimationFrame(() => {
       tabSwitchInFlightRef.current = false;
@@ -420,16 +449,58 @@ export function TopBar({
           <span className="font-semibold text-slate-200 text-sm">Lime's CE Editor</span>
         </div>
 
-        <button
-          onClick={onOpenFolder}
-          disabled={isLoading}
-          className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded-lg transition-colors disabled:opacity-50"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-          </svg>
-          {isLoading ? 'Loading…' : 'Open Server Folder'}
-        </button>
+        <div ref={serverMenuRef} className="relative">
+          <button
+            onClick={() => !isLoading && setShowServerMenu(v => !v)}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded-lg transition-colors disabled:opacity-50"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            {isLoading ? 'Loading…' : (serverRootPath ? folderLabel(serverRootPath) : 'Open Server…')}
+            {!isLoading && (
+              <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            )}
+          </button>
+
+          {showServerMenu && (
+            <div className="absolute top-full left-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[260px]">
+              {recentFolders.length > 0 && (
+                <>
+                  <div className="px-3 pt-2 pb-1 text-[11px] text-slate-500 uppercase tracking-wider">Recent</div>
+                  {recentFolders.map(path => (
+                    <button
+                      key={path}
+                      onClick={() => { onOpenFromPath(path); setShowServerMenu(false); }}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-800 transition-colors flex items-center gap-2.5"
+                    >
+                      <svg className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                      <div className="min-w-0">
+                        <p className={`text-sm font-medium truncate ${path === serverRootPath ? 'text-indigo-400' : 'text-slate-200'}`}>{folderLabel(path)}</p>
+                        <p className="text-xs text-slate-500 font-mono truncate">{folderSubLabel(path)}</p>
+                      </div>
+                    </button>
+                  ))}
+                  <div className="border-t border-slate-700 my-1" />
+                </>
+              )}
+              <button
+                onClick={() => { onOpenFolder(); setShowServerMenu(false); }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-800 transition-colors flex items-center gap-2.5 text-slate-300"
+              >
+                <svg className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="text-sm">Browse for folder…</span>
+              </button>
+            </div>
+          )}
+        </div>
 
         {mission && (
           <span className="text-slate-400 text-sm">

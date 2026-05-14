@@ -39,6 +39,8 @@ interface UiState {
   showPlayerSpawns: boolean;
   categoryOverrides: Record<string, string>;
   buildingLootOverrides: Record<string, BuildingLootOverride>;
+  recentFolders: string[];
+  rememberLastFolder: boolean;
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
@@ -77,6 +79,8 @@ interface UiState {
   toggleBuildingAddedItem: (buildingType: string, itemName: string) => void;
   toggleBuildingAddedCategory: (buildingType: string, category: string) => void;
   clearBuildingLootOverride: (buildingType: string) => void;
+  addRecentFolder: (path: string) => void;
+  setRememberLastFolder: (v: boolean) => void;
 }
 
 const CATEGORY_OVERRIDES_KEY = 'categoryOverrides';
@@ -183,6 +187,14 @@ export const useUiStore = create<UiState>((set) => ({
   showPlayerSpawns: false,
   categoryOverrides: readCategoryOverrides(),
   buildingLootOverrides: readBuildingLootOverrides(),
+  recentFolders: (() => {
+    try { return JSON.parse(localStorage.getItem('recentFolders') ?? '[]') as string[]; }
+    catch { return []; }
+  })(),
+  rememberLastFolder: (() => {
+    try { return JSON.parse(localStorage.getItem('rememberLastFolder') ?? 'false') as boolean; }
+    catch { return false; }
+  })(),
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
       ? s.hiddenTiers.filter(t => t !== tier)
@@ -291,6 +303,15 @@ export const useUiStore = create<UiState>((set) => ({
     const next = { ...s.buildingLootOverrides, [key]: nextEntry };
     localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
     return { buildingLootOverrides: next };
+  }),
+  addRecentFolder: (path) => set(s => {
+    const next = [path, ...s.recentFolders.filter(p => p !== path)].slice(0, 8);
+    localStorage.setItem('recentFolders', JSON.stringify(next));
+    return { recentFolders: next };
+  }),
+  setRememberLastFolder: (v) => set(() => {
+    localStorage.setItem('rememberLastFolder', JSON.stringify(v));
+    return { rememberLastFolder: v };
   }),
   clearBuildingLootOverride: (buildingType) => set(s => {
     const key = buildingType.trim().toLowerCase();
