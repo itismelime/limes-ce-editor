@@ -338,6 +338,8 @@ export function useServerFolder() {
   const setCeToolProject     = useServerStore(s => s.setCeToolProject);
   const setCeToolFolderOverride = useServerStore(s => s.setCeToolFolderOverride);
   const setPickCeToolFolder  = useServerStore(s => s.setPickCeToolFolder);
+  const setServerRootPath    = useServerStore(s => s.setServerRootPath);
+  const setOpenServerFolder  = useServerStore(s => s.setOpenServerFolder);
   const ceToolFolderOverride  = useServerStore(s => s.ceToolFolderOverride);
   const setWeather           = useServerStore(s => s.setWeather);
   const setGameplay          = useServerStore(s => s.setGameplay);
@@ -508,6 +510,7 @@ export function useServerFolder() {
       if (!result) { setLoading(false); return; }
 
       serverRootRef.current = result.path;
+      setServerRootPath(result.path);
       localStorage.setItem(LAST_FOLDER_KEY, result.path);
       await loadFromMissions(result.missions);
     } catch (err) {
@@ -529,6 +532,7 @@ export function useServerFolder() {
     setLoading(true);
     try {
       serverRootRef.current = saved;
+      setServerRootPath(saved);
       const missions = await scanFolder(saved);
       if (missions.length > 0) await loadFromMissions(missions);
     } catch {
@@ -549,10 +553,15 @@ export function useServerFolder() {
     if (current) await selectMission(current);
   }, [activeMap, setCeToolFolderOverride, allMissions, selectMission]);
 
-  // Expose pickCeToolFolder through store so MapView can access it without calling hook twice
+  // Expose callbacks through store so other components can access them without calling hook twice
   useEffect(() => {
     setPickCeToolFolder(pickCeToolFolder);
   }, [pickCeToolFolder, setPickCeToolFolder]);
+
+  useEffect(() => {
+    setOpenServerFolder(openFolder);
+    return () => setOpenServerFolder(undefined);
+  }, [openFolder, setOpenServerFolder]);
 
   const cancelPicker = useCallback(() => {
     setPendingMissions(null);

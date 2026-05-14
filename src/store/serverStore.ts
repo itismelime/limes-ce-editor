@@ -53,6 +53,8 @@ interface ServerState {
   mapGroupProto: Map<string, MapGroupProtoEntry>;
   playerSpawnData: PlayerSpawnData | null;
   ceToolProject: CeToolProject | null;
+  serverRootPath: string | null;
+  openServerFolder?: () => Promise<void>;
   ceToolFolderOverride: string | null; // actually stores the project XML path when user manually picks
   pickCeToolFolder?: () => Promise<void>; // callback from useServerFolder, optional for type safety
   weather: WeatherData | null;
@@ -74,6 +76,8 @@ interface ServerState {
   setMapGroupProto: (proto: Map<string, MapGroupProtoEntry>) => void;
   setPlayerSpawnData: (data: PlayerSpawnData | null) => void;
   setCeToolProject: (data: CeToolProject | null) => void;
+  setServerRootPath: (path: string | null) => void;
+  setOpenServerFolder: (fn: (() => Promise<void>) | undefined) => void;
   setCeToolFolderOverride: (path: string | null) => void;
   setPickCeToolFolder: (fn: (() => Promise<void>) | undefined) => void;
   setWeather: (data: WeatherData | null) => void;
@@ -162,6 +166,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   buildingInstances: [],
   mapGroupProto: new Map(),
   playerSpawnData: null,
+  serverRootPath: null,
+  openServerFolder: undefined,
   ceToolProject: null,
   ceToolFolderOverride: null,
   pickCeToolFolder: undefined,
@@ -192,6 +198,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   setMapGroupProto: (proto) => set({ mapGroupProto: cloneMapGroupProto(proto), originalMapGroupProto: cloneMapGroupProto(proto) }),
   setPlayerSpawnData: (data) => set({ playerSpawnData: data }),
   setCeToolProject: (data) => set({ ceToolProject: data }),
+  setServerRootPath: (path) => set({ serverRootPath: path }),
+  setOpenServerFolder: (fn) => set({ openServerFolder: fn }),
   setCeToolFolderOverride: (path) => set({ ceToolFolderOverride: path }),
   setPickCeToolFolder: (fn) => set({ pickCeToolFolder: fn }),
   setWeather: (data) => set({ weather: data, originalWeather: data }),
