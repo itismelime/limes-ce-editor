@@ -45,3 +45,9 @@ coverage/
 
 # TypeScript build cache
 *.tsbuildinfo
+
+# App runtime temp folder
+.tmp/
+
+# User-generated category override exports
+*-overrides.json
