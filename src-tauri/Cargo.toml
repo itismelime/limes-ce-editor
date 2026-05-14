@@ -1,12 +1,12 @@
 [package]
-name = "dayz-loot-editor"
+name = "limes-ce-editor"
 version = "0.1.1"
-description = "DayZ Loot Editor"
+description = "Lime's CE Editor"
 authors = []
 edition = "2021"
 
 [lib]
-name = "dayz_loot_editor_lib"
+name = "limes_ce_editor_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
+use tauri::window::Color;
 
 struct VersionCache(Mutex<HashMap<String, String>>);
 struct SharedClient(reqwest::Client);
@@ -270,6 +271,15 @@ pub fn run() {
         .expect("HTTP client");
 
     tauri::Builder::default()
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                // Set both native window + WebView2 background to match the app's slate-950
+                // before showing, so no grey/white flash during webview initialization.
+                let _ = window.set_background_color(Some(Color(2, 6, 23, 255)));
+                let _ = window.show();
+            }
+            Ok(())
+        })
         .manage(VersionCache(Mutex::new(HashMap::new())))
         .manage(SharedClient(client))
         .manage(OfflinePrepareState { cancel_requested: AtomicBool::new(false) })

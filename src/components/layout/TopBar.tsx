@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
@@ -41,6 +42,15 @@ type OfflineCacheStatus = {
   total: number;
 };
 
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-xs text-slate-500">{label}</span>
+      <span className={`text-xs text-slate-300 ${mono ? 'font-mono' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
 export function TopBar({
   onOpenFolder,
   onPrefetchTab,
@@ -79,6 +89,8 @@ export function TopBar({
   const showSaveReview = useUiStore(s => s.showSaveReview);
   const setShowSaveReview = useUiStore(s => s.setShowSaveReview);
   const isLoading = useUiStore(s => s.isLoading);
+  const [showAbout, setShowAbout] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [preparingOffline, setPreparingOffline] = useState(false);
   const [offlineProgress, setOfflineProgress] = useState(0);
@@ -204,6 +216,8 @@ export function TopBar({
       // Ignore cancellation races.
     }
   };
+
+  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
   useEffect(() => {
     if (showOfflinePanel) {
@@ -392,7 +406,7 @@ export function TopBar({
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="flex items-center gap-2 mr-2">
           <div className="w-6 h-6 bg-indigo-600 rounded flex items-center justify-center text-xs font-bold">DZ</div>
-          <span className="font-semibold text-slate-200 text-sm">DayZ Loot Editor</span>
+          <span className="font-semibold text-slate-200 text-sm">Lime's CE Editor</span>
         </div>
 
         <button
@@ -417,7 +431,18 @@ export function TopBar({
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-3">
+        <button
+          onClick={() => setShowAbout(true)}
+          className="ml-auto flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors"
+          title="About"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" strokeWidth={2} />
+            <path strokeLinecap="round" strokeWidth={2} d="M12 16v-4M12 8h.01" />
+          </svg>
+        </button>
+
+        <div className="flex items-center gap-3">
           {saveStatus === 'saving' && (
             <span className="flex items-center gap-1.5 text-slate-400 text-xs">
               <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
@@ -608,6 +633,51 @@ export function TopBar({
                   {savingPending ? 'Saving…' : `Confirm Save (${pendingItems.length})`}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAbout && (
+        <div
+          className="fixed inset-0 z-[5000] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowAbout(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-6 pt-6 pb-4 flex flex-col items-center text-center">
+              <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center text-2xl font-bold text-white mb-4 shadow-lg">
+                DZ
+              </div>
+              <h2 className="text-lg font-semibold text-slate-100">Lime's CE Editor</h2>
+              {appVersion && (
+                <span className="mt-1 text-xs text-slate-500 font-mono">v{appVersion}</span>
+              )}
+            </div>
+
+            <div className="border-t border-slate-800 px-6 py-4 space-y-3">
+              <Row label="Author" value="lime" />
+              <Row label="GitHub" value="github.com/your-repo" mono />
+              <Row label="License" value="MIT" />
+              <Row label="Built with" value="Tauri v2 · React · Rust" />
+            </div>
+
+            <div className="border-t border-slate-800 px-6 py-4">
+              <p className="text-xs text-slate-500 text-center leading-relaxed">
+                A desktop editor for DayZ server loot tables, CE economy files,
+                and map group configurations.
+              </p>
+            </div>
+
+            <div className="border-t border-slate-800 px-6 py-3 flex justify-center">
+              <button
+                onClick={() => setShowAbout(false)}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
