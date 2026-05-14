@@ -141,7 +141,18 @@ function markSuccess(set: (fn: (s: ServerState) => Partial<ServerState>) => void
   setTimeout(() => set(s => s.saveStatus === 'success' ? { saveStatus: 'idle' } : {}), 3000);
 }
 
-export const useServerStore = create<ServerState>((set, get) => ({
+export const useServerStore = create<ServerState>((set, get) => {
+  async function trySave(fileName: string, operation: () => Promise<void>): Promise<void> {
+    set({ saveStatus: 'saving' });
+    try {
+      await operation();
+      markSuccess(set);
+    } catch (err) {
+      set({ saveError: `Failed to save ${fileName}: ${toMessage(err)}`, saveStatus: 'idle' });
+    }
+  }
+
+  return {
   mission: null,
   paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null },
   dirty: emptyDirty,
@@ -496,8 +507,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
     const sourceTypes = new Map(
       [...mission.types.entries()].filter(([, t]) => t.source === sourcePath)
     );
-    set({ saveStatus: 'saving' });
-    try {
+    await trySave(sourcePath.split(/[\\/]/).pop()!, async () => {
       await writeFile(sourcePath, serializeTypesXml(sourceTypes));
       set(s => {
         const originalTypes = new Map(s.originalTypes);
@@ -509,36 +519,25 @@ export const useServerStore = create<ServerState>((set, get) => ({
           originalTypes,
         };
       });
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save ${sourcePath.split(/[\\/]/).pop()}: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
 
   saveEventSpawns: async () => {
     const { mission, paths } = get();
     if (!mission || !paths.eventSpawnsPath) return;
-    set({ saveStatus: 'saving' });
-    try {
-      await writeFile(paths.eventSpawnsPath, serializeEventSpawnsXml(mission.eventSpawns));
+    await trySave('cfgeventspawns.xml', async () => {
+      await writeFile(paths.eventSpawnsPath!, serializeEventSpawnsXml(mission.eventSpawns));
       set(s => ({ dirty: { ...s.dirty, eventSpawns: false }, originalEventSpawns: [...mission.eventSpawns] }));
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save cfgeventspawns.xml: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
 
   saveEvents: async () => {
     const { mission, paths } = get();
     if (!mission || !paths.eventsPath) return;
-    set({ saveStatus: 'saving' });
-    try {
-      await writeFile(paths.eventsPath, serializeEventsXml(mission.events));
+    await trySave('events.xml', async () => {
+      await writeFile(paths.eventsPath!, serializeEventsXml(mission.events));
       set(s => ({ dirty: { ...s.dirty, events: false }, originalEvents: new Map(mission.events) }));
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save events.xml: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
 
   saveSpawnableTypes: async () => {
@@ -552,54 +551,39 @@ export const useServerStore = create<ServerState>((set, get) => ({
       groupedBySource.get(sourcePath)!.set(name, spawnableType);
     }
     if (groupedBySource.size === 0) return;
-    set({ saveStatus: 'saving' });
-    try {
+    await trySave('cfgspawnabletypes.xml', async () => {
       for (const [sourcePath, spawnableTypes] of groupedBySource) {
         await writeFile(sourcePath, serializeSpawnableTypesXml(spawnableTypes));
       }
       set(s => ({ dirty: { ...s.dirty, spawnableTypes: false }, originalSpawnableTypes: new Map(mission.spawnableTypes) }));
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save cfgspawnabletypes.xml: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
 
   saveMapGroupProto: async () => {
     const { mapGroupProto, paths } = get();
     if (!paths.mapGroupProtoPath) return;
-    set({ saveStatus: 'saving' });
-    try {
-      await writeFile(paths.mapGroupProtoPath, serializeMapGroupProtoXml(mapGroupProto));
+    await trySave('mapgroupproto.xml', async () => {
+      await writeFile(paths.mapGroupProtoPath!, serializeMapGroupProtoXml(mapGroupProto));
       set(s => ({ dirty: { ...s.dirty, mapGroupProto: false }, originalMapGroupProto: cloneMapGroupProto(s.mapGroupProto) }));
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save mapgroupproto.xml: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
 
   saveWeather: async () => {
     const { weather, paths } = get();
     if (!paths.weatherPath || !weather) return;
-    set({ saveStatus: 'saving' });
-    try {
-      await writeFile(paths.weatherPath, serializeWeatherXml(weather));
+    await trySave('cfgweather.xml', async () => {
+      await writeFile(paths.weatherPath!, serializeWeatherXml(weather));
       set(s => ({ dirty: { ...s.dirty, weather: false }, originalWeather: s.weather }));
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save cfgweather.xml: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
 
   saveGameplay: async () => {
     const { gameplay, paths } = get();
     if (!paths.gameplayPath || !gameplay) return;
-    set({ saveStatus: 'saving' });
-    try {
-      await writeFile(paths.gameplayPath, serializeGameplayJson(gameplay));
+    await trySave('cfggameplay.json', async () => {
+      await writeFile(paths.gameplayPath!, serializeGameplayJson(gameplay));
       set(s => ({ dirty: { ...s.dirty, gameplay: false }, originalGameplay: s.gameplay }));
-      markSuccess(set);
-    } catch (err) {
-      set({ saveError: `Failed to save cfggameplay.json: ${toMessage(err)}`, saveStatus: 'idle' });
-    }
+    });
   },
-}));
+  };
+});
