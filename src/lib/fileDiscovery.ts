@@ -95,45 +95,6 @@ export async function findCeToolTierLayers(folderPath: string, mapId?: string): 
   return promise;
 }
 
-export async function findCeToolProjectXml(folderPath: string, mapId?: string): Promise<string | null> {
-  const cacheKey = `${normalizePath(folderPath).toLowerCase()}|${String(mapId ?? '').toLowerCase()}`;
-  const cached = CETOOL_PROJECT_CACHE.get(cacheKey);
-  if (cached) return cached;
-
-  const promise = (async () => {
-    const results: ScanResult[] = [];
-    await scanDir(folderPath, 0, results);
-
-    // Accept XMLs that are either inside a folder matching the CE Tool name pattern,
-    // or anywhere under a path segment whose name matches.
-    const xmlCandidates = results.filter(r => {
-      if (!r.isXml) return false;
-      const parts = normalizePath(r.path).toLowerCase().split('/');
-      return parts.some(seg => CETOOL_DIR_RE.test(seg));
-    });
-    if (xmlCandidates.length === 0) return null;
-
-    const hints = mapId ? (MAP_HINTS[mapId] ?? []) : [];
-    const scored = xmlCandidates
-      .map(c => {
-        const p = normalizePath(c.path).toLowerCase();
-        const parts = p.split('/');
-        let score = 0;
-        if (parts.some(seg => CETOOL_DIR_RE.test(seg))) score += 4;
-        if (hints.some(h => p.includes(h))) score += 3;
-        if (mapId && c.name === `${mapId}.xml`) score += 4;
-        if (c.name.includes('project')) score += 1;
-        return { ...c, score };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    return scored[0]?.path ?? null;
-  })();
-
-  CETOOL_PROJECT_CACHE.set(cacheKey, promise);
-  return promise;
-}
-
 /**
  * Find CE Tool project XML within a specific mission folder.
  * Looks in {missionPath}/CETool/ and similar folders for map-specific project files.

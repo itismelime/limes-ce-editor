@@ -12,23 +12,8 @@ export function gameToLeaflet(
   return [lat, lng];
 }
 
-export function leafletToGame(
-  lat: number,
-  lng: number,
-  map: MapConfig,
-): { x: number; z: number } {
-  return {
-    x: (lng / map.imageWidth) * map.worldWidth,
-    z: (lat / map.imageHeight + 1) * map.worldHeight,
-  };
-}
-
 export function mapBounds(map: MapConfig): LatLngBoundsExpression {
   return [[0, 0], [-map.imageHeight, map.imageWidth]];
-}
-
-export function mapPanBounds(map: MapConfig): LatLngBoundsExpression {
-  return mapBounds(map);
 }
 
 export function isInBounds(x: number, z: number, map: MapConfig): boolean {
