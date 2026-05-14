@@ -1,9 +1,10 @@
-# DayZ Loot Editor
+# Lime's CE Editor
 
 > A desktop tool for visualising and editing DayZ server loot tables — no more hand-editing XML.
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue?style=flat-square)](https://github.com/lime/LootEditor/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.2.1-blue?style=flat-square)](https://github.com/itismelime/limes-ce-editor/releases)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey?style=flat-square)]()
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 
@@ -11,12 +12,12 @@
 
 <!-- Replace with an actual screenshot: docs/screenshot.png -->
 <!--
-![DayZ Loot Editor Screenshot](docs/screenshot.png)
+![Lime's CE Editor Screenshot](docs/screenshot.png)
 -->
 
 ## What it does
 
-DayZ Loot Editor opens your server mission folder and lets you read, search, filter, and edit every loot-related XML file through a clean UI. Changes write back to the original files — no format is changed, comments are preserved, and nothing outside the files you edit is touched.
+Lime's CE Editor opens your server mission folder and lets you read, search, filter, and edit every loot-related XML file through a clean UI. Changes write back to the original files — no format is changed, comments are preserved, and nothing outside the files you edit is touched.
 
 Supports **vanilla loot tables** and fully merges **mod economy core entries** (Custom Types folders, extra `cfgspawnabletypes` files, rootless XML fragments — all handled automatically).
 
@@ -120,3 +121,9 @@ Installers are written to `src-tauri/target/release/bundle/` — MSI under `msi/
 | State | Zustand |
 | Virtual lists | @tanstack/react-virtual |
 | Bundler | Vite |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
