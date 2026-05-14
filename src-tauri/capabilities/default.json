@@ -20,6 +20,8 @@
       "identifier": "fs:allow-read-dir",
       "allow": [{ "path": "**" }]
     },
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "opener:allow-open-url",
+    "opener:allow-default-urls"
   ]
 }

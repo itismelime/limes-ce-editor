@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
@@ -42,11 +43,20 @@ type OfflineCacheStatus = {
   total: number;
 };
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Row({ label, value, mono, href }: { label: string; value: string; mono?: boolean; href?: string }) {
   return (
     <div className="flex items-center justify-between gap-4">
       <span className="text-xs text-slate-500">{label}</span>
-      <span className={`text-xs text-slate-300 ${mono ? 'font-mono' : ''}`}>{value}</span>
+      {href ? (
+        <button
+          onClick={() => openUrl(href)}
+          className={`text-xs text-indigo-400 hover:text-indigo-300 hover:underline transition-colors ${mono ? 'font-mono' : ''}`}
+        >
+          {value}
+        </button>
+      ) : (
+        <span className={`text-xs text-slate-300 ${mono ? 'font-mono' : ''}`}>{value}</span>
+      )}
     </div>
   );
 }
@@ -659,7 +669,7 @@ export function TopBar({
 
             <div className="border-t border-slate-800 px-6 py-4 space-y-3">
               <Row label="Author" value="lime" />
-              <Row label="GitHub" value="github.com/your-repo" mono />
+              <Row label="GitHub" value="itismelime/limes-ce-editor" href="https://github.com/itismelime/limes-ce-editor" mono />
               <Row label="License" value="MIT" />
               <Row label="Built with" value="Tauri v2 · React · Rust" />
             </div>
