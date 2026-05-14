@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { TIER_COLORS, TIER_ORDER, getUsageColor, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
+import { sampleUsageAtPos, getUsageMasks, getLoadedTierNames } from '../../lib/tierZoneResolver';
 
 export function TierLegend() {
   const hiddenTiers       = useUiStore(s => s.hiddenTiers);
@@ -10,6 +11,7 @@ export function TierLegend() {
   const toggleUsage       = useUiStore(s => s.toggleUsage);
   const setHiddenTiers    = useUiStore(s => s.setHiddenTiers);
   const setHiddenUsages   = useUiStore(s => s.setHiddenUsages);
+  const tierZonesLoaded   = useUiStore(s => s.tierZonesLoaded);
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const mission           = useServerStore(s => s.mission);
 
@@ -28,8 +30,17 @@ export function TierLegend() {
       byKey.get(key)!.rawUsages.add(usage);
     };
 
-    for (const b of buildingInstances) b.usages.forEach(register);
-    if (mission) for (const t of mission.types.values()) t.usages.forEach(register);
+    if (tierZonesLoaded && getUsageMasks() !== null) {
+      // CE usage layers loaded: build legend from actual zone types per building.
+      // This replaces surface tags (Shelves, Floor) with meaningful zone categories.
+      for (const b of buildingInstances) {
+        register(sampleUsageAtPos(b.x, b.z) ?? 'unknown');
+      }
+    } else {
+      // Fallback: use mapgroupproto surface tags + item type usages.
+      for (const b of buildingInstances) b.usages.forEach(register);
+      if (mission) for (const t of mission.types.values()) t.usages.forEach(register);
+    }
 
     return [...byKey.values()]
       .map(group => ({ label: group.label, rawUsages: [...group.rawUsages] }))
@@ -38,7 +49,7 @@ export function TierLegend() {
         if (b.label === 'Unknown') return -1;
         return a.label.localeCompare(b.label);
       });
-  }, [buildingInstances, mission]);
+  }, [buildingInstances, mission, tierZonesLoaded]);
 
   const allUsageKeys = useMemo(() => usageGroups.flatMap(g => g.rawUsages), [usageGroups]);
   const hiddenUsageSet = useMemo(
@@ -46,7 +57,15 @@ export function TierLegend() {
     [hiddenUsages],
   );
 
-  const allTiers = [...TIER_ORDER, 'unknown'];
+  // Build the set of tiers that actually exist: TGA zone layers + building proto tiers + item tiers.
+  const activeTierSet = useMemo(() => {
+    const found = new Set<string>(getLoadedTierNames());
+    for (const b of buildingInstances) b.tiers.forEach(t => found.add(t));
+    if (mission) for (const type of mission.types.values()) type.tiers.forEach(t => found.add(t));
+    return found;
+  }, [buildingInstances, mission, tierZonesLoaded]);
+
+  const allTiers = [...TIER_ORDER.filter(t => activeTierSet.has(t)), 'unknown'];
   const allTiersHidden = allTiers.every(t => hiddenTiers.includes(t));
   const allUsagesHidden = usageGroups.every(g => g.rawUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase())));
 

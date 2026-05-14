@@ -281,5 +281,6 @@ export interface CeToolProject {
   values: string[];
   layers: CeToolLayer[];
   tierLayerNames: Partial<Record<string, string>>;
+  usageLayerNames: Partial<Record<string, string[]>>;
   territories: CeToolTerritory[];
 }

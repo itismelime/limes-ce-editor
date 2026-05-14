@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
-import { TIER_COLORS, formatUsageLabel } from '../../types/map';
+import { TIER_COLORS, getUsageColor, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 
@@ -9,6 +9,7 @@ interface Props {
   building: BuildingInstance;
   tiers: string[];
   zoneTier?: string | null;
+  zoneUsage?: string | null;
   protoTiers?: string[];
   inferredTier?: string | null;
 }
@@ -523,7 +524,7 @@ function AddLootModal({
 }
 
 
-export function BuildingPopup({ building: buildingProp, tiers, zoneTier, protoTiers = [], inferredTier }: Props) {
+export function BuildingPopup({ building: buildingProp, tiers, zoneTier, zoneUsage, protoTiers = [], inferredTier }: Props) {
   const types = useServerStore(s => s.mission?.types ?? EMPTY_TYPES);
   const categoryFilter  = useUiStore(s => s.categoryFilter);
   const dirty = useServerStore(s => s.dirty);
@@ -789,6 +790,13 @@ export function BuildingPopup({ building: buildingProp, tiers, zoneTier, protoTi
             style={{ backgroundColor: TIER_COLORS[t] ?? TIER_COLORS.unknown }}
           >{t}</span>
         ))}
+        {zoneUsage && (
+          <span
+            className="px-1.5 py-0.5 rounded text-white text-xs font-semibold"
+            style={{ backgroundColor: getUsageColor(zoneUsage) }}
+            title="CE zone type (from usage layer)"
+          >{formatUsageLabel(zoneUsage)}</span>
+        )}
         {building.usages.length > 0 && (
           <span className="text-slate-400">{building.usages.map(formatUsageLabel).join(' · ')}</span>
         )}

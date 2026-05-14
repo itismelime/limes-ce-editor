@@ -176,7 +176,7 @@ export async function loadTierLayers(
   layers: Partial<Record<string, Uint8Array>>,
   worldW: number,
   worldH: number,
-  usageLayers: Partial<Record<string, Uint8Array>> = {},
+  usageLayers: Partial<Record<string, Uint8Array[]>> = {},
 ): Promise<boolean> {
   const decodedTier = await Promise.all(
     Object.entries(layers).map(async ([tier, raw]) => {
@@ -186,19 +186,27 @@ export async function loadTierLayers(
     })
   );
 
-  const decodedUsage = await Promise.all(
-    Object.entries(usageLayers).map(async ([usage, raw]) => {
-      if (!raw) return null;
-      const d = await decodeImageMask(raw);
-      return { usage, ...d };
-    })
-  );
+  // Decode all raw files per usage, then OR the masks together so Def + Paint combine.
+  const decodedUsage: Array<{ usage: string; width: number; height: number; mask: Uint8Array }> = [];
+  for (const [usage, raws] of Object.entries(usageLayers)) {
+    if (!raws?.length) continue;
+    const decoded = (await Promise.all(raws.map(r => decodeImageMask(r)))).filter(Boolean);
+    if (decoded.length === 0) continue;
+    const ref = decoded[0];
+    const combined = new Uint8Array(ref.mask.length);
+    for (const d of decoded) {
+      if (d.width !== ref.width || d.height !== ref.height) continue;
+      for (let i = 0; i < combined.length; i++) {
+        if (d.mask[i]) combined[i] = 1;
+      }
+    }
+    decodedUsage.push({ usage, width: ref.width, height: ref.height, mask: combined });
+  }
 
   const validTier = decodedTier.filter((d): d is NonNullable<typeof d> => Boolean(d));
-  const validUsage = decodedUsage.filter((d): d is NonNullable<typeof d> => Boolean(d));
-  if (validTier.length === 0 && validUsage.length === 0) return false;
+  if (validTier.length === 0 && decodedUsage.length === 0) return false;
 
-  const ref = validTier[0] ?? validUsage[0];
+  const ref = validTier[0] ?? decodedUsage[0];
   const gridW = ref.width;
   const gridH = ref.height;
   const masks: Record<string, Uint8Array> = {};
@@ -209,7 +217,7 @@ export async function loadTierLayers(
     masks[layer.tier] = layer.mask;
   }
 
-  for (const layer of validUsage) {
+  for (const layer of decodedUsage) {
     if (layer.width !== gridW || layer.height !== gridH) continue;
     usageMasks[layer.usage] = layer.mask;
   }
@@ -247,6 +255,20 @@ export function clearAreaFlags(): void {
 
 export function hasAreaFlags(): boolean {
   return _cfg !== null;
+}
+
+export function getLoadedTierNames(): string[] {
+  return _cfg?.tierNames ?? [];
+}
+
+export function getUsageMasks(): Readonly<Record<string, Uint8Array>> | null {
+  if (!_cfg?.usageMasks || Object.keys(_cfg.usageMasks).length === 0) return null;
+  return _cfg.usageMasks;
+}
+
+export function getLayerGridInfo(): { gridW: number; gridH: number; worldW: number; worldH: number } | null {
+  if (!_cfg) return null;
+  return { gridW: _cfg.gridW, gridH: _cfg.gridH, worldW: _cfg.worldW, worldH: _cfg.worldH };
 }
 
 function sampleAreaFlags(x: number, z: number): { tier: string } | null {

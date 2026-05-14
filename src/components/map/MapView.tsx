@@ -3,7 +3,7 @@ import { MapContainer, ImageOverlay, Circle, CircleMarker, Marker, Popup, Toolti
 import L from 'leaflet';
 import { CRS } from 'leaflet';
 import { open } from '@tauri-apps/plugin-dialog';
-import { sampleTierAtPos } from '../../lib/tierZoneResolver';
+import { sampleTierAtPos, sampleUsageAtPos, getUsageMasks, getLayerGridInfo } from '../../lib/tierZoneResolver';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -563,6 +563,7 @@ const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
   usageColor,
   latlng,
   zoneTier,
+  zoneUsage,
   protoTiers,
   inferredTier,
   hasUnsavedChanges,
@@ -572,6 +573,7 @@ const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
   usageColor: string;
   latlng: L.LatLngExpression;
   zoneTier: string | null;
+  zoneUsage: string | null;
   protoTiers: string[];
   inferredTier: string | null;
   hasUnsavedChanges: boolean;
@@ -586,6 +588,7 @@ const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
           building={building}
           tiers={displayTiers}
           zoneTier={zoneTier}
+          zoneUsage={zoneUsage}
           protoTiers={protoTiers}
           inferredTier={inferredTier}
         />
@@ -597,6 +600,7 @@ const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
   && prev.usageColor === next.usageColor
   && prev.hasUnsavedChanges === next.hasUnsavedChanges
   && prev.zoneTier === next.zoneTier
+  && prev.zoneUsage === next.zoneUsage
   && prev.inferredTier === next.inferredTier
   && sameStringArray(prev.displayTiers, next.displayTiers)
   && sameStringArray(prev.protoTiers, next.protoTiers)
@@ -747,10 +751,21 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
     const hiddenUsageSet = new Set(hiddenUsages.map(u => u.trim().toLowerCase()));
 
     return buildingInstances.flatMap(b => {
-      const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
-      const visibleUsages = normalizedUsages.filter(u => !hiddenUsageSet.has(u.trim().toLowerCase()));
-      if (visibleUsages.length === 0) return [];
-      const primaryUsage = visibleUsages[0];
+      // Compute zone usage first so it drives the visibility filter.
+      const zoneUsage = tierZonesLoaded ? sampleUsageAtPos(b.x, b.z) : null;
+
+      // Filter by usage zone: when CE layers are loaded use zone type (null → 'unknown');
+      // otherwise fall back to mapgroupproto surface tags (Namalsk etc.).
+      if (tierZonesLoaded) {
+        const effectiveUsage = zoneUsage ?? 'unknown';
+        if (hiddenUsageSet.has(effectiveUsage.toLowerCase())) return [];
+      } else {
+        const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
+        const visibleUsages = normalizedUsages.filter(u => !hiddenUsageSet.has(u.trim().toLowerCase()));
+        if (visibleUsages.length === 0) return [];
+      }
+
+      const primaryUsage = b.usages[0] ?? 'unknown';
       if (nameQ && !b.typeName.toLowerCase().includes(nameQ)) return [];
       if (buildingMinLootmax > 0 && b.lootmax < buildingMinLootmax) return [];
       if (itemFilter !== null && !itemFilter(b)) return [];
@@ -770,7 +785,9 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const markerKey = `${dirtyKey}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`;
       const hasUnsavedChanges = dirtyBuildingKeys.has(dirtyKey);
 
-      return [{ b, markerKey, primaryUsage, displayTiers, usageColor: getUsageColor(primaryUsage), latlng, zoneTier, protoTiers, inferredTier: null, hasUnsavedChanges }];
+      // Prefer CE zone usage for color — it's more meaningful than mapgroupproto surface tags.
+      const markerUsage = zoneUsage ?? primaryUsage;
+      return [{ b, markerKey, primaryUsage, zoneUsage, displayTiers, usageColor: getUsageColor(markerUsage), latlng, zoneTier, protoTiers, inferredTier: null, hasUnsavedChanges }];
     });
   }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, tierZonesLoaded, mapConfig, viewportBounds, dirtyBuildingKeys]);
 
@@ -823,7 +840,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       <>
         {clusters.map((cluster, idx) => {
           if (cluster.pointCount === 1 && cluster.sampleEntry) {
-            const { b, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier, hasUnsavedChanges } = cluster.sampleEntry;
+            const { b, displayTiers, usageColor, latlng, zoneTier, zoneUsage, protoTiers, inferredTier, hasUnsavedChanges } = cluster.sampleEntry;
 
             return (
               <BuildingMarkerEntry
@@ -833,6 +850,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
                 usageColor={usageColor}
                 latlng={latlng}
                 zoneTier={zoneTier}
+                zoneUsage={zoneUsage}
                 protoTiers={protoTiers}
                 inferredTier={inferredTier}
                 hasUnsavedChanges={hasUnsavedChanges}
@@ -878,7 +896,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
 
   return (
     <>
-      {visible.map(({ b, markerKey, displayTiers, usageColor, latlng, zoneTier, protoTiers, inferredTier, hasUnsavedChanges }) => (
+      {visible.map(({ b, markerKey, displayTiers, usageColor, latlng, zoneTier, zoneUsage, protoTiers, inferredTier, hasUnsavedChanges }) => (
         <BuildingMarkerEntry
           key={markerKey}
           building={b}
@@ -886,6 +904,7 @@ function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
           usageColor={usageColor}
           latlng={latlng}
           zoneTier={zoneTier}
+          zoneUsage={zoneUsage}
           protoTiers={protoTiers}
           inferredTier={inferredTier}
           hasUnsavedChanges={hasUnsavedChanges}
@@ -917,6 +936,69 @@ function playerSpawnIcon(type: string): L.DivIcon {
     iconAnchor: [c, c],
     popupAnchor: [0, -c],
   });
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
+}
+
+function UsageLayerOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpression; show: boolean }) {
+  const tierZonesLoaded = useUiStore(s => s.tierZonesLoaded);
+  const [overlayUrls, setOverlayUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!tierZonesLoaded) { setOverlayUrls({}); return; }
+    const masks = getUsageMasks();
+    const grid = getLayerGridInfo();
+    if (!masks || !grid) return;
+
+    const { gridW, gridH } = grid;
+    // Downsample 4096→512 for fast canvas creation (8× reduction each axis = 64× fewer pixels)
+    const SCALE = 0.125;
+    const outW = Math.round(gridW * SCALE);
+    const outH = Math.round(gridH * SCALE);
+    const step = Math.round(1 / SCALE);
+
+    const urls: Record<string, string> = {};
+    for (const [usage, mask] of Object.entries(masks)) {
+      const color = hexToRgb(getUsageColor(usage));
+      if (!color) continue;
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      const imageData = ctx.createImageData(outW, outH);
+      const data = imageData.data;
+      for (let y = 0; y < outH; y++) {
+        for (let x = 0; x < outW; x++) {
+          const srcX = Math.min(x * step, gridW - 1);
+          const srcY = Math.min(y * step, gridH - 1);
+          if (mask[srcY * gridW + srcX]) {
+            const i = (y * outW + x) * 4;
+            data[i]     = color.r;
+            data[i + 1] = color.g;
+            data[i + 2] = color.b;
+            data[i + 3] = 90;
+          }
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+      urls[usage] = canvas.toDataURL();
+    }
+    setOverlayUrls(urls);
+  }, [tierZonesLoaded]);
+
+  if (!show || Object.keys(overlayUrls).length === 0) return null;
+
+  return (
+    <>
+      {Object.entries(overlayUrls).map(([usage, url]) => (
+        <ImageOverlay key={usage} url={url} bounds={bounds} opacity={1} zIndex={10} />
+      ))}
+    </>
+  );
 }
 
 function CeToolZoneOverlays({ mapConfig, show }: { mapConfig: MapConfig; show: boolean }) {
@@ -1133,6 +1215,7 @@ export function MapView() {
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
+  const [showUsageZones, setShowUsageZones] = useState(false);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
@@ -1276,6 +1359,7 @@ export function MapView() {
         )}
         {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
         {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
+        {isMapActive && mapHeavyReady && overlaysReady && <UsageLayerOverlays bounds={bounds} show={showUsageZones} />}
         {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
       </MapContainer>
 
@@ -1423,6 +1507,16 @@ export function MapView() {
           </div>
         )}
 
+        {tierZonesLoaded && getUsageMasks() !== null && (
+          <div className="pointer-events-auto">
+            <button
+              onClick={() => setShowUsageZones(v => !v)}
+              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showUsageZones ? 'border-amber-500 text-amber-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
+            >
+              Usage Zones
+            </button>
+          </div>
+        )}
         {ceToolProject && ceToolProject.territories.length > 0 && (
           <div className="pointer-events-auto">
             <button

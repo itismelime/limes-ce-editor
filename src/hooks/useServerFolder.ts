@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { pickAndDiscoverServer, scanFolder, readFile, findCeToolTierLayers, findCeToolProjectXml, findCeToolProjectXmlInMission, pickCeToolFolder as pickCeToolFolderDialog, type MissionFiles } from '../lib/fileDiscovery';
+import { pickAndDiscoverServer, scanFolder, readFile, findCeToolTierLayers, findCeToolProjectXmlInMission, pickCeToolFolder as pickCeToolFolderDialog, type MissionFiles } from '../lib/fileDiscovery';
 
 const LAST_FOLDER_KEY = 'lastServerFolder';
 import {
@@ -301,17 +301,19 @@ export function useServerFolder() {
       console.info('[tiers] Starting tier load for map:', activeMap, 'root:', rootPath, 'override:', ceToolFolderOverride);
       if (rootPath) {
         try {
-          // Try override (direct XML path from manual pick) or auto-discover from server root
-          // Try override or mission-specific discovery or global search fallback
+          // Try override (direct XML path from manual pick) or mission-scoped discovery.
+          // Intentionally no global server root scan — it risks picking up a CETool project
+          // for a different map when multiple missions co-exist under the same server root.
           const ceProjectPath = ceToolFolderOverride
-            ? ceToolFolderOverride  // override stores the XML path directly
-            : m.missionPath 
-              ? await findCeToolProjectXmlInMission(m.missionPath, activeMap)  // mission-specific search
-              : await findCeToolProjectXml(rootPath, activeMap);  // fallback: global search
+            ? ceToolFolderOverride
+            : m.missionPath
+              ? await findCeToolProjectXmlInMission(m.missionPath, activeMap)
+              : null;
           console.info('[tiers] Found CE project XML at:', ceProjectPath);
           const mapCfg = MAP_CONFIGS[activeMap];
           let worldSize = mapCfg.worldWidth;
           const layers: Partial<Record<string, Uint8Array>> = {};
+          const usageLayers: Partial<Record<string, Uint8Array[]>> = {};
           let usingBundledCeTool = false;
           let resolvedProjectPath = ceProjectPath;
 
@@ -348,6 +350,19 @@ export function useServerFolder() {
                 }
               }
 
+              for (const [usage, layerNames] of Object.entries(ceProject.usageLayerNames ?? {})) {
+                if (!layerNames?.length) continue;
+                const raws: Uint8Array[] = [];
+                for (const layerName of layerNames) {
+                  const raw = usingBundledCeTool
+                    ? await loadBundledLayerByName(ceProject.projectDir, layerName)
+                    : await loadLayerByName(ceProject.projectDir, layerName);
+                  if (raw) raws.push(raw);
+                }
+                if (raws.length > 0) usageLayers[usage] = raws;
+              }
+              console.info('[tiers] Usage layers collected:', Object.keys(usageLayers).length, 'types');
+
             } catch (err) {
               console.error('[tiers] CE project parse error:', err);
               allWarnings.push(`CETool project parse error (${err instanceof Error ? err.message : String(err)})`);
@@ -377,8 +392,8 @@ export function useServerFolder() {
           }
 
           if (Object.keys(layers).length > 0) {
-            console.info('[tiers] Calling loadTierLayers with', Object.keys(layers).length, 'layers, worldSize:', worldSize);
-            loadedTierZones = await loadTierLayers(layers, worldSize, worldSize);
+            console.info('[tiers] Calling loadTierLayers with', Object.keys(layers).length, 'layers,', Object.keys(usageLayers).length, 'usage types, worldSize:', worldSize);
+            loadedTierZones = await loadTierLayers(layers, worldSize, worldSize, usageLayers);
             console.info('[tiers] loadTierLayers returned:', loadedTierZones);
             if (loadedTierZones) {
               setTierZonesLoaded(true);

@@ -76,6 +76,19 @@ export function parseCeToolProjectXml(raw: string, sourcePath: string): CeToolPr
     tierLayerNames[`Tier${match[1]}`] = layer.name;
   }
 
+  // Extract usage layer names: match usgFlg_Def-<Name> and usgFlg_Paint-<Name> patterns,
+  // validate the captured name is a known usage, then group both variants under one key.
+  const usageLayerNames: Partial<Record<string, string[]>> = {};
+  for (const layer of layers) {
+    const match = layer.name.match(/^usgFlg_(?:Def|Paint)-(.+)$/i);
+    if (!match) continue;
+    const captured = match[1];
+    const canonical = usages.find(u => u.toLowerCase() === captured.toLowerCase());
+    if (!canonical) continue;
+    if (!usageLayerNames[canonical]) usageLayerNames[canonical] = [];
+    usageLayerNames[canonical].push(layer.name);
+  }
+
   const territoryTypes = toObjectArray((root['territory-type-list'] as Record<string, unknown> | undefined)?.['territory-type']);
   const territories: CeToolTerritory[] = territoryTypes.flatMap(tt => {
     const territoryType = strAttr(tt, 'name');
@@ -112,6 +125,7 @@ export function parseCeToolProjectXml(raw: string, sourcePath: string): CeToolPr
     values,
     layers,
     tierLayerNames,
+    usageLayerNames,
     territories,
   };
 }
