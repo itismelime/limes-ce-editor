@@ -1,0 +1,139 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useUiStore } from '../../store/uiStore';
+import { useServerStore } from '../../store/serverStore';
+import { BuildingPopup } from './BuildingPopup';
+
+export function BuildingSidebar() {
+  const selectedBuildingType = useUiStore(s => s.selectedBuildingType);
+  const buildingInstances = useServerStore(s => s.buildingInstances);
+  const minExpandedWidth = 320;
+  const maxExpandedWidth = 760;
+  const collapsedWidth = 44;
+  const [expanded, setExpanded] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(384);
+  const resizingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(sidebarWidth);
+  const prevSelectedBuildingRef = useRef<string | null>(null);
+
+  const building = useMemo(() => {
+    if (!selectedBuildingType) return null;
+    return buildingInstances.find(b => b.typeName.trim().toLowerCase() === selectedBuildingType.toLowerCase()) || null;
+  }, [selectedBuildingType, buildingInstances]);
+
+  useEffect(() => {
+    const prev = prevSelectedBuildingRef.current;
+    const next = selectedBuildingType ?? null;
+    if (next && next !== prev) {
+      setExpanded(true);
+    }
+    prevSelectedBuildingRef.current = next;
+  }, [selectedBuildingType]);
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      if (!resizingRef.current || !expanded) return;
+      const delta = event.clientX - dragStartXRef.current;
+      const next = Math.max(minExpandedWidth, Math.min(maxExpandedWidth, dragStartWidthRef.current + delta));
+      setSidebarWidth(next);
+    };
+
+    const onMouseUp = () => {
+      if (!resizingRef.current) return;
+      resizingRef.current = false;
+      setIsResizing(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [expanded]);
+
+  const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startWidth = expanded ? sidebarWidth : minExpandedWidth;
+    if (!expanded) {
+      setExpanded(true);
+      setSidebarWidth(startWidth);
+    }
+    resizingRef.current = true;
+    setIsResizing(true);
+    dragStartXRef.current = event.clientX;
+    dragStartWidthRef.current = startWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const toggleExpanded = () => {
+    setExpanded(prev => {
+      const next = !prev;
+      if (next && sidebarWidth < minExpandedWidth) {
+        setSidebarWidth(384);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div
+      className={`relative bg-slate-900 border-r border-slate-700 flex flex-col h-full overflow-hidden flex-shrink-0 ${isResizing ? '' : 'transition-[width] duration-150 ease-out'}`}
+      style={{ width: expanded ? sidebarWidth : collapsedWidth }}
+    >
+      <div className={`${expanded ? 'px-4 py-3' : 'px-2 py-2'} border-b border-slate-700 flex items-start justify-between gap-2 flex-shrink-0`}>
+        {expanded ? (
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-slate-100 truncate">Building Editor</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{building?.typeName ?? 'No building selected'}</p>
+          </div>
+        ) : (
+          <div className="text-[9px] font-semibold text-slate-500 tracking-wide mt-1">ED</div>
+        )}
+
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggleExpanded}
+            className="text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 rounded w-5 h-5 text-xs leading-none flex items-center justify-center"
+            title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {expanded ? '<' : '>'}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0">
+        {expanded && building && (
+          <BuildingPopup
+            building={building}
+            tiers={building.tiers.length > 0 ? building.tiers : ['unknown']}
+            zoneUsage={building.usages[0] ?? null}
+            protoTiers={building.tiers}
+            inferredTier={null}
+            embedded
+          />
+        )}
+        {expanded && !building && (
+          <div className="h-full flex items-center justify-center text-xs text-slate-500 px-4 text-center">
+            Click a building marker to open the editor.
+          </div>
+        )}
+      </div>
+
+      <div
+        onMouseDown={startResize}
+        className="absolute top-0 right-0 h-full w-2 cursor-col-resize group"
+        title="Drag to resize sidebar"
+      >
+        <div className="absolute top-1/2 -translate-y-1/2 right-0 w-[2px] h-14 bg-slate-600/70 group-hover:bg-slate-400" />
+        <div className="absolute top-1/2 -translate-y-1/2 right-0 w-[2px] h-6 bg-slate-300/90" />
+        <div className="absolute inset-y-0 -right-1 w-3" />
+        </div>
+      
+    </div>
+  );
+}
