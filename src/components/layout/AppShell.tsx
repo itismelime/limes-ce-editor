@@ -16,6 +16,7 @@ const loadEconomyCoreEditor = () => import('../editors/EconomyCoreEditor');
 const loadPlayerSpawnsEditor = () => import('../editors/PlayerSpawnsEditor');
 const loadWeatherEditor = () => import('../editors/WeatherEditor');
 const loadGameplayEditor = () => import('../editors/GameplayEditor');
+const loadSettingsEditor = () => import('../editors/SettingsEditor');
 
 const MapView = lazy(() => loadMapView().then(m => ({ default: m.MapView })));
 const TypesEditor = lazy(() => loadTypesEditor().then(m => ({ default: m.TypesEditor })));
@@ -36,6 +37,8 @@ const StableSpawnableTypesEditor = memo(SpawnableTypesEditor);
 const StableEconomyCoreEditor = memo(EconomyCoreEditor);
 const StableWeatherEditor = memo(WeatherEditor);
 const StableGameplayEditor = memo(GameplayEditor);
+const SettingsEditor = lazy(() => loadSettingsEditor().then(m => ({ default: m.SettingsEditor })));
+const StableSettingsEditor = memo(SettingsEditor);
 
 const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
   map: loadMapView,
@@ -47,6 +50,7 @@ const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
   economy: loadEconomyCoreEditor,
   weather: loadWeatherEditor,
   gameplay: loadGameplayEditor,
+  settings: loadSettingsEditor,
 };
 
 const IDLE_PREFETCH_TABS: ActiveTab[] = ['map', 'types'];
@@ -504,6 +508,11 @@ export function AppShell() {
                 {mountedTabs.gameplay && (
                   <div className={tabPanelClass('gameplay')}>
                     <StableGameplayEditor />
+                  </div>
+                )}
+                {mountedTabs.settings && (
+                  <div className={tabPanelClass('settings')}>
+                    <StableSettingsEditor />
                   </div>
                 )}
               </Suspense>

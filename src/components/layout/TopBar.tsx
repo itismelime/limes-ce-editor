@@ -18,6 +18,7 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'economy',       label: '⚙ Economy Core' },
   { id: 'weather',       label: '🌤 Weather' },
   { id: 'gameplay',      label: '⚗ Gameplay' },
+  { id: 'settings',     label: '⚙ Settings' },
 ];
 
 const MAPS: { id: MapId; label: string }[] = [

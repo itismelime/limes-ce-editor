@@ -1,7 +1,6 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { SearchBar } from '../shared/SearchBar';
@@ -9,7 +8,6 @@ import { SaveButton } from '../shared/SaveButton';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
 import { TIER_COLORS, getUsageColor, formatUsageLabel } from '../../types/map';
-import { readFile, writeFile } from '../../lib/fileDiscovery';
 import { CATEGORY_LABELS, CATEGORY_OPTIONS, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
 
 const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
@@ -311,8 +309,6 @@ export function TypesEditor() {
   const categoryOverrides = useUiStore(s => s.categoryOverrides);
   const setCategoryOverride = useUiStore(s => s.setCategoryOverride);
   const clearCategoryOverride = useUiStore(s => s.clearCategoryOverride);
-  const importCategoryOverrides = useUiStore(s => s.importCategoryOverrides);
-  const clearCategoryOverrides = useUiStore(s => s.clearCategoryOverrides);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string>('');
   const [usageFilter, setUsageFilter] = useState('');
@@ -542,51 +538,6 @@ export function TypesEditor() {
     updateType(name, patch);
   }, [updateType]);
 
-  async function handleImportOverrides() {
-    const selected = await open({
-      multiple: false,
-      title: 'Select category override JSON',
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-    });
-    if (!selected || typeof selected !== 'string') return;
-    try {
-      const raw = await readFile(selected);
-      const parsed = JSON.parse(raw) as { overrides?: Record<string, string> } | Record<string, string>;
-      const source = 'overrides' in parsed && parsed.overrides ? parsed.overrides : parsed;
-      const allowed = new Set(CATEGORY_OPTIONS);
-      const normalized: Record<string, string> = {};
-      for (const [name, category] of Object.entries(source)) {
-        if (typeof category !== 'string') continue;
-        if (!allowed.has(category)) continue;
-        normalized[name.toLowerCase()] = category;
-      }
-      importCategoryOverrides(normalized);
-      useServerStore.setState({ saveError: null });
-    } catch (err) {
-      useServerStore.setState({ saveError: `Failed to import category overrides: ${err instanceof Error ? err.message : String(err)}` });
-    }
-  }
-
-  async function handleExportOverrides() {
-    const folder = await open({
-      directory: true,
-      multiple: false,
-      title: 'Choose folder for override export',
-    });
-    if (!folder || typeof folder !== 'string') return;
-    const payload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      overrides: categoryOverrides,
-    };
-    try {
-      await writeFile(`${folder}/looteditor-category-overrides.json`, JSON.stringify(payload, null, 2));
-      useServerStore.setState({ saveError: null });
-    } catch (err) {
-      useServerStore.setState({ saveError: `Failed to export category overrides: ${err instanceof Error ? err.message : String(err)}` });
-    }
-  }
-
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col min-w-0">
@@ -639,27 +590,6 @@ export function TypesEditor() {
             ))}
           </select>
 
-          <button
-            onClick={handleImportOverrides}
-            className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700"
-          >
-            Import map
-          </button>
-
-          <button
-            onClick={handleExportOverrides}
-            className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700"
-          >
-            Export map
-          </button>
-
-          <button
-            onClick={clearCategoryOverrides}
-            className="px-2 py-1 rounded text-xs bg-slate-800 text-slate-400 border border-slate-700 hover:text-red-400"
-            title="Clear all manual category overrides"
-          >
-            Clear map
-          </button>
 
           <select
             value={sourceFilter}

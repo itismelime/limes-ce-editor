@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { MapId } from '../types/map';
 
-export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay';
+export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay' | 'settings';
 
 export interface BuildingLootOverride {
   blockItems: string[];
