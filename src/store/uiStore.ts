@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { MapId } from '../types/map';
 
 export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay' | 'settings';
+export type ThemeId = 'dark' | 'light';
 
 export interface BuildingLootOverride {
   blockItems: string[];
@@ -13,6 +14,7 @@ export interface BuildingLootOverride {
 interface UiState {
   activeTab: ActiveTab;
   activeMap: MapId;
+  theme: ThemeId;
   showSaveReview: boolean;
   selectedEventName: string | null;
   typeFilter: string;
@@ -44,6 +46,7 @@ interface UiState {
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
+  setTheme: (theme: ThemeId) => void;
   setShowSaveReview: (v: boolean) => void;
   setSelectedEvent: (name: string | null) => void;
   setTypeFilter: (v: string) => void;
@@ -130,6 +133,14 @@ function readBuildingLootOverrides(): Record<string, BuildingLootOverride> {
 export const useUiStore = create<UiState>((set) => ({
   activeTab: 'map',
   activeMap: 'namalsk',
+  theme: (() => {
+    try {
+      const raw = localStorage.getItem('theme');
+      return raw === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  })(),
   showSaveReview: false,
   selectedEventName: null,
   typeFilter: '',
@@ -149,6 +160,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setActiveMap: (map) => set({ activeMap: map }),
+  setTheme: (theme) => set(() => {
+    localStorage.setItem('theme', theme);
+    return { theme };
+  }),
   setShowSaveReview: (v) => set({ showSaveReview: v }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
   setTypeFilter: (v) => set({ typeFilter: v }),

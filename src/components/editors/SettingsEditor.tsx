@@ -13,6 +13,11 @@ const KNOWN_MAPS: { id: string; label: string }[] = [
   { id: 'sakhal',    label: 'Sakhal' },
 ];
 
+const THEME_OPTIONS: { id: 'dark' | 'light'; label: string; note: string }[] = [
+  { id: 'dark', label: 'Dark (default)', note: 'Low-glare look for long sessions and night editing.' },
+  { id: 'light', label: 'Light', note: 'High-contrast daytime look with brighter surfaces.' },
+];
+
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{children}</h2>;
 }
@@ -48,6 +53,8 @@ export function SettingsEditor() {
   const openServerFolder      = useServerStore(s => s.openServerFolder);
   const rememberLastFolder    = useUiStore(s => s.rememberLastFolder);
   const setRememberLastFolder = useUiStore(s => s.setRememberLastFolder);
+  const theme = useUiStore(s => s.theme);
+  const setTheme = useUiStore(s => s.setTheme);
 
   // CE Tool
   const ceToolFolderOverride    = useServerStore(s => s.ceToolFolderOverride);
@@ -155,6 +162,36 @@ export function SettingsEditor() {
           <h1 className="text-lg font-semibold text-slate-100 mb-1">Settings</h1>
           <p className="text-xs text-slate-500">Editor preferences. These settings are stored locally and do not affect your server files.</p>
         </div>
+
+        {/* Appearance */}
+        <section>
+          <SectionHeading>Appearance</SectionHeading>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl px-4">
+            <SettingRow
+              title="Theme"
+              description="Choose how the editor looks. Theme changes apply instantly and are saved locally."
+            >
+              <div className="flex flex-col gap-1 items-end">
+                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-slate-800 border border-slate-700">
+                  {THEME_OPTIONS.map(option => (
+                    <button
+                      key={option.id}
+                      onClick={() => setTheme(option.id)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${theme === option.id
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-slate-300 hover:bg-slate-700'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500 text-right max-w-[280px]">
+                  {THEME_OPTIONS.find(option => option.id === theme)?.note}
+                </p>
+              </div>
+            </SettingRow>
+          </div>
+        </section>
 
         {/* Server files */}
         <section>
