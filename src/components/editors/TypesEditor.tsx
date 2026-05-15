@@ -221,7 +221,6 @@ function DetailPanel({
       </div>
 
       <div ref={scrollContainerRef} className={`flex-1 overflow-y-auto p-4 space-y-5 ${addUsageOpen ? 'pb-16' : ''}`}>
-
         <div>
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2" title="The raw category tag stored in types.xml. Used to group items and control what containers they spawn in">Category</p>
           <input
