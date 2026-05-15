@@ -99,19 +99,22 @@ export function EconomyCoreEditor() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left: entry list */}
-      <div className="w-72 flex-shrink-0 border-r border-slate-800 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-          <h2 className="text-sm font-semibold text-slate-200">cfgeconomycore.xml</h2>
+      <div className="w-72 flex-shrink-0 border-r border-slate-800 flex flex-col bg-slate-950">
+        <div className="flex items-start justify-between px-4 py-3 border-b border-slate-800 bg-slate-900">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-200">cfgeconomycore.xml</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Registered type packs</p>
+          </div>
           <button
             onClick={() => { setSelectedFolder(null); setEditingFile(null); }}
-            className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+            className="h-7 px-3 rounded-lg text-xs font-medium bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
           >
             + Add pack
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {economyCore.length === 0 ? (
-            <p className="text-slate-600 text-xs px-4 py-3">No entries loaded.</p>
+            <p className="text-slate-500 text-xs px-4 py-3">No entries loaded.</p>
           ) : (
             economyCore.map((entry, i) => {
               const isSelected = selectedFolder === entry.folder;
@@ -119,7 +122,7 @@ export function EconomyCoreEditor() {
                 <div
                   key={i}
                   className={`flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 cursor-pointer transition-colors ${
-                    isSelected ? 'bg-slate-800' : 'hover:bg-slate-800/50'
+                    isSelected ? 'bg-slate-800' : 'hover:bg-slate-800'
                   }`}
                   onClick={() => handleSelectEntry(entry.folder)}
                 >
@@ -132,7 +135,7 @@ export function EconomyCoreEditor() {
                   <button
                     onClick={e => { e.stopPropagation(); handleRemove(entry.folder); }}
                     disabled={removing === entry.folder}
-                    className="flex-shrink-0 px-2 py-1 rounded text-xs font-medium bg-red-900/60 hover:bg-red-700 text-red-300 hover:text-white transition-colors disabled:opacity-40"
+                    className="flex-shrink-0 h-7 px-2 rounded-lg text-xs font-medium border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:bg-rose-900/70 transition-colors disabled:opacity-40"
                   >
                     {removing === entry.folder ? '…' : 'Remove'}
                   </button>
@@ -167,7 +170,7 @@ export function EconomyCoreEditor() {
                 disabled={!editingFile.dirty || saving}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                   editingFile.dirty && !saving
-                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                    ? 'bg-lime-500 hover:bg-lime-600 text-white'
                     : 'bg-slate-800 text-slate-600 cursor-not-allowed'
                 }`}
               >
@@ -178,14 +181,14 @@ export function EconomyCoreEditor() {
               <textarea
                 value={editingFile.content}
                 onChange={e => setEditingFile({ ...editingFile, content: e.target.value, dirty: true })}
-                className="w-full h-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-indigo-500 resize-none"
+                className="w-full h-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-lime-500 resize-none"
               />
             </div>
           </>
         ) : selectedEntry ? (
           /* Entry detail view */
           <>
-            <div className="px-6 py-4 border-b border-slate-800">
+            <div className="px-4 py-3 border-b border-slate-800 bg-slate-900">
               <h2 className="text-sm font-semibold text-slate-200">{selectedEntry.folder}</h2>
               <p className="text-xs text-slate-500 mt-0.5">Registered in cfgeconomycore.xml</p>
             </div>
@@ -210,7 +213,7 @@ export function EconomyCoreEditor() {
                       </svg>
                       <span className="text-sm text-slate-200 font-mono flex-1">{f.name}</span>
                       <span className="text-xs text-slate-500 bg-slate-700 px-2 py-0.5 rounded">{f.type}</span>
-                      <span className="text-xs text-indigo-400">Edit →</span>
+                      <span className="text-xs text-lime-400">Edit →</span>
                     </button>
                   ))}
                 </div>
@@ -219,7 +222,7 @@ export function EconomyCoreEditor() {
                 <button
                   onClick={() => handleRemove(selectedEntry.folder)}
                   disabled={removing === selectedEntry.folder}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-red-900/60 hover:bg-red-700 text-red-300 hover:text-white transition-colors disabled:opacity-40"
+                  className="h-8 px-4 rounded-lg text-xs font-medium border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:bg-rose-900/70 transition-colors disabled:opacity-40"
                 >
                   {removing === selectedEntry.folder ? 'Removing…' : 'Remove from cfgeconomycore.xml'}
                 </button>
@@ -229,51 +232,58 @@ export function EconomyCoreEditor() {
         ) : (
           /* Add new pack form */
           <>
-            <div className="px-6 py-4 border-b border-slate-800">
+            <div className="px-4 py-3 border-b border-slate-800 bg-slate-900">
               <h2 className="text-sm font-semibold text-slate-200">Add Custom Types Pack</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Creates <span className="text-slate-400">CustomTypes/&#123;Name&#125;_ce/&#123;Name&#125;_types.xml</span> and registers it in cfgeconomycore.xml.
-              </p>
+              <p className="text-xs text-slate-500 mt-0.5">Registers a new types file in cfgeconomycore.xml</p>
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Pack name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={e => { setName(e.target.value); setSuccess(false); }}
-                  placeholder="e.g. ParagonGear"
-                  className="w-full max-w-sm bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-                {trimmedName && (
-                  <p className="text-xs text-slate-600 mt-1">
-                    → CustomTypes/{trimmedName}_ce/{trimmedName}_types.xml
-                  </p>
-                )}
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs text-slate-400">types.xml content</label>
-                  <button onClick={handleFileUpload} className="text-xs text-indigo-400 hover:text-indigo-300">
-                    Upload file…
-                  </button>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
+
+              <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pack name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={e => { setName(e.target.value); setSuccess(false); }}
+                    placeholder="e.g. ParagonGear"
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-lime-500"
+                  />
+                  {trimmedName && (
+                    <p className="text-xs text-slate-500 font-mono">
+                      CustomTypes/{trimmedName}_ce/{trimmedName}_types.xml
+                    </p>
+                  )}
                 </div>
-                <textarea
-                  value={xml}
-                  onChange={e => { setXml(e.target.value); setSuccess(false); }}
-                  placeholder="Paste types.xml content here, or upload a file above…"
-                  rows={16}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-indigo-500 resize-none"
-                />
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">types.xml content</label>
+                  <button
+                    onClick={handleFileUpload}
+                    className="w-full flex items-center justify-center gap-2 h-9 rounded-lg border border-dashed border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400 text-xs font-medium transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    Browse for file…
+                  </button>
+                  <textarea
+                    value={xml}
+                    onChange={e => { setXml(e.target.value); setSuccess(false); }}
+                    placeholder="…or paste types.xml content here"
+                    rows={14}
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-lime-500 resize-none"
+                  />
+                </div>
               </div>
+
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleAddSave}
                   disabled={!canSave || saving}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  className={`h-8 px-4 rounded-lg text-xs font-medium transition-colors ${
                     canSave && !saving
-                      ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                      : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                      ? 'bg-lime-500 hover:bg-lime-600 text-white'
+                      : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
                   }`}
                 >
                   {saving ? 'Saving…' : 'Save & Register'}
@@ -281,8 +291,9 @@ export function EconomyCoreEditor() {
                 {!paths.economyCorePath && (
                   <p className="text-xs text-amber-400">cfgeconomycore.xml not found — cannot save.</p>
                 )}
-                {success && <p className="text-xs text-green-400">Saved successfully.</p>}
+                {success && <p className="text-xs text-emerald-400">Saved successfully.</p>}
               </div>
+
             </div>
           </>
         )}

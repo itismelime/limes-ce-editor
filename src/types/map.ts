@@ -24,19 +24,19 @@ export const TIER_COLORS: Record<string, string> = {
 export const TIER_ORDER = ['Tier7', 'Tier6', 'Tier5', 'Tier4', 'Tier3', 'Tier2', 'Tier1'];
 
 const TYPE_COLORS: Record<string, string> = {
-  civilian: '#94a3b8',
-  farm: '#16a34a',
-  firefighter: '#f59e0b',
-  fishing: '#14b8a6',
-  hunting: '#06b6d4',
+  civilian: '#fef08a',
+  farm: '#4ade80',
+  firefighter: '#f97316',
+  fishing: '#5eead4',
+  hunting: '#84cc16',
   industrial: '#8b5cf6',
-  medical: '#f97316',
-  medicinal: '#f97316',
+  medical: '#fb7185',
+  medicinal: '#fb7185',
   military: '#ef4444',
-  police: '#3b82f6',
+  police: '#60a5fa',
   seaice: '#67e8f9',
-  town: '#eab308',
-  village: '#ec4899',
+  town: '#fbbf24',
+  village: '#f59e0b',
 };
 
 const CANONICAL_USAGE_LABELS: Record<string, string> = {
@@ -80,6 +80,14 @@ export function getUsageColor(usage: string): string {
   let h = 5381;
   for (let i = 0; i < normalizedUsage.length; i++) h = (((h << 5) + h) ^ normalizedUsage.charCodeAt(i)) >>> 0;
   return COLOR_PALETTE[h % COLOR_PALETTE.length];
+}
+
+export function getUsageTextColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.55 ? '#1e293b' : '#ffffff';
 }
 
 export function formatUsageLabel(usage: string): string {

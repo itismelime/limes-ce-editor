@@ -149,7 +149,7 @@ function EmptyState({ onOpenFolder, onOpenFromPath }: { onOpenFolder: () => void
             <div className="space-y-2">
               {Object.entries(FILE_DESCRIPTIONS).map(([file, desc]) => (
                 <div key={file} className="flex gap-3">
-                  <span className="font-mono text-xs text-indigo-400 w-44 flex-shrink-0">{file}</span>
+                  <span className="font-mono text-xs text-lime-400 w-44 flex-shrink-0">{file}</span>
                   <span className="text-xs text-slate-500">{desc}</span>
                 </div>
               ))}
@@ -209,7 +209,7 @@ function EmptyState({ onOpenFolder, onOpenFromPath }: { onOpenFolder: () => void
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center px-8">
-      <div className="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center text-4xl">🗺</div>
+      <img src="/favicon.svg" className="w-20 h-20" />
       <div>
         <h2 className="text-xl font-semibold text-slate-200 mb-2">Open a server folder</h2>
         <p className="text-slate-500 text-sm max-w-sm">
@@ -219,7 +219,7 @@ function EmptyState({ onOpenFolder, onOpenFromPath }: { onOpenFolder: () => void
 
       <button
         onClick={onOpenFolder}
-        className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+        className="flex items-center gap-2 px-5 py-2.5 bg-lime-500 hover:bg-lime-600 text-white text-sm font-medium rounded-lg transition-colors"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -294,7 +294,7 @@ function MissingFilesWarning({ warnings }: { warnings: string[] }) {
           </div>
         </div>
       )}
-      <p className="text-xs text-slate-600 mt-3 pt-2 border-t border-amber-900/30">
+      <p className="text-xs text-slate-500 mt-3 pt-2 border-t border-amber-900/30">
         The editor will still load, and unknown structures are reported to help harden parsers safely.
       </p>
     </div>
@@ -447,7 +447,13 @@ export function AppShell() {
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        {!mission || showNoFilesError ? (
+        {(!mission || showNoFilesError) && activeTab === 'settings' ? (
+          <div className="flex-1 overflow-hidden">
+            <Suspense fallback={<div className="h-full w-full grid place-items-center text-sm text-slate-500">Loading…</div>}>
+              <StableSettingsEditor />
+            </Suspense>
+          </div>
+        ) : (!mission || showNoFilesError) ? (
           <EmptyState onOpenFolder={openFolder} onOpenFromPath={openFromPath} />
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden">
@@ -560,9 +566,9 @@ export function AppShell() {
 
       {(isLoading || isStartupWarmup) && (
         <div className="absolute inset-0 z-[5000] bg-slate-950 flex items-center justify-center">
-          <div className="w-[360px] max-w-[90vw] rounded-xl border border-slate-700 bg-slate-900/95 p-5">
+          <div className="w-[360px] max-w-[90vw] rounded-xl border border-slate-700 bg-slate-900 p-5">
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-5 h-5 rounded-full border-2 border-slate-600 border-t-indigo-400 animate-spin" />
+              <div className="w-5 h-5 rounded-full border-2 border-slate-600 border-t-lime-400 animate-spin" />
               <p className="text-sm font-medium text-slate-200">
                 {isLoading ? 'Loading server files...' : startupMessage}
               </p>

@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "limes-ce-editor"
-version = "0.1.1"
+version = "0.2.1"
 dependencies = [
  "image",
  "reqwest 0.12.28",

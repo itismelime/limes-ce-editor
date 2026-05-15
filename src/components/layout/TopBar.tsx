@@ -18,7 +18,6 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'economy',       label: 'Economy Core' },
   { id: 'weather',       label: 'Weather' },
   { id: 'gameplay',      label: 'Gameplay' },
-  { id: 'settings',      label: 'Settings' },
 ];
 
 const MAPS: { id: MapId; label: string }[] = [
@@ -51,7 +50,7 @@ function Row({ label, value, mono, href }: { label: string; value: string; mono?
       {href ? (
         <button
           onClick={() => openUrl(href)}
-          className={`text-xs text-indigo-400 hover:text-indigo-300 hover:underline transition-colors ${mono ? 'font-mono' : ''}`}
+          className={`text-xs text-lime-400 hover:text-lime-300 hover:underline transition-colors ${mono ? 'font-mono' : ''}`}
         >
           {value}
         </button>
@@ -445,8 +444,8 @@ export function TopBar({
       {/* Top row */}
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="flex items-center gap-2 mr-2">
-          <div className="w-6 h-6 bg-indigo-600 rounded flex items-center justify-center text-xs font-bold">DZ</div>
-          <span className="font-semibold text-slate-200 text-sm">Lime's CE Editor</span>
+          <img src="/favicon.svg" className="w-6 h-6" />
+          <span className="font-semibold text-slate-200 text-sm">lime's CE Editor</span>
         </div>
 
         <div ref={serverMenuRef} className="relative">
@@ -481,7 +480,7 @@ export function TopBar({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                       </svg>
                       <div className="min-w-0">
-                        <p className={`text-sm font-medium truncate ${path === serverRootPath ? 'text-indigo-400' : 'text-slate-200'}`}>{folderLabel(path)}</p>
+                        <p className={`text-sm font-medium truncate ${path === serverRootPath ? 'text-lime-400' : 'text-slate-200'}`}>{folderLabel(path)}</p>
                         <p className="text-xs text-slate-500 font-mono truncate">{folderSubLabel(path)}</p>
                       </div>
                     </button>
@@ -504,27 +503,16 @@ export function TopBar({
 
         {mission && (
           <span className="text-slate-400 text-sm">
-            <span className="text-slate-600 mr-1">Mission:</span>
+            <span className="text-slate-500 mr-1">Mission:</span>
             {mission.missionName}
-            <span className="ml-2 text-slate-600">
+            <span className="ml-2 text-slate-500">
               · {mission.types.size} items
               · {mission.eventSpawns.length} events
             </span>
           </span>
         )}
 
-        <button
-          onClick={() => setShowAbout(true)}
-          className="ml-auto flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors"
-          title="About"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" strokeWidth={2} />
-            <path strokeLinecap="round" strokeWidth={2} d="M12 16v-4M12 8h.01" />
-          </svg>
-        </button>
-
-        <div className="flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2">
           {saveStatus === 'saving' && (
             <span className="flex items-center gap-1.5 text-slate-400 text-xs">
               <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
@@ -534,142 +522,157 @@ export function TopBar({
           {saveStatus === 'success' && (
             <span className="flex items-center gap-1.5 text-green-400 text-xs">
               <span className="w-2 h-2 rounded-full bg-green-400" />
-              Saved successfully
+              Saved
             </span>
           )}
-          {activeTab === 'map' && (<>
-            <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
-              {MAPS.map(m => (
+
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={typeHistory.length > 0 ? undoType : undoLastSave}
+              disabled={typeHistory.length === 0 && saveCheckpoints.length === 0}
+              title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : 'Revert most recent saved change set'}
+              className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <span aria-hidden="true">↩</span>
+              Undo
+            </button>
+            <button
+              onClick={() => setShowSaveReview(true)}
+              disabled={savingPending || !hasDirty}
+              className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-lime-500 hover:bg-lime-600 text-white disabled:opacity-50 flex items-center gap-2"
+            >
+              {hasDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+              {savingPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+
+          <>
+              <div className="w-px h-4 bg-slate-700 mx-1" />
+              <div className="flex items-center gap-1">
+                {MAPS.map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => setActiveMap(m.id)}
+                    className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${
+                      activeMap === m.id
+                    ? 'bg-lime-500 text-white'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <div ref={offlinePanelRef} className="relative">
                 <button
-                  key={m.id}
-                  onClick={() => setActiveMap(m.id)}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                    activeMap === m.id
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
+                  onClick={() => setShowOfflinePanel(v => !v)}
+                  className={`h-8 bg-slate-900 border border-slate-700 rounded-lg px-3 text-xs transition-colors flex items-center gap-2 ${showOfflinePanel ? 'bg-lime-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
-                  {m.label}
+                  <span className={`w-2.5 h-2.5 rounded-full ${currentMapReady ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                  Offline
                 </button>
-              ))}
-            </div>
 
-            <div ref={offlinePanelRef} className="relative">
-              <button
-                onClick={() => setShowOfflinePanel(v => !v)}
-                className={`h-8 bg-slate-800 border rounded-lg px-3 backdrop-blur text-xs transition-colors flex items-center gap-2 ${showOfflinePanel ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-              >
-                <span className={`w-2.5 h-2.5 rounded-full ${currentMapReady ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                Offline
-              </button>
+                {showOfflinePanel && (
+                  <div className="absolute top-full right-0 mt-2 bg-slate-900 border rounded-xl p-3 w-[320px] z-40">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-xs font-medium text-slate-300">Offline Cache</span>
+                      <span className="text-[11px] text-slate-500">{preparingOffline ? `${Math.round(offlineProgress * 100)}%` : 'Idle'}</span>
+                    </div>
 
-              {showOfflinePanel && (
-                <div className="absolute top-full right-0 mt-2 bg-slate-900/95 border border-slate-700 rounded-lg p-3 backdrop-blur w-[320px] z-40">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="text-xs font-medium text-slate-300">Offline Cache</span>
-                    <span className="text-[11px] text-slate-500">{preparingOffline ? `${Math.round(offlineProgress * 100)}%` : 'Idle'}</span>
-                  </div>
-
-                  <div className="space-y-1 mb-2">
-                    {OFFLINE_MAP_ORDER.map(mapId => {
-                      const status = offlineStatuses[mapId];
-                      const ready = !!status?.ready;
-                      return (
-                        <div key={mapId} className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className={`w-2.5 h-2.5 rounded-full ${ready ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                            <span className={`${mapId === activeMap ? 'text-slate-200' : 'text-slate-300'}`}>
-                              {MAPS.find(m => m.id === mapId)?.label ?? mapId}
+                    <div className="space-y-1 mb-2">
+                      {OFFLINE_MAP_ORDER.map(mapId => {
+                        const status = offlineStatuses[mapId];
+                        const ready = !!status?.ready;
+                        return (
+                          <div key={mapId} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`w-2.5 h-2.5 rounded-full ${ready ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                              <span className={mapId === activeMap ? 'text-slate-200' : 'text-slate-300'}>
+                                {MAPS.find(m => m.id === mapId)?.label ?? mapId}
+                              </span>
+                            </div>
+                            <span className="text-slate-500 text-[11px]">
+                              {status ? `${status.cached.toLocaleString()}/${status.total.toLocaleString()}` : '...'}
                             </span>
                           </div>
-                          <span className="text-slate-500 text-[11px]">
-                            {status ? `${status.cached.toLocaleString()}/${status.total.toLocaleString()}` : '...'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {preparingOffline && (
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mb-2">
-                      <div className="h-full bg-indigo-400 rounded-full transition-all" style={{ width: `${offlineProgress * 100}%` }} />
+                        );
+                      })}
                     </div>
-                  )}
 
-                  {offlineCurrentMap && (
-                    <p className="text-[11px] text-slate-500 mb-2 truncate">
-                      Preparing: {MAPS.find(m => m.id === offlineCurrentMap)?.label ?? offlineCurrentMap}
-                    </p>
-                  )}
+                    {preparingOffline && (
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mb-2">
+                        <div className="h-full bg-lime-400 rounded-full transition-all" style={{ width: `${offlineProgress * 100}%` }} />
+                      </div>
+                    )}
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={prepareCurrentOffline}
-                      disabled={preparingOffline || !isKnownMap}
-                      className={`h-7 border rounded-lg px-2 text-xs transition-colors ${preparingOffline || !isKnownMap ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'}`}
-                    >
-                      Prepare Current
-                    </button>
-                    <button
-                      onClick={prepareAllOffline}
-                      disabled={preparingOffline}
-                      className={`h-7 border rounded-lg px-2 text-xs transition-colors ${preparingOffline ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'}`}
-                    >
-                      Prepare All
-                    </button>
-                    <button
-                      onClick={cancelOfflinePrepare}
-                      disabled={!preparingOffline}
-                      className={`h-7 border rounded-lg px-2 text-xs transition-colors ${!preparingOffline ? 'border-slate-700 text-slate-500' : 'border-red-500/70 text-red-300 hover:border-red-400 hover:text-red-200'}`}
-                    >
-                      Cancel
-                    </button>
+                    {offlineCurrentMap && (
+                      <p className="text-[11px] text-slate-500 mb-2 truncate">
+                        Preparing: {MAPS.find(m => m.id === offlineCurrentMap)?.label ?? offlineCurrentMap}
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={prepareCurrentOffline}
+                        disabled={preparingOffline || !isKnownMap}
+                        className={`h-8 border rounded-lg px-2 text-xs transition-colors ${preparingOffline || !isKnownMap ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'}`}
+                      >
+                        Prepare Current
+                      </button>
+                      <button
+                        onClick={prepareAllOffline}
+                        disabled={preparingOffline}
+                        className={`h-8 border rounded-lg px-2 text-xs transition-colors ${preparingOffline ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'}`}
+                      >
+                        Prepare All
+                      </button>
+                      <button
+                        onClick={cancelOfflinePrepare}
+                        disabled={!preparingOffline}
+                        className={`h-8 border rounded-lg px-2 text-xs transition-colors ${!preparingOffline ? 'border-slate-700 text-slate-500' : 'border-red-500/70 text-red-300 hover:border-red-400 hover:text-red-200'}`}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    {offlineStatus && <p className="mt-2 text-[11px] text-slate-500 truncate">{offlineStatus}</p>}
                   </div>
+                )}
+              </div>
+            </>
 
-                  {offlineStatus && <p className="mt-2 text-[11px] text-slate-500 truncate">{offlineStatus}</p>}
-                </div>
-              )}
-            </div>
-          </>
-          )}
+          <div className="w-px h-4 bg-slate-700 mx-1" />
+
+          <button
+            onClick={() => setShowAbout(true)}
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors"
+            title="About"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" strokeWidth={2} />
+              <path strokeLinecap="round" strokeWidth={2} d="M12 16v-4M12 8h.01" />
+            </svg>
+          </button>
         </div>
-      </div>
-
-      <div className="absolute bottom-2 right-4 z-30 flex items-center gap-1.5">
-        <button
-          onClick={typeHistory.length > 0 ? undoType : undoLastSave}
-          disabled={typeHistory.length === 0 && saveCheckpoints.length === 0}
-          title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : 'Revert most recent saved change set'}
-          className="h-8 px-3 rounded-lg text-sm font-medium transition-all bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 flex items-center gap-1.5"
-        >
-          <span aria-hidden="true">↩</span>
-          Undo
-        </button>
-        <button
-          onClick={() => setShowSaveReview(true)}
-          disabled={savingPending || !hasDirty}
-          className="h-8 px-3 rounded-lg text-sm font-medium transition-all bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 flex items-center gap-2"
-        >
-          {hasDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
-          <span aria-hidden="true">💾</span>
-          {savingPending ? 'Saving…' : 'Save'}
-        </button>
       </div>
 
       {showSaveReview && hasDirty && (
         <div className="fixed inset-0 z-[5000] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-lg overflow-hidden shadow-2xl">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
             <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold text-slate-100">Review Pending Changes</div>
-                <div className="text-xs text-slate-400">Selectively revert items or confirm save.</div>
+                <div className="text-xs text-slate-500">Selectively revert items or confirm save.</div>
               </div>
               <button
                 onClick={() => setShowSaveReview(false)}
-                className="text-slate-400 hover:text-slate-200 text-sm"
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
                 title="Close"
               >
-                x
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
 
@@ -683,7 +686,7 @@ export function TopBar({
                   <button
                     onClick={item.onRevert}
                     disabled={savingPending}
-                    className="h-7 px-2 rounded border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200 text-xs disabled:opacity-50"
+                    className="h-8 px-3 rounded-lg border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200 text-xs disabled:opacity-50"
                   >
                     Revert
                   </button>
@@ -695,7 +698,7 @@ export function TopBar({
               <button
                 onClick={revertAllPending}
                 disabled={savingPending || pendingItems.length === 0}
-                className="h-8 px-3 rounded-lg border border-rose-700/70 bg-rose-900/30 text-rose-300 hover:text-rose-200 text-xs disabled:opacity-50"
+                className="h-8 px-3 rounded-lg border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200 text-xs disabled:opacity-50"
               >
                 Revert All
               </button>
@@ -710,7 +713,7 @@ export function TopBar({
                 <button
                   onClick={() => { void savePendingChanges(); }}
                   disabled={savingPending || pendingItems.length === 0}
-                  className="h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium disabled:opacity-50"
+                  className="h-8 px-3 rounded-lg bg-lime-500 hover:bg-lime-600 text-white text-xs font-medium disabled:opacity-50"
                 >
                   {savingPending ? 'Saving…' : `Confirm Save (${pendingItems.length})`}
                 </button>
@@ -726,13 +729,11 @@ export function TopBar({
           onClick={() => setShowAbout(false)}
         >
           <div
-            className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+            className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
             <div className="px-6 pt-6 pb-4 flex flex-col items-center text-center">
-              <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center text-2xl font-bold text-white mb-4 shadow-lg">
-                DZ
-              </div>
+              <img src="/favicon.svg" className="w-14 h-14 mb-4" />
               <h2 className="text-lg font-semibold text-slate-100">Lime's CE Editor</h2>
               {appVersion && (
                 <span className="mt-1 text-xs text-slate-500 font-mono">v{appVersion}</span>
@@ -756,7 +757,7 @@ export function TopBar({
             <div className="border-t border-slate-800 px-6 py-3 flex justify-center">
               <button
                 onClick={() => setShowAbout(false)}
-                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
+                className="h-8 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
               >
                 Close
               </button>
@@ -766,22 +767,34 @@ export function TopBar({
       )}
 
       {/* Tab row */}
-      <div className="flex gap-1 px-4 pb-0">
+      <div className="flex gap-1 px-4 pb-2">
         {TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => handleTabClick(tab.id)}
             onMouseEnter={() => onPrefetchTab(tab.id)}
             onFocus={() => onPrefetchTab(tab.id)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 ${
+            className={`h-8 px-4 text-xs font-medium rounded-lg transition-colors ${
               activeTab === tab.id
-                ? 'text-indigo-400 border-indigo-500 bg-slate-800/50'
-                : 'text-slate-500 border-transparent hover:text-slate-300'
+                ? 'bg-lime-500 text-white'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
             }`}
           >
             {tab.label}
           </button>
         ))}
+        <button
+          onClick={() => handleTabClick('settings')}
+          onMouseEnter={() => onPrefetchTab('settings')}
+          onFocus={() => onPrefetchTab('settings')}
+          className={`ml-auto h-8 px-4 text-xs font-medium rounded-lg transition-colors ${
+            activeTab === 'settings'
+              ? 'bg-lime-500 text-white'
+              : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+          }`}
+        >
+          Settings
+        </button>
       </div>
 
 

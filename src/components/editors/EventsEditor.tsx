@@ -19,8 +19,8 @@ function EventRow({
 }) {
   return (
     <div
-      className={`flex items-center gap-4 px-4 py-2.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800/50 transition-colors text-sm ${
-        isSelected ? 'bg-indigo-950/40 border-l-2 border-l-indigo-500' : ''
+      className={`flex items-center gap-4 px-4 py-2.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors text-sm ${
+        isSelected ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : ''
       }`}
       onClick={onSelect}
     >
@@ -32,16 +32,16 @@ function EventRow({
       </div>
 
       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <span className="text-xs text-slate-600 w-8">min</span>
+        <span className="text-xs text-slate-500 w-8">min</span>
         <NumberInput value={event.min} onChange={v => onUpdate({ min: v })} min={0} />
-        <span className="text-xs text-slate-600 w-12 ml-1">nominal</span>
+        <span className="text-xs text-slate-500 w-12 ml-1">nominal</span>
         <NumberInput value={event.nominal} onChange={v => onUpdate({ nominal: v })} min={0} />
-        <span className="text-xs text-slate-600 w-8 ml-1">max</span>
+        <span className="text-xs text-slate-500 w-8 ml-1">max</span>
         <NumberInput value={event.max} onChange={v => onUpdate({ max: v })} min={0} />
       </div>
 
       <div className="ml-auto flex items-center gap-3" onClick={e => e.stopPropagation()}>
-        <span className="text-xs text-slate-600">
+        <span className="text-xs text-slate-500">
           {event.children.length} child{event.children.length !== 1 ? 'ren' : ''}
         </span>
         <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
@@ -89,14 +89,14 @@ export function EventsEditor() {
             <SearchBar value={eventFilter} onChange={setEventFilter} placeholder="Search events…" />
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-            <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} className="accent-indigo-500" />
+            <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} className="accent-lime-500" />
             Show inactive
           </label>
-          <span className="text-xs text-slate-600">{filtered.length} / {allEvents.length}</span>
+          <span className="text-xs text-slate-500">{filtered.length} / {allEvents.length}</span>
           <SaveButton isDirty={isDirty} onSave={saveEvents} label="Save events.xml" />
         </div>
 
-        <div className="flex items-center gap-4 px-4 py-2 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-800 bg-slate-900/50">
+        <div className="flex items-center gap-4 px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800 bg-slate-900/50">
           <span className="w-64">Event Name</span>
           <span>Min / Nominal / Max</span>
           <span className="ml-auto">Status</span>
@@ -119,7 +119,11 @@ export function EventsEditor() {
         <div className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
             <span className="font-mono text-sm text-slate-200 truncate">{selectedEvent.name}</span>
-            <button onClick={() => setSelectedName(null)} className="text-slate-600 hover:text-slate-400 text-lg">×</button>
+            <button onClick={() => setSelectedName(null)} className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <div>
@@ -150,11 +154,11 @@ export function EventsEditor() {
                 {selectedEvent.children.map((child, i) => (
                   <div key={i} className="flex items-center justify-between bg-slate-800 rounded px-2 py-1.5">
                     <span className="font-mono text-xs text-slate-300 truncate">{child.type}</span>
-                    <span className="text-xs text-slate-600">{child.min}–{child.max}</span>
+                    <span className="text-xs text-slate-500">{child.min}–{child.max}</span>
                   </div>
                 ))}
                 {selectedEvent.children.length === 0 && (
-                  <p className="text-xs text-slate-600 italic">No children defined</p>
+                  <p className="text-xs text-slate-500 italic">No children defined</p>
                 )}
               </div>
             </div>

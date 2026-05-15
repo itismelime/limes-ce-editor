@@ -70,7 +70,7 @@ export function TierLegend() {
   const allUsagesHidden = usageGroups.every(g => g.rawUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase())));
 
   return (
-    <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 backdrop-blur min-w-[140px] pointer-events-auto">
+    <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 min-w-[140px] pointer-events-auto">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tier (ring)</p>
         <button

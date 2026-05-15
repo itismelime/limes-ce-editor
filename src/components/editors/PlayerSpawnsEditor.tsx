@@ -33,7 +33,7 @@ export function PlayerSpawnsEditor() {
         </div>
         <button
           onClick={() => setActiveTab('map')}
-          className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+          className="text-xs px-3 py-1.5 rounded-lg bg-lime-500 hover:bg-lime-600 text-white transition-colors"
         >
           Show on map →
         </button>
@@ -74,7 +74,7 @@ export function PlayerSpawnsEditor() {
                   <tbody>
                     {section.points.map((p, i) => (
                       <tr key={i} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30">
-                        <td className="px-3 py-1 text-slate-600">{i + 1}</td>
+                        <td className="px-3 py-1 text-slate-500">{i + 1}</td>
                         <td className="px-3 py-1 font-mono text-slate-300">{p.x.toFixed(2)}</td>
                         <td className="px-3 py-1 font-mono text-slate-300">{p.z.toFixed(2)}</td>
                       </tr>

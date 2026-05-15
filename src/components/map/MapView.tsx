@@ -44,10 +44,14 @@ function FilterInput({ placeholder, value, onChange }: { placeholder: string; va
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-lime-500"
       />
       {value && (
-        <button onClick={() => onChange('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs">✕</button>
+        <button onClick={() => onChange('')} className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-slate-300">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       )}
     </div>
   );
@@ -186,6 +190,15 @@ function PopupAutoFlip() {
   return null;
 }
 
+function ZoomControlOffset({ sidebarWidth }: { sidebarWidth: number }) {
+  const map = useMap();
+  useEffect(() => {
+    const el = map.getContainer().querySelector('.leaflet-top.leaflet-left') as HTMLElement | null;
+    if (el) el.style.left = `${sidebarWidth + 8}px`;
+  }, [map, sidebarWidth]);
+  return null;
+}
+
 function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
   useEffect(() => {
@@ -194,11 +207,11 @@ function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
 
     const syncViewBounds = () => {
       const minZoom = map.getBoundsZoom(bounds, false);
-      map.setMinZoom(minZoom);
+      map.setMinZoom(minZoom - 1.5);
       map.setMaxBounds(bounds);
       map.panInsideBounds(bounds, { animate: false });
-      if (map.getZoom() < minZoom) {
-        map.setZoom(minZoom);
+      if (map.getZoom() < minZoom - 1.5) {
+        map.setZoom(minZoom - 1.5);
       }
     };
 
@@ -551,6 +564,7 @@ export function MapView() {
   const mission                = useServerStore(s => s.mission);
   const [overlaysReady, setOverlaysReady] = useState(false);
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(44);
 
   useEffect(() => {
     const idleWindow = window as Window & {
@@ -690,14 +704,14 @@ export function MapView() {
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="text-xs text-slate-400 block mb-1">World Width (m)</label>
-                <input name="width" type="number" defaultValue={10000} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
+                <input name="width" type="number" defaultValue={10000} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-lime-500" />
               </div>
               <div className="flex-1">
                 <label className="text-xs text-slate-400 block mb-1">World Height (m)</label>
-                <input name="height" type="number" defaultValue={10000} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500" />
+                <input name="height" type="number" defaultValue={10000} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-lime-500" />
               </div>
             </div>
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+            <button type="submit" className="w-full bg-lime-500 hover:bg-lime-600 text-white text-sm font-medium py-2 rounded-lg transition-colors">
               Select Map Image
             </button>
           </form>
@@ -715,7 +729,7 @@ export function MapView() {
             <p className="text-slate-300 text-sm font-medium">Downloading map tiles…</p>
             <div className="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
-                className="h-full bg-indigo-400 rounded-full transition-all"
+                className="h-full bg-lime-400 rounded-full transition-all"
                 style={{ width: `${downloadProgress * 100}%` }}
               />
             </div>
@@ -739,9 +753,9 @@ export function MapView() {
 
   // ── Map ready ─────────────────────────────────────────────────────────────
   return (
-    <div className="h-full flex bg-slate-950">
-      <BuildingSidebar />
-      <div className="flex-1 relative">
+    <div className="h-full relative bg-slate-950">
+      <BuildingSidebar onWidthChange={setSidebarWidth} />
+      <div className="absolute inset-0">
         <MapContainer
           crs={CRS.Simple}
           preferCanvas
@@ -759,6 +773,7 @@ export function MapView() {
           <MapFitBounds mapConfig={mapConfig} />
           <MapVisibilitySync isActive={isMapActive} />
           <PopupAutoFlip />
+          <ZoomControlOffset sidebarWidth={sidebarWidth} />
 
           {/* Background overview — hidden once detail zoom takes over */}
           <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
@@ -777,7 +792,7 @@ export function MapView() {
 
         {/* CE Tool not found notice */}
         {mission && !ceToolProject && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-[420px] max-w-[90vw] bg-slate-900/95 border border-amber-700/60 rounded-xl shadow-xl backdrop-blur p-4 pointer-events-auto">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-[420px] max-w-[90vw] bg-slate-900 border border-amber-700/60 rounded-xl shadow-xl p-4 pointer-events-auto">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <p className="text-amber-400 font-semibold text-sm mb-1">CE Tool data unavailable</p>
@@ -790,7 +805,7 @@ export function MapView() {
                   href="https://github.com/BohemiaInteractive/DayZ-Central-Economy"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-indigo-400 hover:text-indigo-300 underline"
+                  className="text-lime-400 hover:text-lime-300 underline"
                   onClick={e => e.stopPropagation()}
                 >
                   Get it on GitHub
@@ -807,167 +822,155 @@ export function MapView() {
         </div>
       )}
 
-      <div className="absolute bottom-4 right-4 z-[1000] flex items-end gap-2 pointer-events-none">
-        {/* Filters controls column */}
-        {buildingInstances.length > 0 && (
-          <div className="relative flex flex-col items-end gap-2 pointer-events-auto">
-            {showBuildingPanel && (
-              <div className="absolute bottom-full right-0 mb-2 bg-slate-900/95 border border-slate-700 rounded-lg backdrop-blur w-64 flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-                  <span className="text-xs font-medium text-slate-300">Building Filters</span>
-                  <span className={`text-xs ${tierZonesLoaded ? 'text-emerald-500' : 'text-slate-600'}`}>
-                    {tierZonesLoaded ? 'Tier zones active' : 'No tier zones'}
-                  </span>
-                </div>
-                <div className="p-3 space-y-2">
-                  <FilterInput
-                    placeholder="Building name… (e.g. mil, sea)"
-                    value={buildingNameFilter}
-                    onChange={setBuildingNameFilter}
-                  />
-                  <FilterInput
-                    placeholder="Item inside… (e.g. AKM, CodeLock)"
-                    value={buildingItemFilter}
-                    onChange={setBuildingItemFilter}
-                  />
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-slate-500 whitespace-nowrap">Min lootmax</label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={buildingMinLootmax || ''}
-                      onChange={e => setBuildingMinLootmax(Math.max(0, Number(e.target.value) || 0))}
-                      placeholder="0"
-                      className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                    />
-                    {buildingMinLootmax > 0 && (
-                      <button onClick={() => setBuildingMinLootmax(0)} className="text-slate-500 hover:text-slate-300 text-xs flex-shrink-0">✕</button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            <button
-              onClick={() => setShowBuildingPanel(v => !v)}
-              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showBuildingPanel ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-            >
-              Filters{(buildingNameFilter || buildingItemFilter || buildingMinLootmax > 0) ? ' ●' : ''}
-            </button>
-          </div>
-        )}
-
-        {/* Events controls column */}
-        <div className="relative flex flex-col items-end gap-2 pointer-events-auto">
-          {showEventList && (
-            <div className="absolute bottom-full right-0 mb-2 bg-slate-900/95 border border-slate-700 rounded-lg backdrop-blur w-56 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-                <span className="text-xs font-medium text-slate-300">Events</span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => markers.forEach(m => { if (!hiddenEvents.includes(m.eventName)) toggleEvent(m.eventName); })}
-                    className="text-xs text-slate-500 hover:text-slate-300"
-                  >Hide all</button>
-                  <button
-                    onClick={() => markers.forEach(m => { if (hiddenEvents.includes(m.eventName)) toggleEvent(m.eventName); })}
-                    className="text-xs text-slate-500 hover:text-slate-300"
-                  >Show all</button>
-                </div>
-              </div>
-              <div className="overflow-y-auto max-h-64">
-                {[...markers]
-                  .sort((a, b) => a.eventName.localeCompare(b.eventName))
-                  .filter(m => mapEventFilter === '' || m.eventName.toLowerCase().includes(mapEventFilter.toLowerCase()))
-                  .map(m => {
-                    const hidden = hiddenEvents.includes(m.eventName);
-                    return (
-                      <button
-                        key={m.eventName}
-                        onClick={() => toggleEvent(m.eventName)}
-                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-800 transition-colors ${hidden ? 'opacity-40' : ''}`}
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: getUsageColor(m.dominantUsage) }}
-                        />
-                        <span className="text-xs text-slate-200 truncate flex-1">{m.eventName}</span>
-                        <span className="text-xs text-slate-500 flex-shrink-0">{m.positions.length}</span>
-                      </button>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowEventList(v => !v)}
-              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showEventList ? 'border-indigo-500 text-indigo-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-            >
-              Events {hiddenEvents.length > 0 ? `(${hiddenEvents.length} hidden)` : ''}
-            </button>
-          </div>
-        </div>
-
-        {/* Player spawns toggle */}
-        {playerSpawnData && playerSpawnData.sections.length > 0 && (
-          <div className="pointer-events-auto">
-            <button
-              onClick={togglePlayerSpawns}
-              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showPlayerSpawns ? 'border-emerald-500 text-emerald-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-            >
-              Player Spawns
-            </button>
-          </div>
-        )}
-
-        {tierZonesLoaded && getUsageMasks() !== null && (
-          <div className="pointer-events-auto">
-            <button
-              onClick={() => setShowUsageZones(v => !v)}
-              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showUsageZones ? 'border-amber-500 text-amber-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-            >
-              Usage Zones
-            </button>
-          </div>
-        )}
-        {ceToolProject && ceToolProject.territories.length > 0 && (
-          <div className="pointer-events-auto">
-            <button
-              onClick={() => setShowCeZones(v => !v)}
-              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showCeZones ? 'border-cyan-500 text-cyan-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-            >
-              CE Zones
-            </button>
-          </div>
-        )}
-
-        {/* Buildings controls column */}
-        {buildingInstances.length > 0 && (
-          <div className="flex flex-col items-end gap-2 pointer-events-auto">
-            <button
-              onClick={toggleBuildings}
-              className={`h-8 bg-slate-900/90 border rounded-lg px-3 backdrop-blur text-xs transition-colors ${showBuildings ? 'border-emerald-500 text-emerald-400' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}
-            >
-              Buildings
-            </button>
-          </div>
-        )}
-
-        {/* Tier/usage legend — always visible, anchored to bottom-right */}
+      <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto">
         <TierLegend />
       </div>
 
+      {/* Bottom-center toolbar with dropup panels */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000] flex flex-col items-center gap-2 pointer-events-none">
+        {showBuildingPanel && buildingInstances.length > 0 && (
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-64 flex flex-col overflow-hidden pointer-events-auto">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+              <span className="text-xs font-medium text-slate-300">Building Filters</span>
+              <span className={`text-xs ${tierZonesLoaded ? 'text-emerald-500' : 'text-slate-500'}`}>
+                {tierZonesLoaded ? 'Tier zones active' : 'No tier zones'}
+              </span>
+            </div>
+            <div className="p-3 space-y-2">
+              <FilterInput
+                placeholder="Building name… (e.g. mil, sea)"
+                value={buildingNameFilter}
+                onChange={setBuildingNameFilter}
+              />
+              <FilterInput
+                placeholder="Item inside… (e.g. AKM, CodeLock)"
+                value={buildingItemFilter}
+                onChange={setBuildingItemFilter}
+              />
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500 whitespace-nowrap">Min lootmax</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={buildingMinLootmax || ''}
+                  onChange={e => setBuildingMinLootmax(Math.max(0, Number(e.target.value) || 0))}
+                  placeholder="0"
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-lime-500"
+                />
+                {buildingMinLootmax > 0 && (
+                  <button onClick={() => setBuildingMinLootmax(0)} className="flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-slate-300 flex-shrink-0">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showEventList && (
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-56 flex flex-col overflow-hidden pointer-events-auto">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+              <span className="text-xs font-medium text-slate-300">Events</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => markers.forEach(m => { if (!hiddenEvents.includes(m.eventName)) toggleEvent(m.eventName); })}
+                  className="text-xs text-slate-500 hover:text-slate-300"
+                >Hide all</button>
+                <button
+                  onClick={() => markers.forEach(m => { if (hiddenEvents.includes(m.eventName)) toggleEvent(m.eventName); })}
+                  className="text-xs text-slate-500 hover:text-slate-300"
+                >Show all</button>
+              </div>
+            </div>
+            <div className="overflow-y-auto max-h-64">
+              {[...markers]
+                .sort((a, b) => a.eventName.localeCompare(b.eventName))
+                .filter(m => mapEventFilter === '' || m.eventName.toLowerCase().includes(mapEventFilter.toLowerCase()))
+                .map(m => {
+                  const hidden = hiddenEvents.includes(m.eventName);
+                  return (
+                    <button
+                      key={m.eventName}
+                      onClick={() => toggleEvent(m.eventName)}
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-800 transition-colors ${hidden ? 'opacity-40' : ''}`}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: getUsageColor(m.dominantUsage) }}
+                      />
+                      <span className="text-xs text-slate-200 truncate flex-1">{m.eventName}</span>
+                      <span className="text-xs text-slate-500 flex-shrink-0">{m.positions.length}</span>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg px-2 h-11 pointer-events-auto">
+        {buildingInstances.length > 0 && (
+          <button
+            onClick={() => { setShowBuildingPanel(v => !v); setShowEventList(false); }}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showBuildingPanel ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            Filters{(buildingNameFilter || buildingItemFilter || buildingMinLootmax > 0) ? ' ●' : ''}
+          </button>
+        )}
+        <button
+          onClick={() => { setShowEventList(v => !v); setShowBuildingPanel(false); }}
+          className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showEventList ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+        >
+          Events {hiddenEvents.length > 0 ? `(${hiddenEvents.length} hidden)` : ''}
+        </button>
+        {playerSpawnData && playerSpawnData.sections.length > 0 && (
+          <button
+            onClick={togglePlayerSpawns}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showPlayerSpawns ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            Player Spawns
+          </button>
+        )}
+        {tierZonesLoaded && getUsageMasks() !== null && (
+          <button
+            onClick={() => setShowUsageZones(v => !v)}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showUsageZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            Usage Zones
+          </button>
+        )}
+        {ceToolProject && ceToolProject.territories.length > 0 && (
+          <button
+            onClick={() => setShowCeZones(v => !v)}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showCeZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            CE Zones
+          </button>
+        )}
+        {buildingInstances.length > 0 && (
+          <button
+            onClick={toggleBuildings}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showBuildings ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            Buildings
+          </button>
+        )}
+        </div>
+      </div>
+
       <div className="absolute top-4 right-4 z-[1000] flex flex-col items-end gap-2">
-        <div className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-1.5 backdrop-blur text-xs text-slate-400">
+        <div className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-400">
           {markers.length} events · {markers.reduce((s, m) => s + m.positions.length, 0)} spawn points
           {buildingInstances.length > 0 && ` · ${buildingInstances.length.toLocaleString()} buildings`}
           {ceToolProject && ` · ${ceToolProject.territories.length} CE territories`}
         </div>
         <div className="flex items-center gap-2">
-          <div className="h-8 bg-slate-900/90 border border-slate-700 rounded-lg px-2 backdrop-blur flex items-center gap-2">
+          <div className="h-8 bg-slate-900 border border-slate-700 rounded-xl px-2 flex items-center gap-2">
             <span className="text-[11px] text-slate-500 whitespace-nowrap">Cluster ≤ zoom</span>
             <button
               onClick={() => setMapClusterZoomThreshold(Math.max(-3, mapClusterZoomThreshold - 1))}
-              className="w-6 h-6 bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 hover:border-slate-500"
+              className="w-6 h-6 bg-slate-800 border border-slate-700 rounded-md text-xs text-slate-200 hover:border-slate-500"
               aria-label="Decrease cluster zoom threshold"
             >
               -
@@ -975,7 +978,7 @@ export function MapView() {
             <span className="w-6 text-center text-xs text-slate-200">{mapClusterZoomThreshold}</span>
             <button
               onClick={() => setMapClusterZoomThreshold(Math.min(1, mapClusterZoomThreshold + 1))}
-              className="w-6 h-6 bg-slate-800 border border-slate-700 rounded text-xs text-slate-200 hover:border-slate-500"
+              className="w-6 h-6 bg-slate-800 border border-slate-700 rounded-md text-xs text-slate-200 hover:border-slate-500"
               aria-label="Increase cluster zoom threshold"
             >
               +
@@ -984,7 +987,7 @@ export function MapView() {
           {isCustomMap && (
             <button
               onClick={() => pickMapImage(activeMap, setMapImagePath, setMapImageSize)}
-              className="h-8 bg-slate-900/90 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 text-xs px-3 rounded-lg backdrop-blur transition-colors"
+              className="h-8 bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 text-xs px-3 rounded-lg transition-colors"
             >
               Change map image
             </button>

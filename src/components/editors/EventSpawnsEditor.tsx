@@ -26,21 +26,25 @@ function PosRow({ pos, onUpdate, onDelete }: {
 
   return (
     <div className="flex items-center gap-2 py-1">
-      <span className="text-xs text-slate-600 w-4">X</span>
+      <span className="text-xs text-slate-500 w-4">X</span>
       <input
         value={x}
         onChange={e => setX(e.target.value)}
         onBlur={commit}
-        className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+        className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-lime-500"
       />
-      <span className="text-xs text-slate-600 w-4">Z</span>
+      <span className="text-xs text-slate-500 w-4">Z</span>
       <input
         value={z}
         onChange={e => setZ(e.target.value)}
         onBlur={commit}
-        className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+        className="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-lime-500"
       />
-      <button onClick={onDelete} className="ml-auto text-slate-600 hover:text-red-400 transition-colors text-sm">✕</button>
+      <button onClick={onDelete} className="ml-auto flex items-center justify-center w-5 h-5 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-700 transition-colors">
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -110,12 +114,12 @@ export function EventSpawnsEditor() {
               onClick={() => setSelectedEvent(selectedEventName === e.eventName ? null : e.eventName)}
               className={`w-full text-left px-3 py-2 text-xs font-mono border-b border-slate-800/50 transition-colors ${
                 selectedEventName === e.eventName
-                  ? 'bg-indigo-950/50 text-indigo-300 border-l-2 border-l-indigo-500'
+                  ? 'bg-lime-950/50 text-lime-300 border-l-2 border-l-lime-500'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
               }`}
             >
               <span className="block truncate">{e.eventName}</span>
-              <span className="text-slate-600">{e.positions.length} pts</span>
+              <span className="text-slate-500">{e.positions.length} pts</span>
             </button>
           ))}
         </div>
@@ -126,12 +130,12 @@ export function EventSpawnsEditor() {
         <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900">
           <span className="text-sm text-slate-300 font-medium">
             {selectedEventName
-              ? <>Editing: <span className="text-indigo-400 font-mono">{selectedEventName}</span></>
+              ? <>Editing: <span className="text-lime-400 font-mono">{selectedEventName}</span></>
               : 'All Spawn Points'
             }
           </span>
           {selectedEventName && (
-            <button onClick={() => setSelectedEvent(null)} className="text-xs text-slate-600 hover:text-slate-400">
+            <button onClick={() => setSelectedEvent(null)} className="text-xs text-slate-500 hover:text-slate-300">
               ← Show all
             </button>
           )}
@@ -146,10 +150,10 @@ export function EventSpawnsEditor() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-mono text-slate-300">{e.eventName}</span>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600">{e.positions.length} points</span>
+                  <span className="text-xs text-slate-500">{e.positions.length} points</span>
                   <button
                     onClick={() => addPos(e.eventName)}
-                    className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2 py-1 rounded transition-colors"
+                    className="h-8 px-3 rounded-lg text-xs bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
                   >
                     + Add
                   </button>
@@ -157,7 +161,7 @@ export function EventSpawnsEditor() {
               </div>
               <div className="bg-slate-800/50 rounded-lg px-3 py-2 space-y-0.5">
                 {e.positions.length === 0 ? (
-                  <p className="text-xs text-slate-600 italic py-1">No positions defined</p>
+                  <p className="text-xs text-slate-500 italic py-1">No positions defined</p>
                 ) : (
                   e.positions.map((pos, idx) => (
                     <PosRow

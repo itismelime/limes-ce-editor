@@ -47,11 +47,11 @@ export function MarkerPopup({ marker }: Props) {
             </div>
           ))}
           {marker.lootItems.length > 8 && (
-            <p className="text-xs text-slate-600 pt-1">+{marker.lootItems.length - 8} more…</p>
+            <p className="text-xs text-slate-500 pt-1">+{marker.lootItems.length - 8} more…</p>
           )}
         </div>
       ) : (
-        <p className="text-xs text-slate-600 italic">No loot data linked</p>
+        <p className="text-xs text-slate-500 italic">No loot data linked</p>
       )}
 
       <button
@@ -59,7 +59,7 @@ export function MarkerPopup({ marker }: Props) {
           setActiveTab('spawns');
           setSelectedEvent(marker.eventName);
         }}
-        className="mt-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+        className="mt-2 text-xs text-lime-400 hover:text-lime-300 transition-colors"
       >
         Edit spawn points →
       </button>

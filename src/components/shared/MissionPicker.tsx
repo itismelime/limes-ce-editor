@@ -23,7 +23,7 @@ const FILE_LABELS: Record<string, string> = {
 export function MissionPicker({ missions, onSelect, onCancel }: Props) {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg mx-4">
         <div className="px-6 py-5 border-b border-slate-800">
           <h2 className="text-lg font-semibold text-slate-100">Select a Mission</h2>
           <p className="text-sm text-slate-500 mt-1">
@@ -40,10 +40,10 @@ export function MissionPicker({ missions, onSelect, onCancel }: Props) {
               <button
                 key={m.missionPath}
                 onClick={() => onSelect(m)}
-                className="w-full text-left bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700 hover:border-indigo-500 rounded-xl p-4 transition-all group"
+                className="w-full text-left bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700 hover:border-lime-500 rounded-xl p-4 transition-all group"
               >
                 <div className="flex items-start justify-between gap-3 mb-2">
-                  <span className="font-mono text-sm text-slate-200 group-hover:text-indigo-300 transition-colors">
+                  <span className="font-mono text-sm text-slate-200 group-hover:text-lime-300 transition-colors">
                     {m.missionName}
                   </span>
                   <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
@@ -73,7 +73,7 @@ export function MissionPicker({ missions, onSelect, onCancel }: Props) {
                   ))}
                 </div>
 
-                <p className="text-xs text-slate-600 mt-2 truncate" title={m.missionPath}>
+                <p className="text-xs text-slate-500 mt-2 truncate" title={m.missionPath}>
                   {m.missionPath}
                 </p>
               </button>

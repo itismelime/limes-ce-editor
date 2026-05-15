@@ -11,7 +11,7 @@ export function SaveButton({ isDirty, onSave, label = 'Save' }: Props) {
       disabled={!isDirty}
       className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
         isDirty
-          ? 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer'
+          ? 'bg-lime-500 hover:bg-lime-600 text-white cursor-pointer'
           : 'bg-slate-800 text-slate-600 cursor-not-allowed'
       }`}
     >

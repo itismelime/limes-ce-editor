@@ -171,7 +171,7 @@ export function WeatherEditor() {
                 key={section.key}
                 onClick={() => setSelectedSection(section.key)}
                 className={`w-full text-left px-4 py-3 border-b border-slate-800/60 transition-colors ${
-                  isSelected ? 'bg-indigo-950/40 border-l-2 border-l-indigo-500' : 'hover:bg-slate-800/50'
+                  isSelected ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : 'hover:bg-slate-800'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -188,7 +188,7 @@ export function WeatherEditor() {
           <button
             onClick={() => setSelectedSection('storm')}
             className={`w-full text-left px-4 py-3 border-b border-slate-800/60 transition-colors ${
-              selectedSection === 'storm' ? 'bg-indigo-950/40 border-l-2 border-l-indigo-500' : 'hover:bg-slate-800/50'
+              selectedSection === 'storm' ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : 'hover:bg-slate-800'
             }`}
           >
             <div className="flex items-center justify-between gap-2">

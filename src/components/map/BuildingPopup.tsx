@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
-import { TIER_COLORS, getUsageColor, formatUsageLabel } from '../../types/map';
+import { TIER_COLORS, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 
@@ -138,7 +138,7 @@ function CategorySection({
               e.stopPropagation();
               onOpenAddModal(categoryKey);
             }}
-            className="w-5 h-5 rounded border border-emerald-700/70 bg-emerald-900/40 text-emerald-300 hover:text-emerald-200"
+            className="w-5 h-5 rounded-md border border-lime-700/70 bg-lime-900/40 text-lime-300 hover:text-lime-200"
             title="Add this category to building type (XML)"
           >
             +
@@ -148,7 +148,7 @@ function CategorySection({
               e.stopPropagation();
               onOpenTierModal(categoryKey);
             }}
-            className="w-5 h-5 rounded border border-amber-700/70 bg-amber-900/40 text-amber-300 hover:text-amber-200"
+            className="w-5 h-5 rounded-md border border-lime-700/70 bg-lime-900/40 text-lime-300 hover:text-lime-200"
             title="Remove one tier for this category (types.xml)"
           >
             T
@@ -158,10 +158,12 @@ function CategorySection({
               e.stopPropagation();
               onBlockCategory(categoryKey);
             }}
-            className="w-5 h-5 rounded border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200"
+            className="w-5 h-5 rounded-md border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200"
             title="Remove this category from building type (XML)"
           >
-            x
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
       </div>
@@ -198,7 +200,7 @@ function CategorySection({
           </div>
           <div className="overflow-y-auto max-h-52">
             {filtered.length === 0 ? (
-              <p className="text-slate-600 italic text-xs px-3 py-2">No items match</p>
+              <p className="text-slate-500 italic text-xs px-3 py-2">No items match</p>
             ) : (
               <>
                 <div className="divide-y divide-slate-800/50">
@@ -281,7 +283,7 @@ function CategorySection({
                     </div>
                   ))}
                 </div>
-                <p className="text-slate-700 text-xs px-3 py-1">{filtered.length} item{filtered.length !== 1 ? 's' : ''}</p>
+                <p className="text-slate-500 text-xs px-3 py-1">{filtered.length} item{filtered.length !== 1 ? 's' : ''}</p>
               </>
             )}
           </div>
@@ -337,7 +339,7 @@ function TierGateModal({
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className="w-[310px] max-h-[90%] bg-slate-900 border border-slate-700 rounded-lg overflow-hidden flex flex-col"
+        className="w-[310px] max-h-[90%] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden flex flex-col"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
@@ -348,9 +350,11 @@ function TierGateModal({
               e.stopPropagation();
               onClose();
             }}
-            className="text-slate-400 hover:text-slate-200 text-xs"
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
-            x
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
@@ -372,7 +376,7 @@ function TierGateModal({
         </div>
 
         <div className="p-3 space-y-1 border-b border-slate-800 text-[11px]">
-          <div className="text-emerald-300">Will update: {preview.patches.length}</div>
+          <div className="text-slate-200">Will update: {preview.patches.length}</div>
           <div className="text-slate-500">Already not in tier: {preview.noTierCount}</div>
           <div className="text-slate-500">Blocked (no higher tier): {preview.noHigherCount}</div>
           {preview.patches.length > 0 && (
@@ -450,7 +454,7 @@ function AddLootModal({
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className="w-[310px] max-h-[90%] bg-slate-900 border border-slate-700 rounded-lg overflow-hidden flex flex-col"
+        className="w-[310px] max-h-[90%] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden flex flex-col"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
@@ -461,9 +465,11 @@ function AddLootModal({
               e.stopPropagation();
               onClose();
             }}
-            className="text-slate-400 hover:text-slate-200 text-xs"
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
-            x
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
@@ -488,7 +494,7 @@ function AddLootModal({
             {categoryFilter && (
               <button
                 onClick={() => onAddCategory(categoryFilter)}
-                className="px-2 rounded bg-emerald-900/40 border border-emerald-700 text-emerald-300 text-xs"
+                className="h-8 px-3 rounded-lg bg-lime-900/40 border border-lime-700 text-lime-300 text-xs hover:text-lime-200"
                 title="Add whole category to this building type"
               >
                 +cat
@@ -831,14 +837,19 @@ export function BuildingPopup({
         ))}
         {displaySourceSignals.showZoneUsageBadge && (
           <span
-            className="px-1.5 py-0.5 rounded text-white text-xs font-semibold"
-            style={{ backgroundColor: getUsageColor(displaySourceSignals.zoneUsageValue) }}
+            className="px-1.5 py-0.5 rounded text-xs font-semibold"
+            style={{ backgroundColor: getUsageColor(displaySourceSignals.zoneUsageValue), color: getUsageTextColor(getUsageColor(displaySourceSignals.zoneUsageValue)) }}
             title="CE zone type (from usage layer)"
           >{formatUsageLabel(displaySourceSignals.zoneUsageValue)}</span>
         )}
-        {displaySourceSignals.visibleUsages.length > 0 && (
-          <span className="text-slate-400">{displaySourceSignals.visibleUsages.map(formatUsageLabel).join(' · ')}</span>
-        )}
+        {displaySourceSignals.visibleUsages.filter(u => u.toLowerCase() !== displaySourceSignals.zoneUsageValue.toLowerCase()).map(u => (
+          <span
+            key={u}
+            className="px-1.5 py-0.5 rounded text-xs font-semibold"
+            style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}
+            title="Building usage tag"
+          >{formatUsageLabel(u)}</span>
+        ))}
       </div>
       {(hasZoneTier || orderedProtoTiers.length > 0 || hasInferredTier) && (
         <div className="mb-3 text-[11px] text-slate-500">
@@ -860,7 +871,7 @@ export function BuildingPopup({
       <div className="mb-3 flex items-center justify-between">
         <button
           onClick={() => openAddModal()}
-          className="w-6 h-6 rounded border border-emerald-700/70 bg-emerald-900/40 text-emerald-300 hover:text-emerald-200"
+          className="w-6 h-6 rounded-md border border-lime-700/70 bg-lime-900/40 text-lime-300 hover:text-lime-200"
           title="Add category to this building type"
         >
           +
@@ -874,7 +885,7 @@ export function BuildingPopup({
           <button
             onClick={() => setShowSaveReview(true)}
             disabled={!hasPending}
-            className="px-2 py-0.5 rounded border border-slate-600 bg-slate-800 text-slate-200 disabled:opacity-50"
+            className="h-8 px-3 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-slate-100 hover:border-slate-500 text-xs disabled:opacity-50"
             title="Review and save all pending XML changes"
           >
             Save Pending
@@ -884,7 +895,7 @@ export function BuildingPopup({
       {saveStatus && <div className="mb-2 text-[11px] text-slate-400">{saveStatus}</div>}
 
       {building.containers.length === 0 ? (
-        <p className="text-slate-600 italic">no container data</p>
+        <p className="text-slate-500 italic">no container data</p>
       ) : (
         <>
           {sortedCategories.map(cat => (
@@ -905,7 +916,7 @@ export function BuildingPopup({
           ))}
 
           {sortedCategories.length === 0 && (
-            <p className="text-slate-600 italic">No loot after overrides</p>
+            <p className="text-slate-500 italic">No loot after overrides</p>
           )}
         </>
       )}

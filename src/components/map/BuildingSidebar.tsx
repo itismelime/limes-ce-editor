@@ -3,7 +3,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { BuildingPopup } from './BuildingPopup';
 
-export function BuildingSidebar() {
+export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number) => void }) {
   const selectedBuildingType = useUiStore(s => s.selectedBuildingType);
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const minExpandedWidth = 320;
@@ -21,6 +21,10 @@ export function BuildingSidebar() {
     if (!selectedBuildingType) return null;
     return buildingInstances.find(b => b.typeName.trim().toLowerCase() === selectedBuildingType.toLowerCase()) || null;
   }, [selectedBuildingType, buildingInstances]);
+
+  useEffect(() => {
+    onWidthChange?.(expanded ? sidebarWidth : collapsedWidth);
+  }, [expanded, sidebarWidth]);
 
   useEffect(() => {
     const prev = prevSelectedBuildingRef.current;
@@ -82,28 +86,25 @@ export function BuildingSidebar() {
 
   return (
     <div
-      className={`relative bg-slate-900 border-r border-slate-700 flex flex-col h-full overflow-hidden flex-shrink-0 ${isResizing ? '' : 'transition-[width] duration-150 ease-out'}`}
+      className={`absolute left-0 top-0 h-full z-[500] bg-slate-900 border-r border-slate-700 flex flex-col overflow-hidden ${isResizing ? '' : 'transition-[width] duration-150 ease-out'}`}
       style={{ width: expanded ? sidebarWidth : collapsedWidth }}
     >
-      <div className={`${expanded ? 'px-4 py-3' : 'px-2 py-2'} border-b border-slate-700 flex items-start justify-between gap-2 flex-shrink-0`}>
-        {expanded ? (
+      <div className={`${expanded ? 'px-4 py-3' : 'px-2 py-2'} border-b border-slate-700 flex items-start ${expanded ? 'justify-between' : 'justify-center'} gap-2 flex-shrink-0`}>
+        {expanded && (
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-100 truncate">Building Editor</h2>
             <p className="text-xs text-slate-400 mt-0.5">{building?.typeName ?? 'No building selected'}</p>
           </div>
-        ) : (
-          <div className="text-[9px] font-semibold text-slate-500 tracking-wide mt-1">ED</div>
         )}
-
-        <div className="flex items-center gap-1">
-          <button
-            onClick={toggleExpanded}
-            className="text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 rounded w-5 h-5 text-xs leading-none flex items-center justify-center"
-            title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-          >
-            {expanded ? '<' : '>'}
-          </button>
-        </div>
+        <button
+          onClick={toggleExpanded}
+          className={`${expanded ? 'w-5 h-5' : 'w-7 h-7'} rounded border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 flex items-center justify-center transition-colors flex-shrink-0`}
+          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={expanded ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
+          </svg>
+        </button>
       </div>
 
       <div className="flex-1 min-h-0">

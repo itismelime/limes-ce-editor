@@ -37,7 +37,7 @@ function SettingRow({ title, description, children }: { title: string; descripti
 }
 
 function PathDisplay({ path }: { path: string | null }) {
-  if (!path) return <span className="text-xs text-slate-600 italic">Not set</span>;
+  if (!path) return <span className="text-xs text-slate-500 italic">Not set</span>;
   const parts = path.replace(/\\/g, '/').split('/');
   const short = parts.slice(-2).join('/');
   return (
@@ -178,7 +178,7 @@ export function SettingsEditor() {
                       key={option.id}
                       onClick={() => setTheme(option.id)}
                       className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${theme === option.id
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-lime-500 text-white'
                         : 'text-slate-300 hover:bg-slate-700'}`}
                     >
                       {option.label}
@@ -215,7 +215,7 @@ export function SettingsEditor() {
             >
               <button
                 onClick={() => setRememberLastFolder(!rememberLastFolder)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${rememberLastFolder ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${rememberLastFolder ? 'bg-lime-500' : 'bg-slate-700'}`}
               >
                 <span
                   className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${rememberLastFolder ? 'translate-x-[18px]' : 'translate-x-[3px]'}`}
@@ -326,12 +326,12 @@ export function SettingsEditor() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setClusterZoom(clusterZoom - 1)}
-                  className="w-7 h-7 bg-slate-800 border border-slate-700 rounded text-slate-200 hover:border-slate-500 text-sm"
+                  className="w-7 h-7 bg-slate-800 border border-slate-700 rounded-md text-slate-200 hover:border-slate-500 text-sm"
                 >−</button>
                 <span className="w-6 text-center text-sm text-slate-200">{clusterZoom}</span>
                 <button
                   onClick={() => setClusterZoom(clusterZoom + 1)}
-                  className="w-7 h-7 bg-slate-800 border border-slate-700 rounded text-slate-200 hover:border-slate-500 text-sm"
+                  className="w-7 h-7 bg-slate-800 border border-slate-700 rounded-md text-slate-200 hover:border-slate-500 text-sm"
                 >+</button>
               </div>
             </SettingRow>

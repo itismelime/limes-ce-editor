@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --app-bg: #0a0a0a;
+  --app-bg: #020617;
   --app-fg: #f0f0f0;
   --app-scrollbar-thumb: #404040;
   --app-scrollbar-thumb-hover: #525252;
