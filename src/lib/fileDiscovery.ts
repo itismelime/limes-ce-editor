@@ -13,6 +13,8 @@ const TARGET_FILES = new Set([
   'cfgplayerspawnpoints.xml',
   'cfgweather.xml',
   'cfggameplay.json',
+  'cfglimitsdefinition.xml',
+  'cfglimitsdefinitionuser.xml',
 ]);
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.tga']);
@@ -35,6 +37,8 @@ export interface MissionFiles {
   playerSpawnPointsPath: string | null;
   weatherPath: string | null;
   gameplayPath: string | null;
+  limitsDefinitionPath: string | null;
+  limitsDefinitionUserPath: string | null;
   mapImagePath: string | null;
 }
 
@@ -248,8 +252,10 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
       mapGroupPosPath:       files['mapgrouppos.xml']          ?? null,
       areaFlagsPath:         files['areaflags.map']            ?? null,
       playerSpawnPointsPath: files['cfgplayerspawnpoints.xml'] ?? null,
-      weatherPath:           files['cfgweather.xml']           ?? null,
-      gameplayPath:          files['cfggameplay.json']         ?? null,
+      weatherPath:              files['cfgweather.xml']                ?? null,
+      gameplayPath:             files['cfggameplay.json']             ?? null,
+      limitsDefinitionPath:     files['cfglimitsdefinition.xml']     ?? null,
+      limitsDefinitionUserPath: files['cfglimitsdefinitionuser.xml'] ?? null,
       mapImagePath,
     };
   });

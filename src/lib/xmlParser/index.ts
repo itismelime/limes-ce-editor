@@ -7,3 +7,4 @@ export * from './playerSpawns';
 export * from './economyCore';
 export * from './weather';
 export * from './gameplay';
+export * from './limitsDefinition';

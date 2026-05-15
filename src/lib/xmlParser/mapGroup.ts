@@ -124,6 +124,10 @@ export function serializeMapGroupProtoXml(proto: Map<string, MapGroupProtoXmlEnt
     .map(([name, entry]) => ({
       '@_name':    entry.rawName ?? name,
       '@_lootmax': String(entry.lootmax),
+      // Buildings without containers store usages as group-level <usage> elements
+      ...(entry.containers.length === 0 && entry.usages.length > 0
+        ? { usage: entry.usages.map(u => ({ '@_name': u })) }
+        : {}),
       ...(entry.containers.length ? {
         container: entry.containers.map(c => ({
           '@_name':    c.name,

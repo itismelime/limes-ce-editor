@@ -515,7 +515,7 @@ export function AppShell() {
                 )}
                 {mountedTabs.types && (
                   <div className={tabPanelClass('types')}>
-                    <StableTypesEditor />
+                    <StableTypesEditor isActive={activeTab === 'types'} />
                   </div>
                 )}
                 {mountedTabs.events && (

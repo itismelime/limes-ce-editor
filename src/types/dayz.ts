@@ -146,6 +146,8 @@ export type DirtyFlags = {
   mapGroupProto: boolean;
   weather: boolean;
   gameplay: boolean;
+  limitsDefinition: boolean;
+  limitsDefinitionUser: boolean;
 };
 
 export interface CeFile {
@@ -240,6 +242,28 @@ export interface GameplayData {
     rawMaxTemps?: string;
   };
   rawData?: Record<string, unknown>;
+}
+
+export interface LimitsDefinition {
+  categories: string[];
+  tags: string[];
+  usages: string[];
+  values: string[];
+}
+
+export interface LimitsUsageGroup {
+  name: string;
+  usages: string[];
+}
+
+export interface LimitsValueGroup {
+  name: string;
+  values: string[];
+}
+
+export interface LimitsDefinitionUser {
+  usageGroups: LimitsUsageGroup[];
+  valueGroups: LimitsValueGroup[];
 }
 
 export interface CeToolLayer {

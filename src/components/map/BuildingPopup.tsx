@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
 import { TIER_COLORS, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
@@ -542,7 +542,6 @@ export function BuildingPopup({
 }: Props) {
   const types = useServerStore(s => s.mission?.types ?? EMPTY_TYPES);
   const categoryFilter  = useUiStore(s => s.categoryFilter);
-  const dirty = useServerStore(s => s.dirty);
   // Read live building from store so category edits are reflected immediately without
   // relying on Leaflet re-opening the popup with updated props.
   const liveBuildingInstances = useServerStore(s => s.buildingInstances);
@@ -553,8 +552,18 @@ export function BuildingPopup({
   const originalMapGroupProto = useServerStore(s => s.originalMapGroupProto);
   const addBuildingCategory = useServerStore(s => s.addBuildingCategory);
   const removeBuildingCategory = useServerStore(s => s.removeBuildingCategory);
+  const addBuildingUsage = useServerStore(s => s.addBuildingUsage);
+  const removeBuildingUsage = useServerStore(s => s.removeBuildingUsage);
+  const limitsDefinition = useServerStore(s => s.limitsDefinition);
+  const updateLimitsDefinition = useServerStore(s => s.updateLimitsDefinition);
   const updateType = useServerStore(s => s.updateType);
-  const setShowSaveReview = useUiStore(s => s.setShowSaveReview);
+  const setCustomUsageColor = useUiStore(s => s.setCustomUsageColor);
+  const removeCustomUsageColor = useUiStore(s => s.removeCustomUsageColor);
+  const removeLimitsUsage = useServerStore(s => s.removeLimitsUsage);
+  const [usageDropdownOpen, setUsageDropdownOpen] = useState(false);
+  const [usageSearch, setUsageSearch] = useState('');
+  const [pendingUsageColor, setPendingUsageColor] = useState('#94a3b8');
+  const usageDropdownRef = useRef<HTMLDivElement>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalCategory, setAddModalCategory] = useState('');
   const [showTierModal, setShowTierModal] = useState(false);
@@ -563,6 +572,33 @@ export function BuildingPopup({
   const [tierApplying, setTierApplying] = useState(false);
   const [tierStatus, setTierStatus] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (usageSearch.trim()) setPendingUsageColor(getUsageColor(usageSearch.trim()));
+  }, [usageSearch]);
+
+  useEffect(() => {
+    if (!usageDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (usageDropdownRef.current && !usageDropdownRef.current.contains(e.target as Node)) {
+        setUsageDropdownOpen(false);
+        setUsageSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [usageDropdownOpen]);
+
+  const availableUsages = useMemo(() => {
+    const current = new Set(building.usages.map(u => u.trim().toLowerCase()));
+    const base = limitsDefinition?.usages ?? [];
+    const fromInstances = liveBuildingInstances.flatMap(b => b.usages.map(u => u.trim())).filter(Boolean);
+    return [...new Set([...base, ...fromInstances])].filter(u => !current.has(u.trim().toLowerCase()));
+  }, [limitsDefinition, building.usages, liveBuildingInstances]);
+
+  const filteredUsages = useMemo(() =>
+    availableUsages.filter(u => u.toLowerCase().includes(usageSearch.toLowerCase())),
+  [availableUsages, usageSearch]);
 
   // Aggregate all eligible items across all containers, deduplicated
   const allItems = useMemo(() => {
@@ -816,9 +852,7 @@ export function BuildingPopup({
     }
   };
 
-  const pendingTypeSources = dirty.typesSources.length;
-  const pendingMapProto = dirty.mapGroupProto;
-  const hasPending = pendingMapProto || pendingTypeSources > 0;
+
 
 
   return (
@@ -845,11 +879,90 @@ export function BuildingPopup({
         {displaySourceSignals.visibleUsages.filter(u => u.toLowerCase() !== displaySourceSignals.zoneUsageValue.toLowerCase()).map(u => (
           <span
             key={u}
-            className="px-1.5 py-0.5 rounded text-xs font-semibold"
+            className="group px-1.5 py-0.5 rounded text-xs font-semibold flex items-center gap-1"
             style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}
             title="Building usage tag"
-          >{formatUsageLabel(u)}</span>
+          >
+            {formatUsageLabel(u)}
+            <button
+              onClick={() => removeBuildingUsage(building.typeName, u)}
+              className="opacity-0 group-hover:opacity-70 hover:!opacity-100 leading-none transition-opacity"
+              title={`Remove ${u}`}
+            >×</button>
+          </span>
         ))}
+        <div className="relative" ref={usageDropdownRef}>
+          <button
+            onClick={() => { setUsageDropdownOpen(v => !v); setUsageSearch(''); }}
+            className="px-1.5 py-0.5 rounded text-xs font-medium bg-lime-900/50 text-lime-300 hover:bg-lime-900/80 border border-lime-700/50"
+            title="Add usage"
+          >+ Add</button>
+            {usageDropdownOpen && (
+              <div className="absolute left-0 top-full mt-1 z-50 bg-slate-800 border border-slate-600 rounded shadow-lg w-44">
+                <input
+                  autoFocus
+                  type="text"
+                  value={usageSearch}
+                  onChange={e => setUsageSearch(e.target.value)}
+                  placeholder="Search usages…"
+                  className="w-full px-2 py-1 text-xs bg-slate-700 border-b border-slate-600 text-slate-200 placeholder-slate-500 focus:outline-none rounded-t"
+                />
+                {!usageSearch.trim() && (
+                  <div className="px-2 py-1.5 border-b border-slate-600">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-700/50 rounded px-2 py-1.5">
+                      <svg className="w-3 h-3 text-lime-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      <span>Type a new name to create a custom usage</span>
+                    </div>
+                  </div>
+                )}
+                <div className="max-h-40 overflow-y-auto">
+                  {filteredUsages.map(u => (
+                    <div key={u} className="flex items-center group hover:bg-slate-700">
+                      <button
+                        onClick={() => { addBuildingUsage(building.typeName, u); setUsageDropdownOpen(false); setUsageSearch(''); }}
+                        className="flex-1 text-left px-2 py-1.5 text-xs text-slate-200 flex items-center gap-1.5"
+                      >
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: getUsageColor(u) }} />
+                        {formatUsageLabel(u)}
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); removeLimitsUsage(u); removeCustomUsageColor(u); }}
+                        className="px-2 py-1.5 opacity-0 group-hover:opacity-40 hover:!opacity-100 text-slate-400 hover:text-rose-400 transition-opacity text-xs leading-none"
+                        title={`Delete "${u}" zone`}
+                      >×</button>
+                    </div>
+                  ))}
+                  {usageSearch.trim() && !availableUsages.some(u => u.toLowerCase() === usageSearch.trim().toLowerCase()) && (
+                    <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-slate-600">
+                      <input
+                        type="color"
+                        value={pendingUsageColor}
+                        onChange={e => setPendingUsageColor(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent flex-shrink-0"
+                        title="Pick color"
+                      />
+                      <button
+                        onClick={() => {
+                          const name = usageSearch.trim();
+                          setCustomUsageColor(name, pendingUsageColor);
+                          if (limitsDefinition) updateLimitsDefinition({ ...limitsDefinition, usages: [...limitsDefinition.usages, name] });
+                          addBuildingUsage(building.typeName, name);
+                          setUsageDropdownOpen(false);
+                          setUsageSearch('');
+                        }}
+                        className="flex-1 text-left text-xs text-lime-300 hover:text-lime-200"
+                      >
+                        Create "{usageSearch.trim()}"
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
       </div>
       {(hasZoneTier || orderedProtoTiers.length > 0 || hasInferredTier) && (
         <div className="mb-3 text-[11px] text-slate-500">
@@ -876,21 +989,6 @@ export function BuildingPopup({
         >
           +
         </button>
-        <div className="flex items-center gap-2">
-          {hasPending && (
-            <span className="text-[10px] text-amber-400">
-              Pending: {pendingMapProto ? 'mapgroupproto' : ''}{pendingMapProto && pendingTypeSources > 0 ? ' + ' : ''}{pendingTypeSources > 0 ? `${pendingTypeSources} types file(s)` : ''}
-            </span>
-          )}
-          <button
-            onClick={() => setShowSaveReview(true)}
-            disabled={!hasPending}
-            className="h-8 px-3 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-slate-100 hover:border-slate-500 text-xs disabled:opacity-50"
-            title="Review and save all pending XML changes"
-          >
-            Save Pending
-          </button>
-        </div>
       </div>
       {saveStatus && <div className="mb-2 text-[11px] text-slate-400">{saveStatus}</div>}
 

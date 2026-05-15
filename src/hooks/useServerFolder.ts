@@ -11,6 +11,7 @@ import {
   parseMapGroupProtoXml, parseMapGroupPosXml, joinMapGroups,
   parsePlayerSpawnPointsXml,
   parseWeatherXml, parseGameplayJson,
+  parseLimitsDefinitionXml, parseLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
 import { clearAreaFlags, loadTierLayers } from '../lib/tierZoneResolver';
 import { readBinaryFile } from '../lib/fileDiscovery';
@@ -344,6 +345,8 @@ export function useServerFolder() {
   const ceToolFolderOverride  = useServerStore(s => s.ceToolFolderOverride);
   const setWeather           = useServerStore(s => s.setWeather);
   const setGameplay          = useServerStore(s => s.setGameplay);
+  const setLimitsDefinition  = useServerStore(s => s.setLimitsDefinition);
+  const setLimitsDefinitionUser = useServerStore(s => s.setLimitsDefinitionUser);
   const setLoading          = useUiStore(s => s.setLoading);
   const setLoadError        = useUiStore(s => s.setLoadError);
   const setLoadWarnings     = useUiStore(s => s.setLoadWarnings);
@@ -367,15 +370,17 @@ export function useServerFolder() {
 
     try {
       setPaths({
-        missionPath:        m.missionPath,
-        typesPath:          m.typesPath,
-        eventSpawnsPath:    m.eventSpawnsPath,
-        eventsPath:         m.eventsPath,
-        spawnableTypesPath: m.spawnableTypesPath,
-        economyCorePath:    m.economyCorePath,
-        mapGroupProtoPath:  m.mapGroupProtoPath,
-        weatherPath:        m.weatherPath,
-        gameplayPath:       m.gameplayPath,
+        missionPath:              m.missionPath,
+        typesPath:                m.typesPath,
+        eventSpawnsPath:          m.eventSpawnsPath,
+        eventsPath:               m.eventsPath,
+        spawnableTypesPath:       m.spawnableTypesPath,
+        economyCorePath:          m.economyCorePath,
+        mapGroupProtoPath:        m.mapGroupProtoPath,
+        weatherPath:              m.weatherPath,
+        gameplayPath:             m.gameplayPath,
+        limitsDefinitionPath:     m.limitsDefinitionPath,
+        limitsDefinitionUserPath: m.limitsDefinitionUserPath,
       });
 
       const { mission, warnings } = await loadMission(m);
@@ -454,13 +459,25 @@ export function useServerFolder() {
         }
       }
 
+      setLimitsDefinition(null);
+      if (m.limitsDefinitionPath) {
+        try { setLimitsDefinition(parseLimitsDefinitionXml(await readFile(m.limitsDefinitionPath))); }
+        catch { /* optional — silently skip */ }
+      }
+
+      setLimitsDefinitionUser(null);
+      if (m.limitsDefinitionUserPath) {
+        try { setLimitsDefinitionUser(parseLimitsDefinitionUserXml(await readFile(m.limitsDefinitionUserPath))); }
+        catch { /* optional — silently skip */ }
+      }
+
       if (m.mapImagePath) setMapImagePath(activeMap, convertFileSrc(m.mapImagePath));
     } catch (err) {
       if (err instanceof Error) setLoadError(`error:${err.message}`);
     } finally {
       setLoading(false);
     }
-  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource]);
+  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser]);
 
   // Keep ref current every render so the effect below always has the latest version.
   selectMissionRef.current = selectMission;

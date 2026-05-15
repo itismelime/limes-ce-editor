@@ -71,9 +71,21 @@ const COLOR_PALETTE = [
   '#22c55e', '#eab308', '#14b8a6', '#8b5cf6', '#f43f5e',
 ];
 
+const CUSTOM_USAGE_COLORS: Record<string, string> = {};
+
+export function registerCustomUsageColor(usage: string, color: string): void {
+  CUSTOM_USAGE_COLORS[usage.trim().toLowerCase()] = color;
+}
+
+export function unregisterCustomUsageColor(usage: string): void {
+  delete CUSTOM_USAGE_COLORS[usage.trim().toLowerCase()];
+}
+
 export function getUsageColor(usage: string): string {
   if (!usage || usage === 'unknown') return '#475569';
   const normalizedUsage = usage.trim().toLowerCase();
+  const customColor = CUSTOM_USAGE_COLORS[normalizedUsage];
+  if (customColor) return customColor;
   const knownColor = TYPE_COLORS[normalizedUsage];
   if (knownColor) return knownColor;
 

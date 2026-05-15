@@ -92,6 +92,8 @@ export function TopBar({
   const saveMapGroupProto = useServerStore(s => s.saveMapGroupProto);
   const saveWeather = useServerStore(s => s.saveWeather);
   const saveGameplay = useServerStore(s => s.saveGameplay);
+  const saveLimitsDefinition = useServerStore(s => s.saveLimitsDefinition);
+  const saveLimitsDefinitionUser = useServerStore(s => s.saveLimitsDefinitionUser);
   const saveCheckpoints = useServerStore(s => s.saveCheckpoints);
   const createSaveCheckpointFromDirty = useServerStore(s => s.createSaveCheckpointFromDirty);
   const revertSaveCheckpoint = useServerStore(s => s.revertSaveCheckpoint);
@@ -102,8 +104,14 @@ export function TopBar({
   const revertMapGroupProto = useServerStore(s => s.revertMapGroupProto);
   const revertWeather = useServerStore(s => s.revertWeather);
   const revertGameplay = useServerStore(s => s.revertGameplay);
+  const revertLimitsDefinition = useServerStore(s => s.revertLimitsDefinition);
+  const revertLimitsDefinitionUser = useServerStore(s => s.revertLimitsDefinitionUser);
   const undoType = useServerStore(s => s.undoType);
+  const undoMapGroupProto = useServerStore(s => s.undoMapGroupProto);
+  const undoZoneRemove = useServerStore(s => s.undoZoneRemove);
   const typeHistory = useServerStore(s => s.typeHistory);
+  const mapGroupProtoHistory = useServerStore(s => s.mapGroupProtoHistory);
+  const zoneRemoveHistory = useServerStore(s => s.zoneRemoveHistory);
   const activeTab = useUiStore(s => s.activeTab);
   const setActiveTab = useUiStore(s => s.setActiveTab);
   const activeMap = useUiStore(s => s.activeMap);
@@ -144,7 +152,7 @@ export function TopBar({
     setActiveTab(targetTab);
   };
 
-  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay;
+  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay || dirty.limitsDefinition || dirty.limitsDefinitionUser;
   const pendingItems: Array<{ id: string; label: string; detail: string; onRevert: () => void }> = [
     ...dirty.typesSources.map(source => ({
       id: `types:${source}`,
@@ -169,6 +177,12 @@ export function TopBar({
       : []),
     ...(dirty.gameplay
       ? [{ id: 'gameplay', label: 'gameplay.json', detail: 'Gameplay settings', onRevert: () => revertGameplay() }]
+      : []),
+    ...(dirty.limitsDefinition
+      ? [{ id: 'limitsDefinition', label: 'cfglimitsdefinition.xml', detail: 'Usage zones & categories', onRevert: () => revertLimitsDefinition() }]
+      : []),
+    ...(dirty.limitsDefinitionUser
+      ? [{ id: 'limitsDefinitionUser', label: 'cfglimitsdefinitionuser.xml', detail: 'Usage & value group aliases', onRevert: () => revertLimitsDefinitionUser() }]
       : []),
   ];
   const isKnownMap = OFFLINE_MAP_ORDER.includes(activeMap);
@@ -409,6 +423,8 @@ export function TopBar({
       if (dirty.spawnableTypes) await saveSpawnableTypes();
       if (dirty.weather) await saveWeather();
       if (dirty.gameplay) await saveGameplay();
+      if (dirty.limitsDefinition) await saveLimitsDefinition();
+      if (dirty.limitsDefinitionUser) await saveLimitsDefinitionUser();
     } finally {
       setSavingPending(false);
     }
@@ -431,6 +447,8 @@ export function TopBar({
     if (dirty.mapGroupProto) revertMapGroupProto();
     if (dirty.weather) revertWeather();
     if (dirty.gameplay) revertGameplay();
+    if (dirty.limitsDefinition) revertLimitsDefinition();
+    if (dirty.limitsDefinitionUser) revertLimitsDefinitionUser();
   };
 
   return (
@@ -528,9 +546,9 @@ export function TopBar({
 
           <div className="flex items-center gap-1.5">
             <button
-              onClick={typeHistory.length > 0 ? undoType : undoLastSave}
-              disabled={typeHistory.length === 0 && saveCheckpoints.length === 0}
-              title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : 'Revert most recent saved change set'}
+              onClick={typeHistory.length > 0 ? undoType : mapGroupProtoHistory.length > 0 ? undoMapGroupProto : zoneRemoveHistory.length > 0 ? undoZoneRemove : undoLastSave}
+              disabled={typeHistory.length === 0 && mapGroupProtoHistory.length === 0 && zoneRemoveHistory.length === 0 && saveCheckpoints.length === 0}
+              title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : mapGroupProtoHistory.length > 0 ? `Undo last building change (${mapGroupProtoHistory.length} step${mapGroupProtoHistory.length !== 1 ? 's' : ''})` : zoneRemoveHistory.length > 0 ? `Undo zone deletion "${zoneRemoveHistory[0].usage}"` : 'Revert most recent saved change set'}
               className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 disabled:opacity-50 flex items-center gap-1.5"
             >
               <span aria-hidden="true">↩</span>
@@ -539,7 +557,8 @@ export function TopBar({
             <button
               onClick={() => setShowSaveReview(true)}
               disabled={savingPending || !hasDirty}
-              className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-lime-500 hover:bg-lime-600 text-white disabled:opacity-50 flex items-center gap-2"
+              title={hasDirty ? `Unsaved changes:\n${pendingItems.map(i => `  • ${i.detail}`).join('\n')}` : 'Nothing to save'}
+              className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 ${hasDirty ? 'bg-lime-500 hover:bg-lime-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-default'}`}
             >
               {hasDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
               {savingPending ? 'Saving…' : 'Save'}

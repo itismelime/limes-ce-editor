@@ -5,6 +5,7 @@ import { BuildingPopup } from './BuildingPopup';
 
 export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number) => void }) {
   const selectedBuildingType = useUiStore(s => s.selectedBuildingType);
+  const selectedBuildingSeq = useUiStore(s => s.selectedBuildingSeq);
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const minExpandedWidth = 320;
   const maxExpandedWidth = 760;
@@ -15,7 +16,6 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
   const resizingRef = useRef(false);
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(sidebarWidth);
-  const prevSelectedBuildingRef = useRef<string | null>(null);
 
   const building = useMemo(() => {
     if (!selectedBuildingType) return null;
@@ -27,13 +27,12 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
   }, [expanded, sidebarWidth]);
 
   useEffect(() => {
-    const prev = prevSelectedBuildingRef.current;
-    const next = selectedBuildingType ?? null;
-    if (next && next !== prev) {
+    if (selectedBuildingType) {
       setExpanded(true);
+    } else {
+      setExpanded(false);
     }
-    prevSelectedBuildingRef.current = next;
-  }, [selectedBuildingType]);
+  }, [selectedBuildingSeq, selectedBuildingType]);
 
   useEffect(() => {
     const onMouseMove = (event: MouseEvent) => {

@@ -199,6 +199,12 @@ function ZoomControlOffset({ sidebarWidth }: { sidebarWidth: number }) {
   return null;
 }
 
+function MapClickDeselect() {
+  const setSelectedBuilding = useUiStore(s => s.setSelectedBuilding);
+  useMapEvent('click', () => setSelectedBuilding(null));
+  return null;
+}
+
 function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
   useEffect(() => {
@@ -772,6 +778,7 @@ export function MapView() {
         >
           <MapFitBounds mapConfig={mapConfig} />
           <MapVisibilitySync isActive={isMapActive} />
+          <MapClickDeselect />
           <PopupAutoFlip />
           <ZoomControlOffset sidebarWidth={sidebarWidth} />
 
@@ -945,7 +952,7 @@ export function MapView() {
             onClick={() => setShowCeZones(v => !v)}
             className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showCeZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
           >
-            CE Zones
+            Spawn Territories
           </button>
         )}
         {buildingInstances.length > 0 && (

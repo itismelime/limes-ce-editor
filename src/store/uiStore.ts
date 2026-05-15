@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { MapId } from '../types/map';
+import { registerCustomUsageColor, unregisterCustomUsageColor } from '../types/map';
 
 export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay' | 'settings';
 export type ThemeId = 'dark' | 'light';
@@ -18,6 +19,7 @@ interface UiState {
   showSaveReview: boolean;
   selectedEventName: string | null;
   selectedBuildingType: string | null;
+  selectedBuildingSeq: number;
   typeFilter: string;
   categoryFilter: string;
   eventFilter: string;
@@ -44,6 +46,7 @@ interface UiState {
   buildingLootOverrides: Record<string, BuildingLootOverride>;
   recentFolders: string[];
   rememberLastFolder: boolean;
+  customUsageColors: Record<string, string>;
 
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: MapId) => void;
@@ -86,10 +89,29 @@ interface UiState {
   clearBuildingLootOverride: (buildingType: string) => void;
   addRecentFolder: (path: string) => void;
   setRememberLastFolder: (v: boolean) => void;
+  setCustomUsageColor: (usage: string, color: string) => void;
+  removeCustomUsageColor: (usage: string) => void;
 }
 
 const CATEGORY_OVERRIDES_KEY = 'categoryOverrides';
 const BUILDING_LOOT_OVERRIDES_KEY = 'buildingLootOverrides';
+const CUSTOM_USAGE_COLORS_KEY = 'customUsageColors';
+
+function readCustomUsageColors(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CUSTOM_USAGE_COLORS_KEY) ?? '{}') as Record<string, unknown>;
+    const result: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) {
+        result[k.trim().toLowerCase()] = v;
+        registerCustomUsageColor(k, v);
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
 
 function readCategoryOverrides(): Record<string, string> {
   try {
@@ -146,6 +168,7 @@ export const useUiStore = create<UiState>((set) => ({
   showSaveReview: false,
   selectedEventName: null,
   selectedBuildingType: null,
+  selectedBuildingSeq: 0,
   typeFilter: '',
   categoryFilter: '',
   eventFilter: '',
@@ -169,7 +192,7 @@ export const useUiStore = create<UiState>((set) => ({
   }),
   setShowSaveReview: (v) => set({ showSaveReview: v }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
-  setSelectedBuilding: (type) => set({ selectedBuildingType: type }),
+  setSelectedBuilding: (type) => set(s => ({ selectedBuildingType: type, selectedBuildingSeq: s.selectedBuildingSeq + 1 })),
   setTypeFilter: (v) => set({ typeFilter: v }),
   setCategoryFilter: (v) => set({ categoryFilter: v }),
   setEventFilter: (v) => set({ eventFilter: v }),
@@ -214,6 +237,7 @@ export const useUiStore = create<UiState>((set) => ({
     try { return JSON.parse(localStorage.getItem('rememberLastFolder') ?? 'false') as boolean; }
     catch { return false; }
   })(),
+  customUsageColors: readCustomUsageColors(),
   toggleTier: (tier) => set(s => ({
     hiddenTiers: s.hiddenTiers.includes(tier)
       ? s.hiddenTiers.filter(t => t !== tier)
@@ -331,6 +355,21 @@ export const useUiStore = create<UiState>((set) => ({
   setRememberLastFolder: (v) => set(() => {
     localStorage.setItem('rememberLastFolder', JSON.stringify(v));
     return { rememberLastFolder: v };
+  }),
+  setCustomUsageColor: (usage, color) => set(s => {
+    const key = usage.trim().toLowerCase();
+    const next = { ...s.customUsageColors, [key]: color };
+    localStorage.setItem(CUSTOM_USAGE_COLORS_KEY, JSON.stringify(next));
+    registerCustomUsageColor(usage, color);
+    return { customUsageColors: next };
+  }),
+  removeCustomUsageColor: (usage) => set(s => {
+    const key = usage.trim().toLowerCase();
+    const next = { ...s.customUsageColors };
+    delete next[key];
+    localStorage.setItem(CUSTOM_USAGE_COLORS_KEY, JSON.stringify(next));
+    unregisterCustomUsageColor(usage);
+    return { customUsageColors: next };
   }),
   clearBuildingLootOverride: (buildingType) => set(s => {
     const key = buildingType.trim().toLowerCase();

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData, WeatherData, GameplayData, CeToolProject } from '../types/dayz';
+import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData, WeatherData, GameplayData, CeToolProject, LimitsDefinition, LimitsDefinitionUser } from '../types/dayz';
 import {
   serializeTypesXml, serializeEventSpawnsXml,
   serializeEventsXml, serializeSpawnableTypesXml,
   serializeEconomyCoreXml, serializeMapGroupProtoXml,
   serializeWeatherXml, serializeGameplayJson,
+  serializeLimitsDefinitionXml, serializeLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
 import { writeFile, createDir } from '../lib/fileDiscovery';
 import type { ContainerDef } from '../types/dayz';
@@ -19,6 +20,8 @@ interface FilePaths {
   mapGroupProtoPath: string | null;
   weatherPath: string | null;
   gameplayPath: string | null;
+  limitsDefinitionPath: string | null;
+  limitsDefinitionUserPath: string | null;
 }
 
 type MapGroupProtoEntry = {
@@ -29,6 +32,13 @@ type MapGroupProtoEntry = {
   lootmax: number;
   containers: ContainerDef[];
   orderIndex?: number;
+};
+
+type ZoneRemoveSnapshot = {
+  usage: string;
+  prevLimitsDefinition: LimitsDefinition | null;
+  prevProtoEntries: Array<{ key: string; entry: MapGroupProtoEntry }>;
+  prevTypes: Array<{ name: string; type: DayZType }>;
 };
 
 type SaveCheckpoint = {
@@ -61,6 +71,8 @@ interface ServerState {
   reloadCeToolData?: () => Promise<void>;
   weather: WeatherData | null;
   gameplay: GameplayData | null;
+  limitsDefinition: LimitsDefinition | null;
+  limitsDefinitionUser: LimitsDefinitionUser | null;
   originalTypes: Map<string, DayZType>;
   originalEvents: Map<string, DayZEvent>;
   originalEventSpawns: EventSpawnDef[];
@@ -68,8 +80,12 @@ interface ServerState {
   originalMapGroupProto: Map<string, MapGroupProtoEntry>;
   originalWeather: WeatherData | null;
   originalGameplay: GameplayData | null;
+  originalLimitsDefinition: LimitsDefinition | null;
+  originalLimitsDefinitionUser: LimitsDefinitionUser | null;
   saveCheckpoints: SaveCheckpoint[];
   typeHistory: { name: string; prev: DayZType }[];
+  mapGroupProtoHistory: { key: string; prev: MapGroupProtoEntry }[];
+  zoneRemoveHistory: ZoneRemoveSnapshot[];
 
   setMission: (mission: MissionData) => void;
   setPaths: (paths: Partial<FilePaths>) => void;
@@ -87,6 +103,10 @@ interface ServerState {
   setWeather: (data: WeatherData | null) => void;
   setGameplay: (data: GameplayData | null) => void;
   updateGameplay: (data: GameplayData) => void;
+  setLimitsDefinition: (data: LimitsDefinition | null) => void;
+  setLimitsDefinitionUser: (data: LimitsDefinitionUser | null) => void;
+  updateLimitsDefinition: (data: LimitsDefinition) => void;
+  updateLimitsDefinitionUser: (data: LimitsDefinitionUser) => void;
   clearSaveError: () => void;
   createSaveCheckpointFromDirty: (label?: string) => void;
   revertSaveCheckpoint: (id?: string) => void;
@@ -94,6 +114,8 @@ interface ServerState {
 
   updateType: (name: string, patch: Partial<DayZType>) => void;
   undoType: () => void;
+  undoMapGroupProto: () => void;
+  undoZoneRemove: () => void;
   revertTypesSource: (sourcePath: string) => void;
   revertEventSpawns: () => void;
   revertEvents: () => void;
@@ -101,11 +123,16 @@ interface ServerState {
   revertMapGroupProto: () => void;
   revertWeather: () => void;
   revertGameplay: () => void;
+  revertLimitsDefinition: () => void;
+  revertLimitsDefinitionUser: () => void;
   updateEvent: (name: string, patch: Partial<DayZEvent>) => void;
   setEventSpawns: (spawns: EventSpawnDef[]) => void;
   updateSpawnableType: (name: string, patch: Partial<SpawnableType>) => void;
   addBuildingCategory: (buildingType: string, category: string) => void;
   removeBuildingCategory: (buildingType: string, category: string) => void;
+  addBuildingUsage: (buildingType: string, usage: string) => void;
+  removeBuildingUsage: (buildingType: string, usage: string) => void;
+  removeLimitsUsage: (usage: string) => void;
 
   addCustomTypePack: (name: string, xmlContent: string) => Promise<void>;
   removeEconomyCoreEntry: (folder: string) => Promise<void>;
@@ -116,27 +143,48 @@ interface ServerState {
   saveMapGroupProto: () => Promise<void>;
   saveWeather: () => Promise<void>;
   saveGameplay: () => Promise<void>;
+  saveLimitsDefinition: () => Promise<void>;
+  saveLimitsDefinitionUser: () => Promise<void>;
 }
 
-const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false };
+const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false, limitsDefinition: false, limitsDefinitionUser: false };
+
+function cloneMapGroupProtoEntry(entry: MapGroupProtoEntry): MapGroupProtoEntry {
+  return {
+    rawName: entry.rawName,
+    usages: [...entry.usages],
+    tiers: [...entry.tiers],
+    valueUsers: entry.valueUsers ? [...entry.valueUsers] : undefined,
+    lootmax: entry.lootmax,
+    containers: entry.containers.map(c => ({ ...c, categories: [...c.categories], tags: [...c.tags] })),
+    orderIndex: entry.orderIndex,
+  };
+}
+
+function mapGroupProtoEntryDirty(a: MapGroupProtoEntry, b: MapGroupProtoEntry): boolean {
+  if (a.lootmax !== b.lootmax) return true;
+  if (a.usages.length !== b.usages.length || a.usages.some((u, i) => u !== b.usages[i])) return true;
+  if (a.tiers.length !== b.tiers.length || a.tiers.some((t, i) => t !== b.tiers[i])) return true;
+  if (a.containers.length !== b.containers.length) return true;
+  return a.containers.some((c, ci) => {
+    const bc = b.containers[ci];
+    return c.categories.length !== bc.categories.length || c.categories.some((cat, i) => cat !== bc.categories[i])
+        || c.tags.length !== bc.tags.length || c.tags.some((tag, i) => tag !== bc.tags[i]);
+  });
+}
+
+function isMapGroupProtoDirty(current: Map<string, MapGroupProtoEntry>, original: Map<string, MapGroupProtoEntry>): boolean {
+  if (current.size !== original.size) return true;
+  for (const [key, entry] of current) {
+    const orig = original.get(key);
+    if (!orig || mapGroupProtoEntryDirty(entry, orig)) return true;
+  }
+  return false;
+}
 
 function cloneMapGroupProto(proto: Map<string, MapGroupProtoEntry>): Map<string, MapGroupProtoEntry> {
   const next = new Map<string, MapGroupProtoEntry>();
-  for (const [key, entry] of proto) {
-    next.set(key, {
-      rawName: entry.rawName,
-      usages: [...entry.usages],
-      tiers: [...entry.tiers],
-      valueUsers: entry.valueUsers ? [...entry.valueUsers] : undefined,
-      lootmax: entry.lootmax,
-      containers: entry.containers.map(c => ({
-        ...c,
-        categories: [...c.categories],
-        tags: [...c.tags],
-      })),
-      orderIndex: entry.orderIndex,
-    });
-  }
+  for (const [key, entry] of proto) next.set(key, cloneMapGroupProtoEntry(entry));
   return next;
 }
 
@@ -162,7 +210,7 @@ export const useServerStore = create<ServerState>((set, get) => {
 
   return {
   mission: null,
-  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null },
+  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null, limitsDefinitionPath: null, limitsDefinitionUserPath: null },
   dirty: emptyDirty,
   saveError: null,
   saveStatus: 'idle' as const,
@@ -179,6 +227,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   reloadCeToolData: undefined,
   weather: null,
   gameplay: null,
+  limitsDefinition: null,
+  limitsDefinitionUser: null,
   originalTypes: new Map(),
   originalEvents: new Map(),
   originalEventSpawns: [],
@@ -186,8 +236,12 @@ export const useServerStore = create<ServerState>((set, get) => {
   originalMapGroupProto: new Map(),
   originalWeather: null,
   originalGameplay: null,
+  originalLimitsDefinition: null,
+  originalLimitsDefinitionUser: null,
   saveCheckpoints: [],
   typeHistory: [],
+  mapGroupProtoHistory: [],
+  zoneRemoveHistory: [],
 
   setMission: (mission) => set({
     mission,
@@ -201,7 +255,7 @@ export const useServerStore = create<ServerState>((set, get) => {
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
   setBuildingInstances: (instances) => set({ buildingInstances: instances }),
-  setMapGroupProto: (proto) => set({ mapGroupProto: cloneMapGroupProto(proto), originalMapGroupProto: cloneMapGroupProto(proto) }),
+  setMapGroupProto: (proto) => set({ mapGroupProto: cloneMapGroupProto(proto), originalMapGroupProto: cloneMapGroupProto(proto), mapGroupProtoHistory: [] }),
   setPlayerSpawnData: (data) => set({ playerSpawnData: data }),
   setCeToolProject: (data) => set({ ceToolProject: data }),
   setServerRootPath: (path) => set({ serverRootPath: path }),
@@ -213,6 +267,10 @@ export const useServerStore = create<ServerState>((set, get) => {
   setWeather: (data) => set({ weather: data, originalWeather: data }),
   setGameplay: (data) => set({ gameplay: data, originalGameplay: data }),
   updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),
+  setLimitsDefinition: (data) => set({ limitsDefinition: data, originalLimitsDefinition: data }),
+  setLimitsDefinitionUser: (data) => set({ limitsDefinitionUser: data, originalLimitsDefinitionUser: data }),
+  updateLimitsDefinition: (data) => set(s => ({ limitsDefinition: data, dirty: { ...s.dirty, limitsDefinition: true } })),
+  updateLimitsDefinitionUser: (data) => set(s => ({ limitsDefinitionUser: data, dirty: { ...s.dirty, limitsDefinitionUser: true } })),
   clearSaveError: () => set({ saveError: null }),
 
   createSaveCheckpointFromDirty: (label = 'Save') => set(s => {
@@ -360,6 +418,20 @@ export const useServerStore = create<ServerState>((set, get) => {
     return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources }, typeHistory: rest };
   }),
 
+  undoMapGroupProto: () => set(s => {
+    if (s.mapGroupProtoHistory.length === 0) return s;
+    const [last, ...rest] = s.mapGroupProtoHistory;
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(last.key, last.prev);
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === last.key
+        ? { ...b, usages: last.prev.usages, containers: last.prev.containers }
+        : b,
+    );
+    const dirty = isMapGroupProtoDirty(protoNext, s.originalMapGroupProto);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory: rest, dirty: { ...s.dirty, mapGroupProto: dirty } };
+  }),
+
   revertTypesSource: (sourcePath) => set(s => {
     if (!s.mission) return s;
     const next = new Map(s.mission.types);
@@ -402,7 +474,7 @@ export const useServerStore = create<ServerState>((set, get) => {
       const entry = proto.get(key);
       return entry ? { ...b, containers: entry.containers } : b;
     });
-    return { mapGroupProto: proto, buildingInstances, dirty: { ...s.dirty, mapGroupProto: false } };
+    return { mapGroupProto: proto, buildingInstances, dirty: { ...s.dirty, mapGroupProto: false }, mapGroupProtoHistory: [] };
   }),
 
   revertWeather: () => set(s => ({
@@ -413,6 +485,16 @@ export const useServerStore = create<ServerState>((set, get) => {
   revertGameplay: () => set(s => ({
     gameplay: s.originalGameplay,
     dirty: { ...s.dirty, gameplay: false },
+  })),
+
+  revertLimitsDefinition: () => set(s => ({
+    limitsDefinition: s.originalLimitsDefinition,
+    dirty: { ...s.dirty, limitsDefinition: false },
+  })),
+
+  revertLimitsDefinitionUser: () => set(s => ({
+    limitsDefinitionUser: s.originalLimitsDefinitionUser,
+    dirty: { ...s.dirty, limitsDefinitionUser: false },
   })),
 
   updateEvent: (name, patch) => set(s => {
@@ -442,8 +524,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const normalizedCat = cat.toLowerCase();
     if (!key || !normalizedCat || !s.mapGroupProto.has(key)) return s;
 
+    const entry = s.mapGroupProto.get(key)!;
     const protoNext = new Map(s.mapGroupProto);
-    const entry = protoNext.get(key)!;
     const containers = entry.containers.map(c => {
       if (c.categories.some(existing => existing.trim().toLowerCase() === normalizedCat)) return c;
       return { ...c, categories: [...c.categories, cat] };
@@ -453,8 +535,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const buildingInstances = s.buildingInstances.map(b =>
       b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
     );
-
-    return { mapGroupProto: protoNext, buildingInstances, dirty: { ...s.dirty, mapGroupProto: true } };
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
   }),
 
   removeBuildingCategory: (buildingType, category) => set(s => {
@@ -462,8 +544,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const cat = category.trim().toLowerCase();
     if (!key || !cat || !s.mapGroupProto.has(key)) return s;
 
+    const entry = s.mapGroupProto.get(key)!;
     const protoNext = new Map(s.mapGroupProto);
-    const entry = protoNext.get(key)!;
     const containers = entry.containers.map(c => ({
       ...c,
       categories: c.categories.filter(existing => existing.trim().toLowerCase() !== cat),
@@ -473,8 +555,195 @@ export const useServerStore = create<ServerState>((set, get) => {
     const buildingInstances = s.buildingInstances.map(b =>
       b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
     );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
 
-    return { mapGroupProto: protoNext, buildingInstances, dirty: { ...s.dirty, mapGroupProto: true } };
+  addBuildingUsage: (buildingType, usage) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const u = usage.trim();
+    if (!key || !u || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    if (entry.usages.some(existing => existing.trim().toLowerCase() === u.toLowerCase())) return s;
+    const containers = entry.containers.length > 0
+      ? entry.containers.map(c => ({ ...c, tags: [...c.tags, u] }))
+      : entry.containers;
+    const updated = { ...entry, usages: [...entry.usages, u], containers };
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, updated);
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, usages: updated.usages, containers: updated.containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
+  removeBuildingUsage: (buildingType, usage) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const u = usage.trim().toLowerCase();
+    if (!key || !u || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    const containers = entry.containers.length > 0
+      ? entry.containers.map(c => ({ ...c, tags: c.tags.filter(t => t.trim().toLowerCase() !== u) }))
+      : entry.containers;
+    const updated = { ...entry, usages: entry.usages.filter(existing => existing.trim().toLowerCase() !== u), containers };
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, updated);
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, usages: updated.usages, containers: updated.containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
+  removeLimitsUsage: (usage) => set(s => {
+    const uLower = usage.trim().toLowerCase();
+    const nextDirty = { ...s.dirty };
+
+    // Snapshot state before any mutation for undo
+    const prevProtoEntries: ZoneRemoveSnapshot['prevProtoEntries'] = [];
+    for (const [key, entry] of s.mapGroupProto) {
+      const inUsages = entry.usages.some(x => x.trim().toLowerCase() === uLower);
+      const inContainers = entry.containers.some(c => c.tags.some(t => t.trim().toLowerCase() === uLower));
+      if (inUsages || inContainers) prevProtoEntries.push({ key, entry: cloneMapGroupProtoEntry(entry) });
+    }
+    const prevTypes: ZoneRemoveSnapshot['prevTypes'] = [];
+    if (s.mission) {
+      for (const [name, type] of s.mission.types) {
+        if (type.usages.some(u => u.trim().toLowerCase() === uLower)) prevTypes.push({ name, type });
+      }
+    }
+    const snapshot: ZoneRemoveSnapshot = {
+      usage,
+      prevLimitsDefinition: s.limitsDefinition,
+      prevProtoEntries,
+      prevTypes,
+    };
+
+    // Remove from cfglimitsdefinition.xml
+    let nextLimits = s.limitsDefinition;
+    if (s.limitsDefinition) {
+      const filtered = s.limitsDefinition.usages.filter(x => x.trim().toLowerCase() !== uLower);
+      if (filtered.length !== s.limitsDefinition.usages.length) {
+        nextLimits = { ...s.limitsDefinition, usages: filtered };
+        nextDirty.limitsDefinition = true;
+      }
+    }
+
+    // Remove from mapgroupproto.xml — both entry.usages and container tags
+    const protoNext = new Map(s.mapGroupProto);
+    let protoChanged = false;
+    for (const [key, entry] of protoNext) {
+      const filteredUsages = entry.usages.filter(x => x.trim().toLowerCase() !== uLower);
+      const filteredContainers = entry.containers.length > 0
+        ? entry.containers.map(c => ({ ...c, tags: c.tags.filter(t => t.trim().toLowerCase() !== uLower) }))
+        : entry.containers;
+      const changed = filteredUsages.length !== entry.usages.length
+        || filteredContainers.some((c, i) => c.tags.length !== entry.containers[i].tags.length);
+      if (changed) {
+        protoNext.set(key, { ...entry, usages: filteredUsages, containers: filteredContainers });
+        protoChanged = true;
+      }
+    }
+    if (protoChanged) nextDirty.mapGroupProto = isMapGroupProtoDirty(protoNext, s.originalMapGroupProto);
+
+    const buildingInstances = protoChanged
+      ? s.buildingInstances.map(b => {
+          const key = b.typeName.trim().toLowerCase();
+          const entry = protoNext.get(key);
+          return entry ? { ...b, usages: entry.usages, containers: entry.containers } : b;
+        })
+      : s.buildingInstances;
+
+    // Remove <usage name="..."/> from all types in types.xml
+    let nextMission = s.mission;
+    if (s.mission) {
+      const nextTypes = new Map(s.mission.types);
+      const dirtySources = new Set(nextDirty.typesSources);
+      let typesChanged = false;
+      for (const [name, type] of nextTypes) {
+        if (type.usages.some(u => u.trim().toLowerCase() === uLower)) {
+          nextTypes.set(name, { ...type, usages: type.usages.filter(u => u.trim().toLowerCase() !== uLower) });
+          if (type.source) dirtySources.add(type.source);
+          typesChanged = true;
+        }
+      }
+      if (typesChanged) {
+        nextMission = { ...s.mission, types: nextTypes };
+        nextDirty.typesSources = [...dirtySources];
+      }
+    }
+
+    const zoneRemoveHistory = [snapshot, ...s.zoneRemoveHistory].slice(0, 30);
+    return { limitsDefinition: nextLimits, mapGroupProto: protoNext, buildingInstances, mission: nextMission, dirty: nextDirty, zoneRemoveHistory };
+  }),
+
+  undoZoneRemove: () => set(s => {
+    if (s.zoneRemoveHistory.length === 0) return s;
+    const [snap, ...rest] = s.zoneRemoveHistory;
+    const uLower = snap.usage.trim().toLowerCase();
+    const nextDirty = { ...s.dirty };
+
+    // Restore limitsDefinition
+    nextDirty.limitsDefinition = snap.prevLimitsDefinition !== s.limitsDefinition
+      ? true
+      : s.dirty.limitsDefinition;
+
+    // Restore affected mapGroupProto entries
+    const protoNext = new Map(s.mapGroupProto);
+    for (const { key, entry } of snap.prevProtoEntries) protoNext.set(key, entry);
+    nextDirty.mapGroupProto = isMapGroupProtoDirty(protoNext, s.originalMapGroupProto);
+
+    const buildingInstances = s.buildingInstances.map(b => {
+      const key = b.typeName.trim().toLowerCase();
+      const entry = protoNext.get(key);
+      return entry ? { ...b, usages: entry.usages, containers: entry.containers } : b;
+    });
+
+    // Restore affected types
+    let nextMission = s.mission;
+    if (s.mission && snap.prevTypes.length > 0) {
+      const nextTypes = new Map(s.mission.types);
+      const dirtySources = new Set(nextDirty.typesSources);
+      for (const { name, type } of snap.prevTypes) {
+        nextTypes.set(name, type);
+        if (type.source) dirtySources.add(type.source);
+      }
+      // Only keep sources dirty if they still differ from originals after restore
+      const cleanedSources = [...dirtySources].filter(src => {
+        for (const [, t] of nextTypes) {
+          if (t.source === src && t !== s.originalTypes.get(t.name)) return true;
+        }
+        // Also keep if other non-restored types in this source are still dirty
+        for (const [tName, t] of s.mission!.types) {
+          if (t.source === src && !snap.prevTypes.some(p => p.name === tName)) {
+            if (t !== s.originalTypes.get(tName)) return true;
+          }
+        }
+        return false;
+      });
+      nextDirty.typesSources = cleanedSources;
+      nextMission = { ...s.mission, types: nextTypes };
+    }
+
+    // Also clear any remaining dirty for types sources that only had this usage removed
+    const remainingDirtySources = nextDirty.typesSources.filter(src => {
+      if (!nextMission) return false;
+      for (const [, t] of nextMission.types) {
+        if (t.source === src && t !== s.originalTypes.get(t.name)) return true;
+      }
+      return false;
+    });
+    nextDirty.typesSources = remainingDirtySources;
+
+    return {
+      limitsDefinition: snap.prevLimitsDefinition,
+      mapGroupProto: protoNext,
+      buildingInstances,
+      mission: nextMission,
+      dirty: nextDirty,
+      zoneRemoveHistory: rest,
+    };
   }),
 
   addCustomTypePack: async (name, xmlContent) => {
@@ -599,6 +868,24 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('cfggameplay.json', async () => {
       await writeFile(paths.gameplayPath!, serializeGameplayJson(gameplay));
       set(s => ({ dirty: { ...s.dirty, gameplay: false }, originalGameplay: s.gameplay }));
+    });
+  },
+
+  saveLimitsDefinition: async () => {
+    const { limitsDefinition, paths } = get();
+    if (!paths.limitsDefinitionPath || !limitsDefinition) return;
+    await trySave('cfglimitsdefinition.xml', async () => {
+      await writeFile(paths.limitsDefinitionPath!, serializeLimitsDefinitionXml(limitsDefinition));
+      set(s => ({ dirty: { ...s.dirty, limitsDefinition: false }, originalLimitsDefinition: s.limitsDefinition }));
+    });
+  },
+
+  saveLimitsDefinitionUser: async () => {
+    const { limitsDefinitionUser, paths } = get();
+    if (!paths.limitsDefinitionUserPath || !limitsDefinitionUser) return;
+    await trySave('cfglimitsdefinitionuser.xml', async () => {
+      await writeFile(paths.limitsDefinitionUserPath!, serializeLimitsDefinitionUserXml(limitsDefinitionUser));
+      set(s => ({ dirty: { ...s.dirty, limitsDefinitionUser: false }, originalLimitsDefinitionUser: s.limitsDefinitionUser }));
     });
   },
   };
