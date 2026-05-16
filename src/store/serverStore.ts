@@ -681,7 +681,6 @@ export const useServerStore = create<ServerState>((set, get) => {
   undoZoneRemove: () => set(s => {
     if (s.zoneRemoveHistory.length === 0) return s;
     const [snap, ...rest] = s.zoneRemoveHistory;
-    const uLower = snap.usage.trim().toLowerCase();
     const nextDirty = { ...s.dirty };
 
     // Restore limitsDefinition

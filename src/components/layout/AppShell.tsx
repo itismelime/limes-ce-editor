@@ -568,7 +568,10 @@ export function AppShell() {
         <div className="absolute inset-0 z-[5000] bg-slate-950 flex items-center justify-center">
           <div className="w-[360px] max-w-[90vw] rounded-xl border border-slate-700 bg-slate-900 p-5">
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-5 h-5 rounded-full border-2 border-slate-600 border-t-lime-400 animate-spin" />
+              <svg className="loader-spinner w-5 h-5 flex-shrink-0" viewBox="0 0 20 20" fill="none">
+                <circle cx="10" cy="10" r="8" stroke="#334155" strokeWidth="2.5" />
+                <circle cx="10" cy="10" r="8" stroke="#84cc16" strokeWidth="2.5" strokeDasharray="14 36" strokeLinecap="round" />
+              </svg>
               <p className="text-sm font-medium text-slate-200">
                 {isLoading ? 'Loading server files...' : startupMessage}
               </p>
