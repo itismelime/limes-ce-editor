@@ -15,6 +15,7 @@ struct OfflinePrepareState {
 // ── Community map registry ──────────────────────────────────────────────────
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct CommunityMapEntry {
     id: String,
     label: String,
@@ -419,6 +420,135 @@ async fn save_community_maps(
     Ok(())
 }
 
+// ── mpmission download ───────────────────────────────────────────────────────
+
+struct MpmissionSource {
+    zip_url:       &'static str,
+    zip_subfolder: &'static str, // path inside ZIP (after the repo-branch prefix)
+    mission_name:  &'static str, // destination folder name inside mpmissions/
+}
+
+const MPMISSION_SOURCES: &[(&str, MpmissionSource)] = &[
+    ("deerisle", MpmissionSource {
+        zip_url:       "https://github.com/johnmclane666/Deerisle-Stable/archive/refs/heads/master.zip",
+        zip_subfolder: "V5.9/empty.deerisle",
+        mission_name:  "empty.deerisle",
+    }),
+    ("alteria", MpmissionSource {
+        zip_url:       "https://github.com/johnmclane666/DayZ-Alteria-Stable/archive/refs/heads/main.zip",
+        zip_subfolder: "empty.alteria",
+        mission_name:  "empty.alteria",
+    }),
+    ("banov", MpmissionSource {
+        zip_url:       "https://github.com/KubeloLive/Banov-Central-Economy/archive/refs/heads/main.zip",
+        zip_subfolder: "empty.banov",
+        mission_name:  "empty.banov",
+    }),
+    ("esseker", MpmissionSource {
+        zip_url:       "https://github.com/InclementDab/Esseker-Server/archive/refs/heads/main.zip",
+        zip_subfolder: "Mission Files/dayzOffline.Esseker",
+        mission_name:  "dayzOffline.Esseker",
+    }),
+    ("namalskorigins", MpmissionSource {
+        zip_url:       "https://github.com/SumrakDZN/Namalsk-Server/archive/refs/heads/main.zip",
+        zip_subfolder: "Mission Files/regular.namalsk",
+        mission_name:  "regular.namalsk",
+    }),
+    ("takistan", MpmissionSource {
+        zip_url:       "https://github.com/CypeR79/DayZ-Projects/archive/refs/heads/main.zip",
+        zip_subfolder: "TakistanPlus/mission",
+        mission_name:  "TakistanPlus",
+    }),
+];
+
+fn extract_mpmission_from_zip(
+    zip_bytes:     &[u8],
+    zip_subfolder: &str,
+    dest:          &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+
+    let subfolder = zip_subfolder.replace('\\', "/");
+    let marker    = format!("/{}/", subfolder);
+    let direct    = format!("{}/", subfolder);
+    let mut found = false;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let raw_name  = entry.name().replace('\\', "/");
+
+        let relative = if let Some(pos) = raw_name.find(&marker) {
+            &raw_name[pos + marker.len()..]
+        } else if raw_name.starts_with(&direct) {
+            &raw_name[direct.len()..]
+        } else {
+            continue;
+        };
+
+        found = true;
+        if relative.is_empty() { continue; }
+
+        let dest_path = dest.join(relative);
+        if raw_name.ends_with('/') {
+            std::fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = dest_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut out = std::fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+        }
+    }
+
+    if !found {
+        return Err(format!("Mission folder '{}' not found in archive — the repo may have been restructured. Use the manual link instead.", zip_subfolder));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_mpmission(
+    http:        tauri::State<'_, SharedClient>,
+    xam_name:    String,
+    mission_path: String, // path to the currently loaded mpmission (used to find mpmissions dir)
+) -> Result<String, String> {
+    let xam_lower = xam_name.trim().to_lowercase();
+    let source = MPMISSION_SOURCES.iter()
+        .find(|(id, _)| *id == xam_lower.as_str())
+        .map(|(_, s)| s)
+        .ok_or_else(|| format!("No automatic download available for '{}'", xam_name))?;
+
+    // Parent of the loaded mpmission is the mpmissions/ directory.
+    let mpmissions_dir = std::path::Path::new(&mission_path)
+        .parent()
+        .ok_or("Cannot determine mpmissions directory from mission path")?;
+
+    let dest = mpmissions_dir.join(source.mission_name);
+    if dest.exists() {
+        return Err(format!("'{}' already exists in your mpmissions folder", source.mission_name));
+    }
+
+    let response = http.0.get(source.zip_url)
+        .send().await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Download failed: HTTP {} — use the manual link instead", response.status()));
+    }
+
+    let bytes = response.bytes().await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+
+    extract_mpmission_from_zip(&bytes, source.zip_subfolder, &dest)
+        .map_err(|e| { let _ = std::fs::remove_dir_all(&dest); e })?;
+
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 async fn resolve_version(
@@ -487,6 +617,7 @@ pub fn run() {
             probe_community_map,
             load_community_maps,
             save_community_maps,
+            download_mpmission,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

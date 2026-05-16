@@ -48,6 +48,12 @@ interface UiState {
   rememberLastFolder: boolean;
   customUsageColors: Record<string, string>;
 
+  settingsScrollTarget: string | null;
+  setSettingsScrollTarget: (target: string | null) => void;
+
+  showCommunityMapsModal: boolean;
+  setShowCommunityMapsModal: (v: boolean) => void;
+
   setActiveTab: (tab: ActiveTab) => void;
   setActiveMap: (map: string) => void;
   setTheme: (theme: ThemeId) => void;
@@ -156,7 +162,10 @@ function readBuildingLootOverrides(): Record<string, BuildingLootOverride> {
 
 export const useUiStore = create<UiState>((set) => ({
   activeTab: 'map',
-  activeMap: 'namalsk',
+  activeMap: (() => {
+    try { return localStorage.getItem('activeMap') ?? 'chernarus'; }
+    catch { return 'chernarus'; }
+  })(),
   theme: (() => {
     try {
       const raw = localStorage.getItem('theme');
@@ -184,8 +193,17 @@ export const useUiStore = create<UiState>((set) => ({
   loadError: null,
   loadWarnings: [],
 
+  settingsScrollTarget: null,
+  setSettingsScrollTarget: (target) => set({ settingsScrollTarget: target }),
+
+  showCommunityMapsModal: false,
+  setShowCommunityMapsModal: (v) => set({ showCommunityMapsModal: v }),
+
   setActiveTab: (tab) => set({ activeTab: tab }),
-  setActiveMap: (map) => set({ activeMap: map }),
+  setActiveMap: (map) => set(() => {
+    try { localStorage.setItem('activeMap', map); } catch { /* ignore */ }
+    return { activeMap: map };
+  }),
   setTheme: (theme) => set(() => {
     localStorage.setItem('theme', theme);
     return { theme };

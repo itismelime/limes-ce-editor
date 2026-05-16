@@ -4,6 +4,7 @@ version = "0.2.1"
 description = "Lime's CE Editor"
 authors = []
 edition = "2021"
+default-run = "limes-ce-editor"
 
 [lib]
 name = "limes_ce_editor_lib"
@@ -26,3 +27,4 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+zip   = { version = "2", default-features = false, features = ["deflate"] }

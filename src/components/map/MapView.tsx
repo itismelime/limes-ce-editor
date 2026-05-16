@@ -565,9 +565,6 @@ export function MapView() {
     for (const cm of communityMaps) s.add(cm.id);
     return s;
   }, [communityMaps]);
-  const mapClusterZoomThreshold = useUiStore(s => s.mapClusterZoomThreshold);
-  const setMapClusterZoomThreshold = useUiStore(s => s.setMapClusterZoomThreshold);
-
   const hiddenEvents          = useUiStore(s => s.hiddenEvents);
   const toggleEvent           = useUiStore(s => s.toggleEvent);
   const setHiddenEvents       = useUiStore(s => s.setHiddenEvents);

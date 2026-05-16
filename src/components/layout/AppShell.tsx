@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useMemo, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
@@ -6,6 +6,7 @@ import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { useServerFolder } from '../../hooks/useServerFolder';
 import { TopBar } from './TopBar';
 import { MissionPicker } from '../shared/MissionPicker';
+import { CommunityMapsSection } from '../editors/CommunityMapsSection';
 import type { ActiveTab } from '../../store/uiStore';
 
 const loadMapView = () => import('../map/MapView');
@@ -314,14 +315,24 @@ export function AppShell() {
   const loadError = useUiStore(s => s.loadError);
   const loadWarnings = useUiStore(s => s.loadWarnings);
   const isLoading = useUiStore(s => s.isLoading);
-  const { openFolder, openFromPath, autoLoad, pendingMissions, selectMission, cancelPicker } = useServerFolder();
+  const { openFolder, openFromPath, autoLoad, pendingMissions, selectMission, cancelPicker, allMissions } = useServerFolder();
+  const showCommunityMapsModal = useUiStore(s => s.showCommunityMapsModal);
+  const setShowCommunityMapsModal = useUiStore(s => s.setShowCommunityMapsModal);
+
+  useEffect(() => {
+    if (!showCommunityMapsModal) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowCommunityMapsModal(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showCommunityMapsModal, setShowCommunityMapsModal]);
   const [mountedTabs, setMountedTabs] = useState<Partial<Record<ActiveTab, true>>>({ [activeTab]: true });
   const [isStartupWarmup, setIsStartupWarmup] = useState(false);
   const [startupMessage, setStartupMessage] = useState('Preparing editor...');
   const [showNoticeDetails, setShowNoticeDetails] = useState(false);
 
   const loadCommunityMaps = useCommunityMapsStore(s => s.load);
-  const communityMapIds = useCommunityMapsStore(s => new Set(s.maps.map(m => m.id)));
+  const communityMapsRaw = useCommunityMapsStore(s => s.maps);
+  const communityMapIds = useMemo(() => new Set(communityMapsRaw.map(m => m.id)), [communityMapsRaw]);
 
   // Load community maps as early as possible.
   useEffect(() => { void loadCommunityMaps(); }, [loadCommunityMaps]);
@@ -444,7 +455,7 @@ export function AppShell() {
 
   return (
     <div className="relative flex flex-col h-screen bg-slate-950">
-      <TopBar onOpenFolder={openFolder} onOpenFromPath={openFromPath} onPrefetchTab={prefetchTab} />
+      <TopBar onOpenFolder={openFolder} onOpenFromPath={openFromPath} onPrefetchTab={prefetchTab} allMissions={allMissions} />
       {pendingMissions && (
         <MissionPicker
           missions={pendingMissions}
@@ -570,6 +581,31 @@ export function AppShell() {
           </div>
         )}
       </div>
+
+      {showCommunityMapsModal && (
+        <div
+          className="absolute inset-0 z-[4000] bg-black/60 flex items-center justify-center p-6"
+          onClick={() => setShowCommunityMapsModal(false)}
+        >
+          <div
+            className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-4 pb-2">
+              <h2 className="text-sm font-semibold text-slate-200">Community Maps</h2>
+              <button
+                onClick={() => setShowCommunityMapsModal(false)}
+                className="text-slate-500 hover:text-slate-200 transition-colors text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-5 pb-5">
+              <CommunityMapsSection hideHeading defaultShowAdd />
+            </div>
+          </div>
+        </div>
+      )}
 
       {(isLoading || isStartupWarmup) && (
         <div className="absolute inset-0 z-[5000] bg-slate-950 flex items-center justify-center">

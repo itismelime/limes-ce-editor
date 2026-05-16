@@ -7,6 +7,7 @@ import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import type { ActiveTab } from '../../store/uiStore';
+import type { MissionFiles } from '../../lib/fileDiscovery';
 import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
 
 const TABS: { id: ActiveTab; label: string }[] = [
@@ -74,10 +75,12 @@ export function TopBar({
   onOpenFolder,
   onOpenFromPath,
   onPrefetchTab,
+  allMissions,
 }: {
   onOpenFolder: () => void;
   onOpenFromPath: (path: string) => void;
   onPrefetchTab: (tab: ActiveTab) => void;
+  allMissions: MissionFiles[];
 }) {
   const serverRootPath = useServerStore(s => s.serverRootPath);
   const mission = useServerStore(s => s.mission);
@@ -122,11 +125,47 @@ export function TopBar({
   const recentFolders = useUiStore(s => s.recentFolders);
 
   const communityMaps = useCommunityMapsStore(s => s.maps);
+  const setSettingsScrollTarget = useUiStore(s => s.setSettingsScrollTarget);
+  const setShowCommunityMapsModal = useUiStore(s => s.setShowCommunityMapsModal);
+  const mapImagePaths = useUiStore(s => s.mapImagePaths);
 
-  const MAPS = useMemo(() => [
-    ...BUILTIN_MAPS,
-    ...communityMaps.map(cm => ({ id: cm.id, label: cm.label })),
-  ], [communityMaps]);
+  const TERRAIN_KEYWORDS: Record<string, string[]> = {
+    namalsk:   ['namalsk'],
+    chernarus: ['chernarus'],
+    livonia:   ['livonia', 'enoch'],
+    sakhal:    ['sakhal'],
+  };
+
+  const mapsWithMissions = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of allMissions) {
+      const lower = m.missionName.toLowerCase();
+      for (const [mapId, keywords] of Object.entries(TERRAIN_KEYWORDS)) {
+        if (keywords.some(kw => lower.includes(kw))) { s.add(mapId); break; }
+      }
+    }
+    return s;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allMissions]);
+
+  const MAPS = useMemo(() => {
+    const missionName = mission?.missionName.toLowerCase() ?? null;
+    const builtins = missionName
+      ? BUILTIN_MAPS.filter(m =>
+          m.id === 'custom' ||
+          (TERRAIN_KEYWORDS[m.id]?.some(kw => missionName.includes(kw)) ?? false) ||
+          mapsWithMissions.has(m.id) ||
+          !!mapImagePaths[m.id]
+        )
+      : BUILTIN_MAPS;
+    const builtinsWithoutCustom = builtins.filter(m => m.id !== 'custom');
+    return [
+      ...builtinsWithoutCustom,
+      ...communityMaps.map(cm => ({ id: cm.id, label: cm.label })),
+      { id: 'custom', label: 'Custom' },
+    ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [communityMaps, mission, mapsWithMissions, mapImagePaths]);
 
   const OFFLINE_MAP_ORDER = useMemo(() => [
     ...Array.from(BUILTIN_TILE_MAP_IDS),
@@ -141,6 +180,8 @@ export function TopBar({
   const [showAbout, setShowAbout] = useState(false);
   const [showServerMenu, setShowServerMenu] = useState(false);
   const serverMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showMapDropdown, setShowMapDropdown] = useState(false);
+  const mapDropdownRef = useRef<HTMLDivElement | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [preparingOffline, setPreparingOffline] = useState(false);
@@ -385,6 +426,20 @@ export function TopBar({
   }, [showServerMenu]);
 
   useEffect(() => {
+    if (!showMapDropdown) return;
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (mapDropdownRef.current && target && !mapDropdownRef.current.contains(target)) {
+        setShowMapDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [showMapDropdown]);
+
+  useEffect(() => {
     if (!tabSwitchInFlightRef.current) return;
     requestAnimationFrame(() => {
       tabSwitchInFlightRef.current = false;
@@ -585,20 +640,53 @@ export function TopBar({
 
           <>
               <div className="w-px h-4 bg-slate-700 mx-1" />
-              <div className="flex items-center gap-1">
-                {MAPS.map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => setActiveMap(m.id)}
-                    className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${
-                      activeMap === m.id
-                    ? 'bg-lime-500 text-white'
-                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
+              <div ref={mapDropdownRef} className="relative">
+                <button
+                  onClick={() => setShowMapDropdown(v => !v)}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${showMapDropdown ? 'bg-lime-600 text-white' : 'bg-lime-500 text-white'}`}
+                >
+                  {MAPS.find(m => m.id === activeMap)?.label ?? activeMap}
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {showMapDropdown && (
+                  <div className="absolute top-full right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px] py-1">
+                    {MAPS.map(m => (
+                      <div key={m.id}>
+                        {m.id === 'custom' && <div className="my-1 border-t border-slate-700" />}
+                      <button
+                        onClick={() => {
+                          setShowMapDropdown(false);
+                          if (m.id === 'custom') {
+                            if (activeTab === 'settings') {
+                              setSettingsScrollTarget('community-maps');
+                            } else {
+                              setShowCommunityMapsModal(true);
+                            }
+                          } else {
+                            setActiveMap(m.id);
+                          }
+                        }}
+                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                          activeMap === m.id
+                            ? 'text-lime-400 bg-slate-800'
+                            : 'text-slate-200 hover:bg-slate-800'
+                        }`}
+                      >
+                        {activeMap === m.id && (
+                          <svg className="w-3 h-3 text-lime-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                          </svg>
+                        )}
+                        {activeMap !== m.id && <span className="w-3 flex-shrink-0" />}
+                        {m.label}
+                      </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div ref={offlinePanelRef} className="relative">

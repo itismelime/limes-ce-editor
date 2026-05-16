@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
@@ -56,6 +56,9 @@ export function SettingsEditor() {
   const setRememberLastFolder = useUiStore(s => s.setRememberLastFolder);
   const theme = useUiStore(s => s.theme);
   const setTheme = useUiStore(s => s.setTheme);
+  const settingsScrollTarget = useUiStore(s => s.settingsScrollTarget);
+  const setSettingsScrollTarget = useUiStore(s => s.setSettingsScrollTarget);
+  const communityMapsSectionRef = useRef<HTMLDivElement>(null);
 
   // CE Tool
   const ceToolFolderOverride    = useServerStore(s => s.ceToolFolderOverride);
@@ -81,6 +84,13 @@ export function SettingsEditor() {
   const importCategoryOverrides = useUiStore(s => s.importCategoryOverrides);
   const clearCategoryOverrides  = useUiStore(s => s.clearCategoryOverrides);
   const overrideCount = Object.keys(categoryOverrides).length;
+
+  useEffect(() => {
+    if (settingsScrollTarget === 'community-maps' && communityMapsSectionRef.current) {
+      communityMapsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setSettingsScrollTarget(null);
+    }
+  }, [settingsScrollTarget, setSettingsScrollTarget]);
 
   async function handleImportOverrides() {
     const selected = await open({
@@ -384,7 +394,9 @@ export function SettingsEditor() {
         </section>
 
         {/* Community Maps */}
-        <CommunityMapsSection />
+        <div ref={communityMapsSectionRef}>
+          <CommunityMapsSection />
+        </div>
 
       </div>
     </div>

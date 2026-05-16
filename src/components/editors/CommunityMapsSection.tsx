@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
+import { useServerStore } from '../../store/serverStore';
 import type { CommunityMapDef } from '../../types/map';
 
 // Well-known community maps that can be pre-filled from a lookup table.
 const KNOWN_COMMUNITY_MAPS: Omit<CommunityMapDef, 'id'>[] = [
   { label: 'Deer Isle',       xamName: 'deerisle',        maxZoom: 7, worldWidth: 15360, worldHeight: 15360 },
+  { label: 'Alteria',         xamName: 'alteria',         maxZoom: 7, worldWidth: 15360, worldHeight: 15360 },
   { label: 'Banov',           xamName: 'banov',           maxZoom: 7, worldWidth: 15360, worldHeight: 15360 },
   { label: 'Esseker',         xamName: 'esseker',         maxZoom: 7, worldWidth: 15360, worldHeight: 15360 },
   { label: 'Rostow',          xamName: 'rostow',          maxZoom: 6, worldWidth: 12800, worldHeight: 12800 },
@@ -13,6 +16,17 @@ const KNOWN_COMMUNITY_MAPS: Omit<CommunityMapDef, 'id'>[] = [
   { label: 'Namalsk Origins', xamName: 'namalskorigins',  maxZoom: 6, worldWidth: 12800, worldHeight: 12800 },
   { label: 'Takistan',        xamName: 'takistan',        maxZoom: 7, worldWidth: 15360, worldHeight: 15360 },
 ];
+
+// Maps with a known mpmission download source.
+const MPMISSION_SOURCES: Record<string, { hasDownload: boolean; fallbackUrl: string }> = {
+  deerisle:       { hasDownload: true,  fallbackUrl: 'https://github.com/johnmclane666/Deerisle-Stable' },
+  alteria:        { hasDownload: true,  fallbackUrl: 'https://github.com/johnmclane666/DayZ-Alteria-Stable' },
+  banov:          { hasDownload: true,  fallbackUrl: 'https://github.com/KubeloLive/Banov-Central-Economy' },
+  esseker:        { hasDownload: true,  fallbackUrl: 'https://github.com/InclementDab/Esseker-Server' },
+  namalskorigins: { hasDownload: true,  fallbackUrl: 'https://github.com/SumrakDZN/Namalsk-Server' },
+  takistan:       { hasDownload: true,  fallbackUrl: 'https://github.com/CypeR79/DayZ-Projects/tree/main/TakistanPlus' },
+  rostow:         { hasDownload: false, fallbackUrl: 'https://steamcommunity.com/sharedfiles/filedetails/?id=2344585107' },
+};
 
 interface ProbeResult {
   valid: boolean;
@@ -28,8 +42,9 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{children}</h2>;
 }
 
-export function CommunityMapsSection() {
+export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHeading?: boolean; defaultShowAdd?: boolean } = {}) {
   const { maps, addMap, removeMap } = useCommunityMapsStore();
+  const missionPath = useServerStore(s => s.paths.missionPath);
 
   const [xamName, setXamName]         = useState('');
   const [label, setLabel]             = useState('');
@@ -39,8 +54,10 @@ export function CommunityMapsSection() {
   const [probing, setProbing]         = useState(false);
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
   const [saving, setSaving]           = useState(false);
-  const [showAdd, setShowAdd]         = useState(false);
+  const [showAdd, setShowAdd]         = useState(defaultShowAdd ?? false);
+  const [editingId, setEditingId]     = useState<string | null>(null);
   const [error, setError]             = useState<string | null>(null);
+  const [downloadStates, setDownloadStates] = useState<Record<string, 'downloading' | 'done' | string>>({});
 
   function fillFromPreset(xam: string) {
     const preset = KNOWN_COMMUNITY_MAPS.find(p => p.xamName === xam);
@@ -89,19 +106,33 @@ export function CommunityMapsSection() {
     }
   }
 
+  function handleEdit(cm: CommunityMapDef) {
+    setEditingId(cm.id);
+    setXamName(cm.xamName);
+    setLabel(cm.label);
+    setWorldWidth(cm.worldWidth);
+    setWorldHeight(cm.worldHeight);
+    setMaxZoom(cm.maxZoom);
+    setProbeResult(null);
+    setError(null);
+    setShowAdd(true);
+  }
+
   async function handleAdd() {
     const name = xamName.trim().toLowerCase();
     if (!name || !label.trim()) return;
+    const clampedWidth  = Math.min(100000, Math.max(100, worldWidth));
+    const clampedHeight = Math.min(100000, Math.max(100, worldHeight));
     setSaving(true);
     setError(null);
     try {
       const def: CommunityMapDef = {
-        id: slugify(name),
+        id: editingId ?? slugify(name),
         label: label.trim(),
         xamName: name,
         maxZoom,
-        worldWidth,
-        worldHeight,
+        worldWidth: clampedWidth,
+        worldHeight: clampedHeight,
       };
       await addMap(def);
       setXamName('');
@@ -110,6 +141,7 @@ export function CommunityMapsSection() {
       setWorldHeight(15360);
       setMaxZoom(7);
       setProbeResult(null);
+      setEditingId(null);
       setShowAdd(false);
     } catch (err) {
       setError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -125,9 +157,20 @@ export function CommunityMapsSection() {
 
   const canAdd = !!xamName.trim() && !!label.trim() && worldWidth > 0 && worldHeight > 0;
 
+  async function handleDownload(cm: CommunityMapDef) {
+    if (!missionPath) return;
+    setDownloadStates(s => ({ ...s, [cm.id]: 'downloading' }));
+    try {
+      await invoke('download_mpmission', { xamName: cm.xamName, missionPath });
+      setDownloadStates(s => ({ ...s, [cm.id]: 'done' }));
+    } catch (err) {
+      setDownloadStates(s => ({ ...s, [cm.id]: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
   return (
     <section>
-      <SectionHeading>Community Maps</SectionHeading>
+      {!hideHeading && <SectionHeading>Community Maps</SectionHeading>}
       <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-4">
         <p className="text-xs text-slate-500 mb-4">
           Add custom maps hosted on xam.nu (e.g. Deer Isle, Banov). They appear in the map selector alongside the built-in maps and support offline tile caching.
@@ -135,20 +178,59 @@ export function CommunityMapsSection() {
 
         {maps.length > 0 && (
           <div className="space-y-2 mb-4">
-            {maps.map(cm => (
-              <div key={cm.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-200 truncate">{cm.label}</p>
-                  <p className="text-xs text-slate-500 font-mono">{cm.xamName} · zoom max {cm.maxZoom} · {cm.worldWidth}×{cm.worldHeight}m</p>
+            {maps.map(cm => {
+              const src = MPMISSION_SOURCES[cm.xamName];
+              const dlState = downloadStates[cm.id];
+              return (
+              <div key={cm.id} className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-200 truncate">{cm.label}</p>
+                    <p className="text-xs text-slate-500 font-mono">{cm.xamName} · zoom max {cm.maxZoom} · {cm.worldWidth}×{cm.worldHeight}m</p>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => handleEdit(cm)}
+                      className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => void handleRemove(cm.id, cm.label)}
+                      className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => void handleRemove(cm.id, cm.label)}
-                  className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition-colors"
-                >
-                  Remove
-                </button>
+
+                {src && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {src.hasDownload && (
+                      <button
+                        onClick={() => void handleDownload(cm)}
+                        disabled={!missionPath || dlState === 'downloading' || dlState === 'done'}
+                        title={!missionPath ? 'Open a server folder first' : undefined}
+                        className="px-2.5 py-1 rounded-lg text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-slate-100 border border-slate-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                      >
+                        {dlState === 'downloading' && <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />}
+                        {dlState === 'downloading' ? 'Downloading…' : dlState === 'done' ? '✓ Downloaded' : '↓ Download mpmission'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void openUrl(src.fallbackUrl)}
+                      className="px-2.5 py-1 rounded-lg text-xs bg-transparent hover:bg-slate-700 text-slate-500 hover:text-slate-300 border border-slate-700 transition-colors flex items-center gap-1"
+                    >
+                      {src.hasDownload ? 'Manual link ↗' : 'Steam Workshop ↗'}
+                    </button>
+                    {dlState && dlState !== 'downloading' && dlState !== 'done' && (
+                      <p className="text-xs text-red-400 w-full">{dlState}</p>
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
 
@@ -161,7 +243,7 @@ export function CommunityMapsSection() {
           </button>
         ) : (
           <div className="border border-slate-700 rounded-xl p-4 space-y-3">
-            <p className="text-xs font-medium text-slate-300">Add community map</p>
+            <p className="text-xs font-medium text-slate-300">{editingId ? 'Edit community map' : 'Add community map'}</p>
 
             {/* Quick-select presets */}
             <div>
@@ -193,6 +275,7 @@ export function CommunityMapsSection() {
                   placeholder="e.g. deerisle"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-lime-500 font-mono"
                 />
+                <p className="text-[10px] text-slate-600 mt-1">Found in the URL: xam.nu/map/<span className="text-slate-500 font-mono">name</span>/…</p>
               </div>
               <div className="flex items-end">
                 <button
@@ -230,6 +313,8 @@ export function CommunityMapsSection() {
                 <label className="block text-[11px] text-slate-500 mb-1">World width (m)</label>
                 <input
                   type="number"
+                  min={100}
+                  max={100000}
                   value={worldWidth}
                   onChange={e => setWorldWidth(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-lime-500"
@@ -239,6 +324,8 @@ export function CommunityMapsSection() {
                 <label className="block text-[11px] text-slate-500 mb-1">World height (m)</label>
                 <input
                   type="number"
+                  min={100}
+                  max={100000}
                   value={worldHeight}
                   onChange={e => setWorldHeight(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-lime-500"
@@ -265,10 +352,10 @@ export function CommunityMapsSection() {
                 disabled={!canAdd || saving}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-lime-500 hover:bg-lime-600 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {saving ? 'Saving…' : 'Add map'}
+                {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add map'}
               </button>
               <button
-                onClick={() => { setShowAdd(false); setError(null); setProbeResult(null); }}
+                onClick={() => { setShowAdd(false); setEditingId(null); setError(null); setProbeResult(null); }}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
               >
                 Cancel

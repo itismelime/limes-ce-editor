@@ -355,6 +355,7 @@ export function useServerFolder() {
   const setLoadWarnings     = useUiStore(s => s.setLoadWarnings);
   const setMapImagePath     = useUiStore(s => s.setMapImagePath);
   const setTierZonesLoaded  = useUiStore(s => s.setTierZonesLoaded);
+  const setActiveMap        = useUiStore(s => s.setActiveMap);
   const activeMap       = useUiStore(s => s.activeMap);
   const communityMaps   = useCommunityMapsStore(s => s.maps);
 
@@ -391,6 +392,12 @@ export function useServerFolder() {
       const allWarnings = [...warnings];
       setLoadWarnings(allWarnings);
       setMission(mission);
+
+      const lowerName = mission.missionName.toLowerCase();
+      const detectedMap = Object.entries(MAP_KEYWORDS).find(([, kws]) =>
+        kws.some(kw => lowerName.includes(kw))
+      )?.[0] ?? null;
+      if (detectedMap) setActiveMap(detectedMap);
 
       // Economy core
       let economyCoreEntries: CeEntry[] = [];
@@ -639,5 +646,5 @@ export function useServerFolder() {
     setPendingMissions(null);
   }, []);
 
-  return { openFolder, openFromPath, autoLoad, pendingMissions, selectMission, cancelPicker };
+  return { openFolder, openFromPath, autoLoad, pendingMissions, selectMission, cancelPicker, allMissions };
 }
