@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { useServerStore } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
+import { useCommunityMapsStore } from '../store/communityMapsStore';
 import { resolveLoot } from '../lib/lootResolver';
-import { MAP_CONFIGS } from '../lib/mapConfig';
+import { getAllMapConfigs } from '../lib/mapConfig';
 
 const EMPTY_EVENTS = new Map();
 const EMPTY_SPAWNABLE_TYPES = new Map();
@@ -20,9 +21,11 @@ export function useMapMarkers(enabled = true) {
   const customMapUrl   = useUiStore(s => s.customMapUrl);
   const customMapWidth = useUiStore(s => s.customMapWidth);
   const customMapHeight = useUiStore(s => s.customMapHeight);
+  const communityMaps = useCommunityMapsStore(s => s.maps);
 
   const mapConfig = useMemo(() => {
-    const base = MAP_CONFIGS[activeMap];
+    const allConfigs = getAllMapConfigs(communityMaps);
+    const base = allConfigs[activeMap] ?? allConfigs['namalsk'];
     const imageUrl = mapImagePaths[activeMap]
       ?? (activeMap === 'custom' ? customMapUrl : base.imageUrl);
 
@@ -35,7 +38,7 @@ export function useMapMarkers(enabled = true) {
       return { ...base, imageUrl, imageWidth, imageHeight, worldWidth: customMapWidth, worldHeight: customMapHeight };
     }
     return { ...base, imageUrl, imageWidth, imageHeight };
-  }, [activeMap, mapImagePaths, mapImageSizes, customMapUrl, customMapWidth, customMapHeight]);
+  }, [activeMap, mapImagePaths, mapImageSizes, customMapUrl, customMapWidth, customMapHeight, communityMaps]);
 
   const markerMission = useMemo(() => {
     if (!missionName) return null;

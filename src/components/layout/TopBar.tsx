@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
+import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import type { ActiveTab } from '../../store/uiStore';
-import type { MapId } from '../../types/map';
+import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: 'Map' },
@@ -20,7 +21,7 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'gameplay',      label: 'Gameplay' },
 ];
 
-const MAPS: { id: MapId; label: string }[] = [
+const BUILTIN_MAPS: { id: string; label: string }[] = [
   { id: 'namalsk',   label: 'Namalsk' },
   { id: 'chernarus', label: 'Chernarus+' },
   { id: 'livonia',   label: 'Livonia' },
@@ -28,8 +29,7 @@ const MAPS: { id: MapId; label: string }[] = [
   { id: 'custom',    label: 'Custom' },
 ];
 
-const OFFLINE_MAP_ORDER: MapId[] = ['namalsk', 'chernarus', 'livonia', 'sakhal'];
-const MAX_XAM_ZOOM_BY_MAP: Record<string, number> = {
+const BUILTIN_MAX_XAM_ZOOM: Record<string, number> = {
   namalsk: 6,
   chernarus: 8,
   livonia: 7,
@@ -120,6 +120,24 @@ export function TopBar({
   const setShowSaveReview = useUiStore(s => s.setShowSaveReview);
   const isLoading = useUiStore(s => s.isLoading);
   const recentFolders = useUiStore(s => s.recentFolders);
+
+  const communityMaps = useCommunityMapsStore(s => s.maps);
+
+  const MAPS = useMemo(() => [
+    ...BUILTIN_MAPS,
+    ...communityMaps.map(cm => ({ id: cm.id, label: cm.label })),
+  ], [communityMaps]);
+
+  const OFFLINE_MAP_ORDER = useMemo(() => [
+    ...Array.from(BUILTIN_TILE_MAP_IDS),
+    ...communityMaps.map(cm => cm.id),
+  ], [communityMaps]);
+
+  const MAX_XAM_ZOOM_BY_MAP = useMemo(() => {
+    const m: Record<string, number> = { ...BUILTIN_MAX_XAM_ZOOM };
+    for (const cm of communityMaps) m[cm.id] = cm.maxZoom;
+    return m;
+  }, [communityMaps]);
   const [showAbout, setShowAbout] = useState(false);
   const [showServerMenu, setShowServerMenu] = useState(false);
   const serverMenuRef = useRef<HTMLDivElement | null>(null);

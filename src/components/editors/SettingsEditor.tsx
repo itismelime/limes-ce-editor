@@ -5,6 +5,7 @@ import { useServerStore } from '../../store/serverStore';
 import { readFile, writeFile, clearCeToolCaches } from '../../lib/fileDiscovery';
 import { CATEGORY_OPTIONS } from '../../lib/itemClassifier';
 import { BUNDLED_CE_MAPS, deployBundledCeProject } from '../../lib/ceToolBundle';
+import { CommunityMapsSection } from './CommunityMapsSection';
 
 const KNOWN_MAPS: { id: string; label: string }[] = [
   { id: 'namalsk',   label: 'Namalsk' },
@@ -381,6 +382,9 @@ export function SettingsEditor() {
             </SettingRow>
           </div>
         </section>
+
+        {/* Community Maps */}
+        <CommunityMapsSection />
 
       </div>
     </div>

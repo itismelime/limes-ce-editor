@@ -15,11 +15,13 @@ import {
 } from '../lib/xmlParser';
 import { clearAreaFlags, loadTierLayers } from '../lib/tierZoneResolver';
 import { readBinaryFile } from '../lib/fileDiscovery';
-import { MAP_CONFIGS } from '../lib/mapConfig';
+import { getAllMapConfigs } from '../lib/mapConfig';
 import { parseCeToolProjectXml } from '../lib/ceToolParser';
 import type { MissionData, CeEntry, CeToolProject, DayZType, SpawnableType } from '../types/dayz';
+import type { CommunityMapDef } from '../types/map';
 import { useServerStore } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
+import { useCommunityMapsStore } from '../store/communityMapsStore';
 
 const MAP_KEYWORDS: Record<string, string[]> = {
   namalsk:   ['namalsk'],
@@ -134,8 +136,9 @@ async function loadCeToolTierData(opts: {
   activeMap: string;
   ceToolFolderOverride: string | null;
   serverRootPath: string | null;
+  communityMaps: CommunityMapDef[];
 }): Promise<{ ceProject: CeToolProject | null; loaded: boolean; ceSource: 'bundled' | 'user' | null; warnings: string[] }> {
-  const { missionPath, activeMap, ceToolFolderOverride, serverRootPath } = opts;
+  const { missionPath, activeMap, ceToolFolderOverride, serverRootPath, communityMaps } = opts;
   const warnings: string[] = [];
 
   if (!serverRootPath) {
@@ -143,7 +146,7 @@ async function loadCeToolTierData(opts: {
     return { ceProject: null, loaded: false, ceSource: null, warnings };
   }
 
-  const mapCfg = MAP_CONFIGS[activeMap as keyof typeof MAP_CONFIGS];
+  const mapCfg = getAllMapConfigs(communityMaps)[activeMap] ?? getAllMapConfigs(communityMaps)['namalsk'];
   let worldSize = mapCfg.worldWidth;
   const layers: Partial<Record<string, Uint8Array>> = {};
   const usageLayers: Partial<Record<string, Uint8Array[]>> = {};
@@ -353,6 +356,7 @@ export function useServerFolder() {
   const setMapImagePath     = useUiStore(s => s.setMapImagePath);
   const setTierZonesLoaded  = useUiStore(s => s.setTierZonesLoaded);
   const activeMap       = useUiStore(s => s.activeMap);
+  const communityMaps   = useCommunityMapsStore(s => s.maps);
 
   const [allMissions, setAllMissions]       = useState<MissionFiles[]>([]);
   const [pendingMissions, setPendingMissions] = useState<MissionFiles[] | null>(null);
@@ -426,6 +430,7 @@ export function useServerFolder() {
         activeMap,
         ceToolFolderOverride,
         serverRootPath: serverRootRef.current,
+        communityMaps,
       });
       setCeToolProject(ceProject);
       setCeSource(activeMap, ceSource);
@@ -606,6 +611,7 @@ export function useServerFolder() {
       activeMap,
       ceToolFolderOverride,
       serverRootPath: serverRootRef.current,
+      communityMaps,
     });
     setCeToolProject(ceProject);
     setCeSource(activeMap, ceSource);

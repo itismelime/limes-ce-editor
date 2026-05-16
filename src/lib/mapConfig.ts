@@ -1,6 +1,6 @@
-import type { MapConfig, MapId } from '../types/map';
+import type { MapConfig, CommunityMapDef } from '../types/map';
 
-export const MAP_CONFIGS: Record<MapId, MapConfig> = {
+export const MAP_CONFIGS: Record<string, MapConfig> = {
   namalsk: {
     id: 'namalsk',
     label: 'Namalsk',
@@ -47,3 +47,19 @@ export const MAP_CONFIGS: Record<MapId, MapConfig> = {
     imageHeight: 2048,
   },
 };
+
+export function getAllMapConfigs(communityMaps: CommunityMapDef[]): Record<string, MapConfig> {
+  const extra: Record<string, MapConfig> = {};
+  for (const cm of communityMaps) {
+    extra[cm.id] = {
+      id: cm.id,
+      label: cm.label,
+      imageUrl: '',
+      worldWidth: cm.worldWidth,
+      worldHeight: cm.worldHeight,
+      imageWidth: 4096,
+      imageHeight: 4096,
+    };
+  }
+  return { ...MAP_CONFIGS, ...extra };
+}

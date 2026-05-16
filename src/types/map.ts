@@ -1,7 +1,18 @@
 export type MapId = 'namalsk' | 'chernarus' | 'livonia' | 'sakhal' | 'custom';
 
+export const BUILTIN_TILE_MAP_IDS = new Set<string>(['namalsk', 'chernarus', 'livonia', 'sakhal']);
+
+export interface CommunityMapDef {
+  id: string;
+  label: string;
+  xamName: string;
+  maxZoom: number;
+  worldWidth: number;
+  worldHeight: number;
+}
+
 export interface MapConfig {
-  id: MapId;
+  id: string;
   label: string;
   imageUrl: string;
   worldWidth: number;
