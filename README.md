@@ -91,11 +91,19 @@ npm run tauri:dev
 
 ### Build installer
 
+Before building for distribution, generate the bundled offline map images once.
+This downloads the four overview PNGs from xam.nu and stitches them locally —
+internet access is required for this step, but **not** for end users after installation.
+
 ```bash
+npm run prepare-maps   # one-time download + stitch (requires internet + Rust toolchain)
 npm run tauri:build
 ```
 
 Installers are written to `src-tauri/target/release/bundle/` — MSI under `msi/`, NSIS exe under `nsis/`.
+
+> **Note:** The generated map PNGs (~30–50 MB total) are git-ignored.
+> Re-run `npm run prepare-maps` whenever you want to refresh them from the latest xam.nu tiles.
 
 ---
 

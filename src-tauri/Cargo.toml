@@ -9,6 +9,10 @@ edition = "2021"
 name = "limes_ce_editor_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "prepare_maps"
+path = "src/bin/prepare_maps.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -21,3 +25,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

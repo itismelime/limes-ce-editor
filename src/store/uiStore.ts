@@ -14,7 +14,7 @@ export interface BuildingLootOverride {
 
 interface UiState {
   activeTab: ActiveTab;
-  activeMap: MapId;
+  activeMap: string;
   theme: ThemeId;
   showSaveReview: boolean;
   selectedEventName: string | null;
@@ -49,7 +49,7 @@ interface UiState {
   customUsageColors: Record<string, string>;
 
   setActiveTab: (tab: ActiveTab) => void;
-  setActiveMap: (map: MapId) => void;
+  setActiveMap: (map: string) => void;
   setTheme: (theme: ThemeId) => void;
   setShowSaveReview: (v: boolean) => void;
   setSelectedBuilding: (type: string | null) => void;

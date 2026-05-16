@@ -5,6 +5,8 @@ pub struct TileDef {
     pub xam_name: &'static str,
     pub versions:  &'static [&'static str],
     pub layer:     &'static str,
+    /// Maximum xam.nu zoom level available for this map (zoom 4 is always the minimum).
+    pub max_zoom:  u32,
 }
 
 pub fn total_tiles_through_zoom(max_zoom: u32) -> u64 {
@@ -32,21 +34,25 @@ pub fn tile_def(map_id: &str) -> Option<TileDef> {
             xam_name: "namalsk",
             versions:  &["May.27", "a3", "latest"],
             layer:     "topographic",
+            max_zoom:  6,
         }),
         "chernarus" => Some(TileDef {
             xam_name: "chernarusplus",
             versions:  &["1.27", "1.26", "latest"],
             layer:     "topographic",
+            max_zoom:  8,
         }),
         "livonia" => Some(TileDef {
             xam_name: "livonia",
             versions:  &["1.27", "1.26", "latest"],
             layer:     "topographic",
+            max_zoom:  7,
         }),
         "sakhal" => Some(TileDef {
             xam_name: "sakhal",
             versions:  &["1.27", "latest"],
             layer:     "topographic",
+            max_zoom:  8,
         }),
         _ => None,
     }
@@ -106,7 +112,7 @@ pub async fn download_overview(
     for ty in 0..GRID {
         for tx in 0..GRID {
             // Download tile and cache it individually for later zoom-in use
-            let tile_path = fetch_tile(map_id, ZOOM, tx, ty, cache_dir, version, client, &def).await?;
+            let tile_path = fetch_tile(map_id, ZOOM, tx, ty, cache_dir, version, client, def.xam_name, def.layer).await?;
             let tile = image::open(&tile_path)
                 .map_err(|e| format!("Decode ({},{}): {}", tx, ty, e))?
                 .to_rgba8();
@@ -187,7 +193,8 @@ pub async fn fetch_tile(
     cache_dir: &Path,
     version:   &str,
     client:    &reqwest::Client,
-    def:       &TileDef,
+    xam_name:  &str,
+    layer:     &str,
 ) -> Result<PathBuf, String> {
     let path = tile_cache_path(cache_dir, map_id, zoom, x, y);
 
@@ -200,7 +207,7 @@ pub async fn fetch_tile(
 
     let url = format!(
         "https://static.xam.nu/dayz/maps/{}/{}/{}/{}/{}/{}.webp",
-        def.xam_name, version, def.layer, zoom, x, y
+        xam_name, version, layer, zoom, x, y
     );
 
     let resp = client.get(&url).send().await
@@ -245,7 +252,7 @@ pub async fn prefetch_tiles(
                 if path.exists() {
                     stats.cached += 1;
                 } else {
-                    match fetch_tile(map_id, z, x, y, cache_dir, version, client, &def).await {
+                    match fetch_tile(map_id, z, x, y, cache_dir, version, client, def.xam_name, def.layer).await {
                         Ok(_) => stats.downloaded += 1,
                         Err(_) => stats.failed += 1,
                     }

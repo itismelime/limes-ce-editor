@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useEffect, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
+import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { useServerFolder } from '../../hooks/useServerFolder';
 import { TopBar } from './TopBar';
 import { MissionPicker } from '../shared/MissionPicker';
@@ -319,6 +320,12 @@ export function AppShell() {
   const [startupMessage, setStartupMessage] = useState('Preparing editor...');
   const [showNoticeDetails, setShowNoticeDetails] = useState(false);
 
+  const loadCommunityMaps = useCommunityMapsStore(s => s.load);
+  const communityMapIds = useCommunityMapsStore(s => new Set(s.maps.map(m => m.id)));
+
+  // Load community maps as early as possible.
+  useEffect(() => { void loadCommunityMaps(); }, [loadCommunityMaps]);
+
   const parsedWarnings = loadWarnings.map(parseLoadWarning);
   const compatWarnings = parsedWarnings.filter(w => w.kind === 'compat');
   const parseWarnings = parsedWarnings.filter(w => w.kind === 'parse');
@@ -388,7 +395,7 @@ export function AppShell() {
       prefetchTabOnce('map');
       prefetchTabOnce('types');
 
-      if (KNOWN_MAPS.has(activeMap) && !mapImagePaths[activeMap]) {
+      if ((KNOWN_MAPS.has(activeMap) || communityMapIds.has(activeMap)) && !mapImagePaths[activeMap]) {
         try {
           const result = await invoke<{ path: string; width: number; height: number }>('download_map_tiles', {
             mapId: activeMap,

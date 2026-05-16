@@ -11,16 +11,17 @@ import 'leaflet/dist/leaflet.css';
 import { useMapMarkers } from '../../hooks/useMapMarkers';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
+import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
 import { getUsageColor } from '../../types/map';
+import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
 import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
 import { BuildingMarkers } from './BuildingMarkers';
 import { BuildingSidebar } from './BuildingSidebar';
 import type { MapConfig } from '../../types/map';
 
-const TILE_MAPS = new Set(['namalsk', 'chernarus', 'livonia', 'sakhal']);
-const MAX_XAM_ZOOM_BY_MAP: Record<string, number> = {
+const BUILTIN_MAX_XAM_ZOOM: Record<string, number> = {
   namalsk: 6,
   chernarus: 8,
   livonia: 7,
@@ -32,8 +33,9 @@ const DETAIL_MIN_ZOOM = 1;
 const XAM_ZOOM_OFFSET = 4;
 const PLAYER_MARKER_SIZE = 20;
 
-function getLeafletTileMaxZoom(mapId: string): number {
-  return (MAX_XAM_ZOOM_BY_MAP[mapId] ?? 8) - XAM_ZOOM_OFFSET;
+function getLeafletTileMaxZoom(mapId: string, communityMaxZoom: Record<string, number>): number {
+  const xamZoom = BUILTIN_MAX_XAM_ZOOM[mapId] ?? communityMaxZoom[mapId] ?? 8;
+  return xamZoom - XAM_ZOOM_OFFSET;
 }
 
 function FilterInput({ placeholder, value, onChange }: { placeholder: string; value: string; onChange: (v: string) => void }) {
@@ -243,9 +245,9 @@ function MapVisibilitySync({ isActive }: { isActive: boolean }) {
 }
 
 /** High-res tile layer — only activates at Leaflet zoom ≥ DETAIL_MIN_ZOOM. */
-function DayZTileLayer({ mapId }: { mapId: string }) {
+function DayZTileLayer({ mapId, communityMaxZoom }: { mapId: string; communityMaxZoom: Record<string, number> }) {
   const map = useMap();
-  const maxTileZoom = getLeafletTileMaxZoom(mapId);
+  const maxTileZoom = getLeafletTileMaxZoom(mapId, communityMaxZoom);
 
   useEffect(() => {
     const layer = L.gridLayer({
@@ -550,6 +552,22 @@ export function MapView() {
   const mapClusterZoomThreshold = useUiStore(s => s.mapClusterZoomThreshold);
   const setMapClusterZoomThreshold = useUiStore(s => s.setMapClusterZoomThreshold);
 
+  const communityMaps = useCommunityMapsStore(s => s.maps);
+
+  const communityMaxZoom = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const cm of communityMaps) m[cm.id] = cm.maxZoom;
+    return m;
+  }, [communityMaps]);
+
+  const tileMaps = useMemo(() => {
+    const s = new Set<string>(BUILTIN_TILE_MAP_IDS);
+    for (const cm of communityMaps) s.add(cm.id);
+    return s;
+  }, [communityMaps]);
+  const mapClusterZoomThreshold = useUiStore(s => s.mapClusterZoomThreshold);
+  const setMapClusterZoomThreshold = useUiStore(s => s.setMapClusterZoomThreshold);
+
   const hiddenEvents          = useUiStore(s => s.hiddenEvents);
   const toggleEvent           = useUiStore(s => s.toggleEvent);
   const setHiddenEvents       = useUiStore(s => s.setHiddenEvents);
@@ -649,10 +667,10 @@ export function MapView() {
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
-  const isKnownMap  = TILE_MAPS.has(activeMap);
+  const isKnownMap  = tileMaps.has(activeMap);
   const isCustomMap = activeMap === 'custom';
   const hasImage    = !!mapConfig.imageUrl;
-  const maxLeafletZoom = isKnownMap ? getLeafletTileMaxZoom(activeMap) : 4;
+  const maxLeafletZoom = isKnownMap ? getLeafletTileMaxZoom(activeMap, communityMaxZoom) : 4;
 
   // Auto-download overview for known maps that don't have a cached image yet.
   useEffect(() => {
@@ -786,7 +804,7 @@ export function MapView() {
           <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
 
           {/* Detail tile layer — capped per map at the highest available xam zoom */}
-          {isMapActive && mapHeavyReady && isKnownMap && <DayZTileLayer mapId={activeMap} />}
+          {isMapActive && mapHeavyReady && isKnownMap && <DayZTileLayer mapId={activeMap} communityMaxZoom={communityMaxZoom} />}
 
           {isMapActive && mapHeavyReady && initializedEventSignature === eventSignature && (
             <EventMarkers markers={markers} mapConfig={mapConfig} />
