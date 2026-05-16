@@ -63,20 +63,28 @@ pub async fn probe_version(
     name:     &str,
     versions: &[&str],
     layer:    &str,
+    on_try:   impl Fn(&str),
 ) -> Result<String, String> {
+    // Use a short timeout for probing — HEAD requests should respond in under a second.
+    let probe_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_else(|_| client.clone());
+
     for &ver in versions {
+        on_try(ver);
         let url = format!(
             "https://static.xam.nu/dayz/maps/{}/{}/{}/4/0/0.webp",
             name, ver, layer
         );
-        if let Ok(resp) = client.head(&url).send().await {
+        if let Ok(resp) = probe_client.head(&url).send().await {
             if resp.status().is_success() {
                 return Ok(ver.to_string());
             }
         }
     }
     Err(format!(
-        "Could not find tiles for '{}' (tried: {}). Check your internet connection.",
+        "Could not find tiles for '{}' on xam.nu (tried versions: {}). Check your internet connection or the map name.",
         name,
         versions.join(", ")
     ))
@@ -139,9 +147,9 @@ pub fn read_cached_overview(cache_dir: &Path, map_id: &str) -> Result<Option<(Pa
     if !overview.exists() {
         return Ok(None);
     }
-
-    let img = image::open(&overview).map_err(|e| format!("Cache read: {}", e))?;
-    Ok(Some((overview, img.width(), img.height())))
+    // Overview PNGs are always TOTAL×TOTAL (4096×4096). Skip full decode.
+    const TOTAL: u32 = 4096;
+    Ok(Some((overview, TOTAL, TOTAL)))
 }
 
 pub fn tile_cache_path(

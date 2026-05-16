@@ -6,19 +6,28 @@ interface Props {
   onCancel: () => void;
 }
 
-const FILE_ICONS: Record<string, string> = {
-  typesPath:          '🎒',
-  eventSpawnsPath:    '📍',
-  eventsPath:         '⚡',
-  spawnableTypesPath: '📦',
+const TERRAIN_DISPLAY: Record<string, string> = {
+  chernarusplus: 'Chernarus+',
+  chernarus:     'Chernarus+',
+  enoch:         'Livonia',
+  livonia:       'Livonia',
+  sakhal:        'Sakhal',
+  namalsk:       'Namalsk',
+  deerisle:      'Deer Isle',
+  alteria:       'Alteria',
+  banov:         'Banov',
+  esseker:       'Esseker',
+  rostow:        'Rostow',
+  takistanplus:  'Takistan+',
+  takistan:      'Takistan',
 };
 
-const FILE_LABELS: Record<string, string> = {
-  typesPath:          'types.xml',
-  eventSpawnsPath:    'cfgeventspawns.xml',
-  eventsPath:         'events.xml',
-  spawnableTypesPath: 'cfgspawnabletypes.xml',
-};
+function parseMissionName(name: string): string {
+  const dot = name.indexOf('.');
+  if (dot === -1) return name;
+  const rawTerrain = name.slice(dot + 1).toLowerCase();
+  return TERRAIN_DISPLAY[rawTerrain] ?? name.slice(dot + 1);
+}
 
 export function MissionPicker({ missions, onSelect, onCancel }: Props) {
   return (
@@ -31,50 +40,20 @@ export function MissionPicker({ missions, onSelect, onCancel }: Props) {
           </p>
         </div>
 
-        <div className="p-3 max-h-96 overflow-y-auto space-y-2">
+        <div className="p-3 max-h-96 overflow-y-auto space-y-1">
           {missions.map(m => {
-            const fileKeys = ['typesPath', 'eventSpawnsPath', 'eventsPath', 'spawnableTypesPath'] as const;
-            const foundCount = fileKeys.filter(k => m[k] !== null).length;
-
+            const terrain = parseMissionName(m.missionName);
             return (
               <button
                 key={m.missionPath}
                 onClick={() => onSelect(m)}
-                className="w-full text-left bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700 hover:border-lime-500 rounded-xl p-4 transition-all group"
+                className="w-full text-left rounded-lg px-3 py-2.5 border border-slate-700 hover:border-lime-500/50 hover:bg-lime-500/10 transition-colors group"
               >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <span className="font-mono text-sm text-slate-200 group-hover:text-lime-300 transition-colors">
-                    {m.missionName}
-                  </span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
-                    foundCount === 4
-                      ? 'bg-green-900/40 text-green-400'
-                      : foundCount > 0
-                      ? 'bg-amber-900/40 text-amber-400'
-                      : 'bg-slate-700 text-slate-500'
-                  }`}>
-                    {foundCount}/4 files
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {fileKeys.map(key => (
-                    <span
-                      key={key}
-                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${
-                        m[key]
-                          ? 'bg-slate-700 text-slate-300'
-                          : 'bg-slate-800/40 text-slate-600 line-through'
-                      }`}
-                    >
-                      <span>{FILE_ICONS[key]}</span>
-                      {FILE_LABELS[key]}
-                    </span>
-                  ))}
-                </div>
-
-                <p className="text-xs text-slate-500 mt-2 truncate" title={m.missionPath}>
-                  {m.missionPath}
+                <span className="text-sm font-medium text-slate-200 group-hover:text-lime-400 transition-colors">
+                  {terrain}
+                </span>
+                <p className="text-xs text-slate-600 group-hover:text-slate-400 font-mono mt-0.5 truncate transition-colors">
+                  {m.missionName}
                 </p>
               </button>
             );

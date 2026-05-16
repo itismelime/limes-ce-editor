@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { useServerStore } from '../../store/serverStore';
 import type { CommunityMapDef } from '../../types/map';
@@ -51,6 +52,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
   const [worldWidth, setWorldWidth]   = useState(15360);
   const [worldHeight, setWorldHeight] = useState(15360);
   const [maxZoom, setMaxZoom]         = useState(7);
+  const [pboPath, setPboPath]         = useState<string | undefined>(undefined);
   const [probing, setProbing]         = useState(false);
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
   const [saving, setSaving]           = useState(false);
@@ -106,6 +108,14 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     }
   }
 
+  async function handleBrowsePbo() {
+    const selected = await openDialog({
+      filters: [{ name: 'DayZ PBO', extensions: ['pbo'] }],
+      multiple: false,
+    });
+    if (typeof selected === 'string') setPboPath(selected);
+  }
+
   function handleEdit(cm: CommunityMapDef) {
     setEditingId(cm.id);
     setXamName(cm.xamName);
@@ -113,6 +123,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     setWorldWidth(cm.worldWidth);
     setWorldHeight(cm.worldHeight);
     setMaxZoom(cm.maxZoom);
+    setPboPath(cm.pboPath);
     setProbeResult(null);
     setError(null);
     setShowAdd(true);
@@ -127,12 +138,13 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     setError(null);
     try {
       const def: CommunityMapDef = {
-        id: editingId ?? slugify(name),
+        id: editingId ?? slugify(name || label),
         label: label.trim(),
         xamName: name,
         maxZoom,
         worldWidth: clampedWidth,
         worldHeight: clampedHeight,
+        pboPath: pboPath || undefined,
       };
       await addMap(def);
       setXamName('');
@@ -140,6 +152,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
       setWorldWidth(15360);
       setWorldHeight(15360);
       setMaxZoom(7);
+      setPboPath(undefined);
       setProbeResult(null);
       setEditingId(null);
       setShowAdd(false);
@@ -155,7 +168,8 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     await removeMap(id);
   }
 
-  const canAdd = !!xamName.trim() && !!label.trim() && worldWidth > 0 && worldHeight > 0;
+  // Valid if either a xam.nu name or a PBO path is provided, plus a display name.
+  const canAdd = (!!xamName.trim() || !!pboPath) && !!label.trim() && worldWidth > 0 && worldHeight > 0;
 
   async function handleDownload(cm: CommunityMapDef) {
     if (!missionPath) return;
@@ -173,7 +187,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
       {!hideHeading && <SectionHeading>Community Maps</SectionHeading>}
       <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-4">
         <p className="text-xs text-slate-500 mb-4">
-          Add custom maps hosted on xam.nu (e.g. Deer Isle, Banov). They appear in the map selector alongside the built-in maps and support offline tile caching.
+          Add community maps to the map selector. Map tiles are fetched from xam.nu, and mpmission files can be downloaded from the mod's GitHub repository.
         </p>
 
         {maps.length > 0 && (
@@ -295,6 +309,34 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
                   : '✗ Not found on xam.nu — check the map name'}
               </p>
             )}
+
+            {/* PBO path for offline satellite tile extraction */}
+            <div>
+              <p className="text-[11px] text-slate-500 mb-1">
+                Satellite tiles from PBO <span className="text-slate-600">(optional — for maps not on xam.nu)</span>
+              </p>
+              <div className="flex gap-2 items-center">
+                <button
+                  onClick={() => void handleBrowsePbo()}
+                  className="px-2.5 py-1.5 rounded-lg text-xs border border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100 transition-colors flex-shrink-0"
+                >
+                  Browse PBO…
+                </button>
+                {pboPath ? (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs text-emerald-400 font-mono truncate">{pboPath.split(/[\\/]/).pop()}</span>
+                    <button onClick={() => setPboPath(undefined)} className="text-slate-500 hover:text-slate-300 flex-shrink-0">✕</button>
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-600">No PBO selected</span>
+                )}
+              </div>
+              {pboPath && (
+                <p className="text-[10px] text-slate-600 mt-1">
+                  Tiles extracted on first map load (~2 min). Cached afterward.
+                </p>
+              )}
+            </div>
 
             {/* Display name */}
             <div>

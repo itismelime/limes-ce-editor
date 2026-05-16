@@ -28,3 +28,11 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 zip   = { version = "2", default-features = false, features = ["deflate"] }
+
+hemtt-pbo        = "1"
+lzokay           = "2"
+texture2ddecoder = "0.1"
+
+[[bin]]
+name = "test_pbo"
+path = "src/bin/test_pbo.rs"

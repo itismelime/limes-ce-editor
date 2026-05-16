@@ -656,7 +656,10 @@ export function MapView() {
 
   const [downloading, setDownloading]       = useState(false);
   const [downloadProgress, setProgress]     = useState(0);
+  const [downloadStatus, setDownloadStatus] = useState('');
   const [downloadError, setDownloadError]   = useState<string | null>(null);
+  const [downloadElapsed, setDownloadElapsed] = useState(0);
+  const downloadStartRef = useRef<number>(0);
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
@@ -678,10 +681,21 @@ export function MapView() {
     (async () => {
       setDownloading(true);
       setProgress(0);
+      setDownloadStatus('');
+      setDownloadElapsed(0);
       setDownloadError(null);
+      downloadStartRef.current = Date.now();
+
+      const elapsed = setInterval(() => {
+        if (!cancelled) setDownloadElapsed(Math.floor((Date.now() - downloadStartRef.current) / 1000));
+      }, 1000);
 
       const unlisten = await listen<number>('tile-progress', e => {
         if (!cancelled) setProgress(e.payload);
+      });
+      const unlistenStatus = await listen<string>('tile-status', e => {
+        console.log('[tile-status]', e.payload);
+        if (!cancelled) setDownloadStatus(e.payload);
       });
 
       try {
@@ -695,7 +709,9 @@ export function MapView() {
       } catch (err) {
         if (!cancelled) setDownloadError(err instanceof Error ? err.message : String(err));
       } finally {
+        clearInterval(elapsed);
         unlisten();
+        unlistenStatus();
         if (!cancelled) setDownloading(false);
       }
     })();
@@ -749,23 +765,46 @@ export function MapView() {
           <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950">
             <p className="text-slate-300 text-sm font-medium">Downloading map tiles…</p>
             <div className="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-lime-400 rounded-full transition-all"
-                style={{ width: `${downloadProgress * 100}%` }}
-              />
+              {downloadProgress > 0 ? (
+                <div
+                  className="h-full bg-lime-500 rounded-full transition-all"
+                  style={{ width: `${downloadProgress * 100}%` }}
+                />
+              ) : (
+                <div className="h-full w-1/3 bg-lime-500 rounded-full animate-pulse" />
+              )}
             </div>
-            <p className="text-slate-500 text-xs">{Math.round(downloadProgress * 100)}%</p>
+            <p className="text-slate-500 text-xs">
+              {downloadStatus || (downloadProgress > 0 ? `${Math.round(downloadProgress * 100)}%` : 'Connecting…')}
+              {downloadElapsed > 0 && <span className="text-slate-600 ml-2">{downloadElapsed}s</span>}
+            </p>
+            {downloadElapsed >= 15 && (
+              <p className="text-slate-600 text-xs max-w-xs text-center">
+                Still connecting — check your internet connection or try a different map.
+              </p>
+            )}
           </div>
         )}
         {downloadError && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950">
-            <p className="text-red-400 text-sm">Download failed: {downloadError}</p>
-            <button
-              onClick={() => setDownloadError(null)}
-              className="text-xs text-slate-400 hover:text-slate-200"
-            >
-              Dismiss
-            </button>
+          <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-slate-950">
+            <div className="bg-red-950/40 border border-red-800/50 rounded-xl p-5 max-w-md mx-4 text-center space-y-2">
+              <p className="text-red-400 text-sm font-medium">Map tiles unavailable</p>
+              <p className="text-slate-400 text-xs">{downloadError}</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setDownloadError(null); setProgress(0); }}
+                className="px-4 py-1.5 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
+              >
+                Retry
+              </button>
+              <button
+                onClick={() => setDownloadError(null)}
+                className="px-4 py-1.5 rounded-lg text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
       </div>

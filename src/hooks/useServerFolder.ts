@@ -512,6 +512,9 @@ export function useServerFolder() {
   }, [activeMap]);
 
   async function loadFromMissions(missions: MissionFiles[]) {
+    // DayZ mission folders always follow <type>.<terrain> naming.
+    // Filter out CE mod folders, tools, and other non-mission subdirectories.
+    missions = missions.filter(m => m.missionName.includes('.'));
     if (missions.length === 0) {
       setLoadError('no_files_found');
       setLoading(false);

@@ -46,7 +46,9 @@ async fn main() {
 
         // ── Step 1: probe which tile version is live ────────────────────────
         println!("[{}] Probing tile version…", map_id);
-        let version = tiles::probe_version(&client, def.xam_name, def.versions, def.layer)
+        let version = tiles::probe_version(&client, def.xam_name, def.versions, def.layer, |v| {
+            println!("[{}] Trying version '{}'…", map_id, v);
+        })
             .await
             .unwrap_or_else(|e| panic!("[{}] Version probe failed: {}", map_id, e));
         println!("[{}] Version: {}", map_id, version);

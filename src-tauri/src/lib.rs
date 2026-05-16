@@ -1,4 +1,5 @@
 pub mod tiles;
+pub mod pbo;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +24,9 @@ struct CommunityMapEntry {
     max_zoom: u32,
     world_width: f64,
     world_height: f64,
+    /// Optional path to the mod's *_data.pbo for offline satellite tile extraction.
+    #[serde(default)]
+    pbo_path: Option<String>,
 }
 
 struct CommunityMapRegistry(Mutex<Vec<CommunityMapEntry>>);
@@ -116,25 +120,28 @@ async fn download_map_tiles(
     registry:      tauri::State<'_, CommunityMapRegistry>,
     map_id:        String,
 ) -> Result<ExtractResult, String> {
+    let _ = app.emit("tile-status", "Checking bundled resources…");
+
     // 1. Check for a bundled overview PNG shipped inside the installer.
     if let Ok(resource_dir) = app.path().resource_dir() {
         let bundled = resource_dir.join("maps").join(format!("{}_tiles.png", map_id));
         if bundled.exists() {
-            let img = image::open(&bundled)
-                .map_err(|e| format!("Bundled map read error: {}", e))?;
+            let _ = app.emit("tile-status", "Loading bundled map…");
             return Ok(ExtractResult {
                 path:   bundled.to_str().ok_or("Invalid path")?.to_string(),
-                width:  img.width(),
-                height: img.height(),
+                width:  4096,
+                height: 4096,
             });
         }
     }
+
+    let _ = app.emit("tile-status", "Checking disk cache…");
 
     let cache_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("map_cache");
 
-    // 2. Check the on-disk download cache.
+    // 2. Check the on-disk download cache (covers both xam.nu and PBO-generated overviews).
     if let Some((path, w, h)) = tiles::read_cached_overview(&cache_dir, &map_id)? {
         return Ok(ExtractResult {
             path: path.to_str().ok_or("Invalid path")?.to_string(),
@@ -143,14 +150,67 @@ async fn download_map_tiles(
         });
     }
 
-    // 3. Fall back to downloading from xam.nu.
-    let version = resolve_version(&version_cache, &http, &registry, &map_id).await?;
+    // 3. If this community map has a PBO path, extract satellite tiles from the PBO.
+    let pbo_info: Option<(std::path::PathBuf, u32)> = {
+        let reg = registry.0.lock().unwrap();
+        reg.iter().find(|e| e.id == map_id).and_then(|entry| {
+            entry.pbo_path.as_ref().map(|p| (
+                std::path::PathBuf::from(p),
+                entry.world_width as u32,
+            ))
+        })
+    };
+    if let Some((pbo_path, world_size)) = pbo_info {
+        let overview_path = tiles::overview_cache_path(&cache_dir, &map_id);
+        let _ = app.emit("tile-status", "Extracting satellite tiles from PBO…");
+        let _ = app.emit("tile-progress", 0.0f32);
+        let app_progress = app.clone();
+        let app_status = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            pbo::generate_overview(
+                &pbo_path,
+                &overview_path,
+                world_size,
+                move |frac| { let _ = app_progress.emit("tile-progress", frac); },
+                move |status| { let _ = app_status.emit("tile-status", status); },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let path = tiles::overview_cache_path(&cache_dir, &map_id);
+        return Ok(ExtractResult {
+            path: path.to_str().ok_or("Invalid path")?.to_string(),
+            width: 4096,
+            height: 4096,
+        });
+    }
+
+    // 4. Fall back to downloading from xam.nu.
+    // Check version cache first (same logic as resolve_version but with status events).
+    let version = {
+        let cached = version_cache.0.lock().unwrap().get(&map_id).cloned();
+        if let Some(v) = cached {
+            v
+        } else {
+            let (xam_name, versions, layer) = get_xam_info(&map_id, &registry)?;
+            let app2 = app.clone();
+            let v = tiles::probe_version(&http.0, &xam_name, versions, layer, move |ver| {
+                let _ = app2.emit("tile-status", format!("Trying version '{}'…", ver));
+            }).await?;
+            version_cache.0.lock().unwrap().insert(map_id.clone(), v.clone());
+            v
+        }
+    };
+    let _ = app.emit("tile-status", format!("Downloading tiles (version {})…", version));
     let (path, w, h) = tiles::download_overview(
         &map_id,
         &cache_dir,
         &version,
         &http.0,
-        |frac| { let _ = app.emit("tile-progress", frac); },
+        |frac| {
+            let _ = app.emit("tile-progress", frac);
+            let _ = app.emit("tile-status", format!("Downloading tiles… {}%", (frac * 100.0) as u32));
+        },
     )
     .await?;
 
@@ -380,7 +440,7 @@ async fn probe_community_map(
     xam_name: String,
 ) -> Result<ProbeCommunityMapResult, String> {
     let version = match tiles::probe_version(
-        &http.0, &xam_name, DEFAULT_COMMUNITY_VERSIONS, DEFAULT_COMMUNITY_LAYER,
+        &http.0, &xam_name, DEFAULT_COMMUNITY_VERSIONS, DEFAULT_COMMUNITY_LAYER, |_| {},
     ).await {
         Ok(v) => v,
         Err(_) => return Ok(ProbeCommunityMapResult { valid: false, version: String::new(), max_zoom: 4 }),
@@ -466,7 +526,6 @@ fn extract_mpmission_from_zip(
     zip_subfolder: &str,
     dest:          &std::path::Path,
 ) -> Result<(), String> {
-    use std::io::Read;
     let cursor = std::io::Cursor::new(zip_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
@@ -564,7 +623,7 @@ async fn resolve_version(
         }
     }
     let (xam_name, versions, layer) = get_xam_info(map_id, registry)?;
-    let v = tiles::probe_version(&http.0, &xam_name, versions, layer).await?;
+    let v = tiles::probe_version(&http.0, &xam_name, versions, layer, |_| {}).await?;
     version_cache.0.lock().unwrap().insert(map_id.to_string(), v.clone());
     Ok(v)
 }

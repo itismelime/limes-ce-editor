@@ -22,6 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.agents
+skills-lock.json
 
 .claude/
 CLAUDE.md
@@ -58,3 +60,4 @@ coverage/
 src-tauri/resources/maps/*.png
 # Detail tile tree — all zoom levels per map (~1-4 GB total for all 4 maps)
 src-tauri/resources/maps/**/*.webp
+src-tauri/test*
