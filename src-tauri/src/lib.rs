@@ -203,6 +203,16 @@ async fn get_tiles_base_dir(
     Ok(None)
 }
 
+/// Returns the app-data maps dir used during extraction — no tile-completeness check.
+/// Use this for early-show (z=0 ready) so we don't wait for z=5 before unhiding the map.
+#[tauri::command]
+async fn get_extraction_maps_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("maps");
+    Ok(dir.to_string_lossy().replace('\\', "/").into())
+}
+
 /// Returns the file-system path for a single map tile (frontend uses `convertFileSrc`).
 #[tauri::command]
 async fn get_tile_path(
@@ -574,6 +584,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_tiles_base_dir,
+            get_extraction_maps_dir,
             get_tile_path,
             extract_map_tiles,
             clear_map_tiles,

@@ -654,17 +654,18 @@ export function MapView() {
   }, [markers.length, eventNames, eventSignature, setHiddenEvents]);
 
   const [tilesBaseDir, setTilesBaseDir]     = useState<string | null>(null);
+  const [tilesNotBuilt, setTilesNotBuilt]   = useState(false);
+  const [buildRequested, setBuildRequested] = useState<Set<string>>(new Set());
   const [downloading, setDownloading]       = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingStatus, setLoadingStatus]   = useState('');
   const [downloadError, setDownloadError]   = useState<string | null>(null);
+  const [retryCount, setRetryCount]         = useState(0);
   const lastProgressRef  = useRef<number>(0);
   // maxReadyLevelRef: highest pyramid zoom level fully written to disk (-1 = none yet, 5 = all done)
   const maxReadyLevelRef = useRef<number>(5);
   // ref to the live TileLayer so we can call redraw() as new levels land
   const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const [extractionWorker, setExtractionWorker] = useState<{
-    level: number; progress: number; status: string;
-  } | null>(null);
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
@@ -680,29 +681,32 @@ export function MapView() {
   // Native max = 5 - zoomOffset. Allow 3 overzoom levels on top.
   const maxLeafletZoom = isKnownMap ? (5 - zoomOffset + 3) : (communityMaxZoom[activeMap] ?? 4);
 
-  // For known tile maps: check if tiles are ready, else extract from PBO progressively.
+  // For known tile maps: check if tiles are ready, else ask user to build.
   useEffect(() => {
     if (!isMapActive || !isKnownMap) return;
 
     let cancelled = false;
     setTilesBaseDir(null);
+    setTilesNotBuilt(false);
+    setDownloadError(null);
     maxReadyLevelRef.current = -1;
-    setExtractionWorker(null);
-
     (async () => {
       const dir = await invoke<string | null>('get_tiles_base_dir', { mapId: activeMap });
       if (cancelled) return;
       if (dir) {
-        // Already fully extracted.
         maxReadyLevelRef.current = 5;
         setTilesBaseDir(dir);
         return;
       }
 
-      // Tiles not ready — start extraction.
+      if (!buildRequested.has(activeMap)) {
+        setTilesNotBuilt(true);
+        return;
+      }
+
+      // User confirmed — start extraction.
       setDownloading(true);
       setLoadingProgress(0);
-      setDownloadError(null);
 
       const unlisten = await listen<number>('tile-progress', e => {
         if (!cancelled) {
@@ -715,25 +719,12 @@ export function MapView() {
       });
       const unlistenStatus = await listen<string>('tile-status', e => {
         if (!cancelled) {
-          setExtractionWorker(w => w ? { ...w, status: e.payload } : null);
+          setLoadingStatus(e.payload);
         }
       });
-      const unlistenLevel = await listen<{ mapId: string; level: number }>('tile-level-done', async e => {
+      const unlistenLevel = await listen<{ mapId: string; level: number }>('tile-level-done', e => {
         if (cancelled || e.payload.mapId !== activeMap) return;
-        const level = e.payload.level;
-        maxReadyLevelRef.current = level;
-        // Progress = levels completed / total levels (0-5 → 1/6..6/6).
-        const levelProgress = (level + 1) / 6;
-        setExtractionWorker(w => w ? { ...w, level, progress: levelProgress } : { level, progress: levelProgress, status: '' });
-
-        if (level === 0) {
-          // Show map immediately with the low-quality z=0 tile.
-          const earlyDir = await invoke<string | null>('get_tiles_base_dir', { mapId: activeMap });
-          if (!cancelled && earlyDir) setTilesBaseDir(earlyDir);
-        } else {
-          // Refresh visible tiles to the newly available higher-quality level.
-          tileLayerRef.current?.redraw();
-        }
+        maxReadyLevelRef.current = e.payload.level;
       });
 
       try {
@@ -753,14 +744,14 @@ export function MapView() {
         unlistenLevel();
         if (!cancelled) {
           setDownloading(false);
-          setExtractionWorker(null);
+          setLoadingStatus('');
         }
       }
     })();
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMap, isMapActive]);
+  }, [activeMap, isMapActive, buildRequested, retryCount]);
 
   // ── Custom map: no image yet ──────────────────────────────────────────────
   if (isCustomMap && !hasImage) {
@@ -803,6 +794,22 @@ export function MapView() {
   if (isKnownMap && !tilesBaseDir) {
     return (
       <div className="h-full flex flex-col">
+        {tilesNotBuilt && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 max-w-sm w-full mx-4 text-center space-y-3">
+              <p className="text-slate-200 text-sm font-semibold">Map tiles not built</p>
+              <p className="text-slate-500 text-xs">
+                No tile data found for this map. Extract tiles from your local DayZ PBO file to view the satellite map.
+              </p>
+              <button
+                onClick={() => setBuildRequested(s => new Set([...s, activeMap]))}
+                className="w-full bg-lime-600 hover:bg-lime-500 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+              >
+                Build tiles
+              </button>
+            </div>
+          </div>
+        )}
         {downloading && (
           <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950">
             <p className="text-slate-300 text-sm font-medium">Building map tiles…</p>
@@ -820,19 +827,19 @@ export function MapView() {
               {loadingProgress > 0 ? `${Math.round(loadingProgress * 100)}%` : 'Starting…'}
             </p>
             <p className="text-slate-600 text-xs max-w-xs text-center">
-              Building the overview tile first — higher resolution tiles will continue loading in the background.
+              {loadingStatus || 'Starting…'}
             </p>
           </div>
         )}
         {downloadError && (
           <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-slate-950">
             <div className="bg-red-950/40 border border-red-800/50 rounded-xl p-5 max-w-md mx-4 text-center space-y-2">
-              <p className="text-red-400 text-sm font-medium">Map tiles unavailable</p>
+              <p className="text-red-400 text-sm font-medium">Tile build failed</p>
               <p className="text-slate-400 text-xs">{downloadError}</p>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => { setDownloadError(null); }}
+                onClick={() => { setDownloadError(null); setRetryCount(c => c + 1); }}
                 className="px-4 py-1.5 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
               >
                 Retry
@@ -928,21 +935,6 @@ export function MapView() {
         </div>
       )}
 
-      {/* Tile extraction worker */}
-      {extractionWorker && (
-        <div className="absolute bottom-4 left-4 z-[1000] bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 w-52 pointer-events-none">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-slate-300">Building zoom levels…</span>
-            <span className="text-xs text-slate-500">{extractionWorker.level + 1}/6</span>
-          </div>
-          <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-lime-500 rounded-full transition-[width] duration-300"
-              style={{ width: `${Math.round(extractionWorker.progress * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto">
         <TierLegend />

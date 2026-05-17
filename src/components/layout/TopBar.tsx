@@ -112,6 +112,8 @@ export function TopBar({
   const setShowCommunityMapsModal = useUiStore(s => s.setShowCommunityMapsModal);
   const mapImagePaths = useUiStore(s => s.mapImagePaths);
 
+
+
   const TERRAIN_KEYWORDS: Record<string, string[]> = {
     namalsk:   ['namalsk'],
     chernarus: ['chernarus'],
@@ -132,6 +134,7 @@ export function TopBar({
   }, [allMissions]);
 
   const MAPS = useMemo(() => {
+    const builtinIds = new Set(BUILTIN_MAPS.map(m => m.id));
     const missionName = mission?.missionName.toLowerCase() ?? null;
     const builtins = missionName
       ? BUILTIN_MAPS.filter(m =>
@@ -141,10 +144,11 @@ export function TopBar({
           !!mapImagePaths[m.id]
         )
       : BUILTIN_MAPS;
-    const builtinsWithoutCustom = builtins.filter(m => m.id !== 'custom');
     return [
-      ...builtinsWithoutCustom,
-      ...communityMaps.map(cm => ({ id: cm.id, label: cm.label })),
+      ...builtins.filter(m => m.id !== 'custom'),
+      ...communityMaps
+        .filter(cm => !builtinIds.has(cm.id))
+        .map(cm => ({ id: cm.id, label: cm.label })),
       { id: 'custom', label: 'Custom' },
     ];
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -398,92 +402,96 @@ export function TopBar({
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {saveStatus === 'saving' && (
-            <span className="flex items-center gap-1.5 text-slate-400 text-xs">
-              <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
-              Saving…
-            </span>
-          )}
-          {saveStatus === 'success' && (
-            <span className="flex items-center gap-1.5 text-green-400 text-xs">
-              <span className="w-2 h-2 rounded-full bg-green-400" />
-              Saved
-            </span>
-          )}
+          {serverRootPath && (
+            <>
+              {saveStatus === 'saving' && (
+                <span className="flex items-center gap-1.5 text-slate-400 text-xs">
+                  <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
+                  Saving…
+                </span>
+              )}
+              {saveStatus === 'success' && (
+                <span className="flex items-center gap-1.5 text-green-400 text-xs">
+                  <span className="w-2 h-2 rounded-full bg-green-400" />
+                  Saved
+                </span>
+              )}
 
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={typeHistory.length > 0 ? undoType : mapGroupProtoHistory.length > 0 ? undoMapGroupProto : zoneRemoveHistory.length > 0 ? undoZoneRemove : undoLastSave}
-              disabled={typeHistory.length === 0 && mapGroupProtoHistory.length === 0 && zoneRemoveHistory.length === 0 && saveCheckpoints.length === 0}
-              title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : mapGroupProtoHistory.length > 0 ? `Undo last building change (${mapGroupProtoHistory.length} step${mapGroupProtoHistory.length !== 1 ? 's' : ''})` : zoneRemoveHistory.length > 0 ? `Undo zone deletion "${zoneRemoveHistory[0].usage}"` : 'Revert most recent saved change set'}
-              className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 disabled:opacity-50 flex items-center gap-1.5"
-            >
-              <span aria-hidden="true">↩</span>
-              Undo
-            </button>
-            <button
-              onClick={() => setShowSaveReview(true)}
-              disabled={savingPending || !hasDirty}
-              title={hasDirty ? `Unsaved changes:\n${pendingItems.map(i => `  • ${i.detail}`).join('\n')}` : 'Nothing to save'}
-              className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 ${hasDirty ? 'bg-lime-500 hover:bg-lime-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-default'}`}
-            >
-              {hasDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
-              {savingPending ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-
-          <div className="w-px h-4 bg-slate-700 mx-1" />
-
-          <div ref={mapDropdownRef} className="relative">
-            <button
-              onClick={() => setShowMapDropdown(v => !v)}
-              className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${showMapDropdown ? 'bg-lime-600 text-white' : 'bg-lime-500 text-white'}`}
-            >
-              {MAPS.find(m => m.id === activeMap)?.label ?? activeMap}
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showMapDropdown && (
-              <div className="absolute top-full right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px] py-1">
-                {MAPS.map(m => (
-                  <div key={m.id}>
-                    {m.id === 'custom' && <div className="my-1 border-t border-slate-700" />}
-                    <button
-                      onClick={() => {
-                        setShowMapDropdown(false);
-                        if (m.id === 'custom') {
-                          if (activeTab === 'settings') {
-                            setSettingsScrollTarget('community-maps');
-                          } else {
-                            setShowCommunityMapsModal(true);
-                          }
-                        } else {
-                          setActiveMap(m.id);
-                        }
-                      }}
-                      className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
-                        activeMap === m.id
-                          ? 'text-lime-400 bg-slate-800'
-                          : 'text-slate-200 hover:bg-slate-800'
-                      }`}
-                    >
-                      {activeMap === m.id && (
-                        <svg className="w-3 h-3 text-lime-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                        </svg>
-                      )}
-                      {activeMap !== m.id && <span className="w-3 flex-shrink-0" />}
-                      {m.label}
-                    </button>
-                  </div>
-                ))}
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={typeHistory.length > 0 ? undoType : mapGroupProtoHistory.length > 0 ? undoMapGroupProto : zoneRemoveHistory.length > 0 ? undoZoneRemove : undoLastSave}
+                  disabled={typeHistory.length === 0 && mapGroupProtoHistory.length === 0 && zoneRemoveHistory.length === 0 && saveCheckpoints.length === 0}
+                  title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : mapGroupProtoHistory.length > 0 ? `Undo last building change (${mapGroupProtoHistory.length} step${mapGroupProtoHistory.length !== 1 ? 's' : ''})` : zoneRemoveHistory.length > 0 ? `Undo zone deletion "${zoneRemoveHistory[0].usage}"` : 'Revert most recent saved change set'}
+                  className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <span aria-hidden="true">↩</span>
+                  Undo
+                </button>
+                <button
+                  onClick={() => setShowSaveReview(true)}
+                  disabled={savingPending || !hasDirty}
+                  title={hasDirty ? `Unsaved changes:\n${pendingItems.map(i => `  • ${i.detail}`).join('\n')}` : 'Nothing to save'}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 ${hasDirty ? 'bg-lime-500 hover:bg-lime-600 text-white' : 'bg-slate-800 border border-slate-700 text-slate-500 cursor-default'}`}
+                >
+                  {hasDirty && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+                  {savingPending ? 'Saving…' : 'Save'}
+                </button>
               </div>
-            )}
-          </div>
 
-          <div className="w-px h-4 bg-slate-700 mx-1" />
+              <div className="w-px h-4 bg-slate-700 mx-1" />
+
+              <div ref={mapDropdownRef} className="relative">
+                <button
+                  onClick={() => setShowMapDropdown(v => !v)}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${showMapDropdown ? 'bg-lime-600 text-white' : 'bg-lime-500 text-white'}`}
+                >
+                  {MAPS.find(m => m.id === activeMap)?.label ?? activeMap}
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {showMapDropdown && (
+                  <div className="absolute top-full right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px] py-1">
+                    {MAPS.map(m => (
+                      <div key={m.id}>
+                        {m.id === 'custom' && <div className="my-1 border-t border-slate-700" />}
+                        <button
+                          onClick={() => {
+                            setShowMapDropdown(false);
+                            if (m.id === 'custom') {
+                              if (activeTab === 'settings') {
+                                setSettingsScrollTarget('community-maps');
+                              } else {
+                                setShowCommunityMapsModal(true);
+                              }
+                            } else {
+                              setActiveMap(m.id);
+                            }
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                            activeMap === m.id
+                              ? 'text-lime-400 bg-slate-800'
+                              : 'text-slate-200 hover:bg-slate-800'
+                          }`}
+                        >
+                          {activeMap === m.id && (
+                            <svg className="w-3 h-3 text-lime-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                            </svg>
+                          )}
+                          {activeMap !== m.id && <span className="w-3 flex-shrink-0" />}
+                          {m.label}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="w-px h-4 bg-slate-700 mx-1" />
+            </>
+          )}
 
           <button
             onClick={() => setShowAbout(true)}
@@ -609,7 +617,7 @@ export function TopBar({
 
       {/* Tab row */}
       <div className="flex gap-1 px-4 pb-2">
-        {TABS.map(tab => (
+        {serverRootPath && TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => handleTabClick(tab.id)}

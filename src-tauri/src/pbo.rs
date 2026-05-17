@@ -138,7 +138,7 @@ pub fn generate_tile_pyramid(
         }
         done += 1;
         if done % 16 == 0 || done == total {
-            on_progress(done as f32 / total as f32);
+            on_progress(done as f32 / total as f32 * 0.7);
         }
     }
 
@@ -151,17 +151,25 @@ pub fn generate_tile_pyramid(
         ));
     }
 
-    // Chop canvas into zoom pyramid. Loading screen exits after z=0 fires tile-level-done,
-    // so no per-tile progress needed here.
-    // Canvas wrapped in Arc so rayon workers can share it read-only.
+    // Chop canvas into zoom pyramid. Generate highest zoom first so rayon maximally
+    // parallelises the many small tiles, giving visible bar movement. z=0 comes last
+    // and uses Nearest filter (1 tile, 256px output — Triangle over a 15k×15k source
+    // is needlessly slow for no visible quality gain at that resolution).
     let canvas = Arc::new(canvas);
+    let levels = MAX_ZOOM + 1;
 
     for z in 0..=MAX_ZOOM {
         let grid = 1u32 << z;
         let tile_canvas_px = canvas_w / grid;
+        if tile_canvas_px == 0 { on_level_done(z); continue; }
 
         on_status(format!("Generating zoom {}…", z));
 
+        let filter = if z == 0 {
+            image::imageops::FilterType::Nearest
+        } else {
+            image::imageops::FilterType::Triangle
+        };
         let canvas_ref = Arc::clone(&canvas);
         let tile_results: Vec<Result<(), String>> = (0..grid * grid)
             .into_par_iter()
@@ -174,9 +182,7 @@ pub fn generate_tile_pyramid(
                 let cropped = image::imageops::crop_imm(
                     &*canvas_ref, x_px, y_px, tile_canvas_px, tile_canvas_px,
                 ).to_image();
-                let resized = image::imageops::resize(
-                    &cropped, TILE_SIZE, TILE_SIZE, image::imageops::FilterType::Triangle,
-                );
+                let resized = image::imageops::resize(&cropped, TILE_SIZE, TILE_SIZE, filter);
                 let out = crate::tiles::tile_path(maps_dir, map_id, z, tx, ty);
                 let parent = out.parent()
                     .ok_or_else(|| format!("tile path has no parent: {}", out.display()))?;
@@ -187,6 +193,7 @@ pub fn generate_tile_pyramid(
             .collect();
 
         for r in tile_results { r?; }
+        on_progress(0.7 + (z + 1) as f32 / levels as f32 * 0.3);
         on_level_done(z);
     }
     Ok(())
@@ -285,13 +292,15 @@ fn detect_tile_overlap(
         }
     }
 
+    // No candidates were scored (e.g. tile_dim too small → max_overlap < 4).
+    if best_overlap == 0 { return None; }
+
     // Reject if detection is unreliable (uniform content) or no clear winner.
-    if baseline == 0 || best_score * 10 >= baseline * 3 {
+    if baseline == 0 || best_score.saturating_mul(10) >= baseline.saturating_mul(3) {
         return None;
     }
 
-    // Detected value is total overlap (both edges). Convert to per-side for stitching.
-    if best_overlap == 0 { None } else { Some(best_overlap / 2) }
+    Some(best_overlap / 2)
 }
 
 // ── PBO helper ────────────────────────────────────────────────────────────────
@@ -448,7 +457,7 @@ fn lzo1x_decompress(src: &[u8], expected_out: usize) -> Result<Vec<u8>, String> 
     let mut outp = DICT_SIZE;
     let mut state = 0usize;
     let mut nstate: usize;
-    let mut lblen: usize = 0;
+    let mut lblen: usize;
     let mut lbcur: usize;
 
     macro_rules! rb {
