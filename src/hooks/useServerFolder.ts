@@ -350,6 +350,7 @@ export function useServerFolder() {
   const setGameplay          = useServerStore(s => s.setGameplay);
   const setLimitsDefinition  = useServerStore(s => s.setLimitsDefinition);
   const setLimitsDefinitionUser = useServerStore(s => s.setLimitsDefinitionUser);
+  const loadTerritoryBitmaps = useServerStore(s => s.loadTerritoryBitmaps);
   const setLoading          = useUiStore(s => s.setLoading);
   const setLoadError        = useUiStore(s => s.setLoadError);
   const setLoadWarnings     = useUiStore(s => s.setLoadWarnings);
@@ -483,13 +484,18 @@ export function useServerFolder() {
         catch { /* optional — silently skip */ }
       }
 
+      setPaths({ ceToolXmlPath: m.ceToolXmlPath ?? null, ceToolLayersDir: m.ceToolLayersDir ?? null });
+      if (m.ceToolXmlPath) {
+        loadTerritoryBitmaps().catch(() => { /* optional — silently skip */ });
+      }
+
       if (m.mapImagePath) setMapImagePath(activeMap, convertFileSrc(m.mapImagePath));
     } catch (err) {
       if (err instanceof Error) setLoadError(`error:${err.message}`);
     } finally {
       setLoading(false);
     }
-  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser]);
+  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps]);
 
   // Keep ref current every render so the effect below always has the latest version.
   selectMissionRef.current = selectMission;

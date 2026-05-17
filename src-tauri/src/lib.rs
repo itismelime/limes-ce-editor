@@ -1,5 +1,6 @@
 pub mod tiles;
 pub mod pbo;
+pub mod bitmap;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
@@ -594,6 +595,9 @@ pub fn run() {
             download_mpmission,
             find_map_pbo,
             discover_installed_maps,
+            bitmap::read_tga_layer,
+            bitmap::write_tga_layer,
+            bitmap::compile_areaflags,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

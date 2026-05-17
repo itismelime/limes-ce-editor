@@ -1,4 +1,4 @@
-import { readDir, readTextFile, readFile as readBinaryFileNative, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
+import { readDir, readTextFile, readFile as readBinaryFileNative, writeFile as writeBinaryFileNative, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 
 const TARGET_FILES = new Set([
@@ -40,6 +40,8 @@ export interface MissionFiles {
   limitsDefinitionPath: string | null;
   limitsDefinitionUserPath: string | null;
   mapImagePath: string | null;
+  ceToolXmlPath: string | null;
+  ceToolLayersDir: string | null;
 }
 
 const MAP_HINTS: Record<string, string[]> = {
@@ -240,6 +242,26 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
     scored.sort((a, b) => b.score - a.score);
     const mapImagePath = scored[0]?.img ?? null;
 
+    // Find CETool project XML in already-scanned results for this mission
+    const missionPrefix = missionPath + '/';
+    const ceToolXml = results
+      .filter(r => r.isXml && normalizePath(r.path).startsWith(missionPrefix))
+      .filter(r => {
+        const parts = normalizePath(r.path).toLowerCase().split('/');
+        return parts.some(seg => CETOOL_DIR_RE.test(seg));
+      })
+      .sort((a, b) => {
+        // prefer files named after the mission (e.g. chernarusplus.xml)
+        const missionLower = missionName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const aMatch = normalizePath(a.path).toLowerCase().includes(missionLower) ? 1 : 0;
+        const bMatch = normalizePath(b.path).toLowerCase().includes(missionLower) ? 1 : 0;
+        return bMatch - aMatch;
+      })[0]?.path ?? null;
+
+    const ceToolLayersDir = ceToolXml
+      ? normalizePath(ceToolXml).split('/').slice(0, -1).join('/') + '/layers'
+      : null;
+
     return {
       missionName,
       missionPath,
@@ -257,6 +279,8 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
       limitsDefinitionPath:     files['cfglimitsdefinition.xml']     ?? null,
       limitsDefinitionUserPath: files['cfglimitsdefinitionuser.xml'] ?? null,
       mapImagePath,
+      ceToolXmlPath: ceToolXml,
+      ceToolLayersDir,
     };
   });
 }
@@ -325,6 +349,10 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
 
 export async function writeFile(path: string, text: string): Promise<void> {
   return writeTextFile(path, text);
+}
+
+export async function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
+  return writeBinaryFileNative(path, data);
 }
 
 export async function createDir(path: string): Promise<void> {

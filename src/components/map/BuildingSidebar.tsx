@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
+import { sampleTierAtPos, sampleUsageAtPos, hasCeToolBitmaps } from '../../lib/tierZoneResolver';
 import { BuildingPopup } from './BuildingPopup';
 
 export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number) => void }) {
@@ -17,14 +18,33 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(sidebarWidth);
 
+  useEffect(() => {
+    onWidthChange?.(expanded ? sidebarWidth : collapsedWidth);
+  }, [expanded, sidebarWidth]);
+
+  const tierZonesLoaded = useUiStore(s => s.tierZonesLoaded);
+  const selectedBuildingPos = useUiStore(s => s.selectedBuildingPos);
+  const territoryBitmaps = useServerStore(s => s.territoryBitmaps);
+  const useZoneData = tierZonesLoaded || (territoryBitmaps.size > 0 && hasCeToolBitmaps());
+
   const building = useMemo(() => {
     if (!selectedBuildingType) return null;
     return buildingInstances.find(b => b.typeName.trim().toLowerCase() === selectedBuildingType.toLowerCase()) || null;
   }, [selectedBuildingType, buildingInstances]);
 
-  useEffect(() => {
-    onWidthChange?.(expanded ? sidebarWidth : collapsedWidth);
-  }, [expanded, sidebarWidth]);
+  const samplePos = selectedBuildingPos ?? (building ? { x: building.x, z: building.z } : null);
+
+  const zoneTier = useMemo(() => {
+    if (!samplePos || !useZoneData) return null;
+    const t = sampleTierAtPos(samplePos.x, samplePos.z);
+    return t !== 'unknown' ? t : null;
+  }, [samplePos, useZoneData, territoryBitmaps]);
+
+  const zoneUsage = useMemo(() => {
+    if (!samplePos || !useZoneData) return building?.usages[0] ?? null;
+    return sampleUsageAtPos(samplePos.x, samplePos.z) ?? building?.usages[0] ?? null;
+  }, [samplePos, useZoneData, territoryBitmaps, building]);
+
 
   useEffect(() => {
     if (selectedBuildingType) {
@@ -85,10 +105,10 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
 
   return (
     <div
-      className={`absolute left-0 top-0 h-full z-[500] bg-slate-900 border-r border-slate-700 flex flex-col overflow-hidden ${isResizing ? '' : 'transition-[width] duration-150 ease-out'}`}
+      className={`absolute left-0 top-0 h-full z-[500] bg-slate-900 border-r border-slate-700 flex flex-col overflow-hidden pointer-events-none ${isResizing ? '' : 'transition-[width] duration-150 ease-out'}`}
       style={{ width: expanded ? sidebarWidth : collapsedWidth }}
     >
-      <div className={`${expanded ? 'px-4 py-3' : 'px-2 py-2'} border-b border-slate-700 flex items-start ${expanded ? 'justify-between' : 'justify-center'} gap-2 flex-shrink-0`}>
+      <div className={`pointer-events-auto ${expanded ? 'px-4 py-3' : 'px-2 py-2'} border-b border-slate-700 flex items-start ${expanded ? 'justify-between' : 'justify-center'} gap-2 flex-shrink-0`}>
         {expanded && (
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-100 truncate">Building Editor</h2>
@@ -106,14 +126,14 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
         </button>
       </div>
 
-      <div className="flex-1 min-h-0">
+      <div className="pointer-events-auto flex-1 min-h-0">
         {expanded && building && (
           <BuildingPopup
             building={building}
             tiers={building.tiers.length > 0 ? building.tiers : ['unknown']}
-            zoneUsage={building.usages[0] ?? null}
+            zoneUsage={zoneUsage}
+            zoneTier={zoneTier}
             protoTiers={building.tiers}
-            inferredTier={null}
             embedded
           />
         )}
@@ -126,7 +146,7 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
 
       <div
         onMouseDown={startResize}
-        className="absolute top-0 right-0 h-full w-2 cursor-col-resize group"
+        className="pointer-events-auto absolute top-0 right-0 h-full w-2 cursor-col-resize group"
         title="Drag to resize sidebar"
       >
         <div className="absolute top-1/2 -translate-y-1/2 right-0 w-[2px] h-14 bg-slate-600/70 group-hover:bg-slate-400" />

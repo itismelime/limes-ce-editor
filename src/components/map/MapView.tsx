@@ -13,7 +13,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
-import { getUsageColor } from '../../types/map';
+import { getUsageColor, TIER_COLORS } from '../../types/map';
 import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
 // MAX_PYRAMID_Z = 5 (matching tiles.rs MAX_ZOOM)
 import { TierLegend } from './TierLegend';
@@ -187,6 +187,8 @@ function ZoomControlOffset({ sidebarWidth }: { sidebarWidth: number }) {
   return null;
 }
 
+
+
 function MapClickDeselect() {
   const setSelectedBuilding = useUiStore(s => s.setSelectedBuilding);
   useMapEvent('click', () => setSelectedBuilding(null));
@@ -199,17 +201,17 @@ function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
     const boundsExpr = mapBounds(mapConfig) as L.LatLngBoundsLiteral;
     const bounds = L.latLngBounds(boundsExpr);
 
+    const padded = bounds.pad(0.10);
     const syncViewBounds = () => {
       const minZoom = map.getBoundsZoom(bounds, false);
       map.setMinZoom(minZoom - 3);
-      map.setMaxBounds(bounds);
-      map.panInsideBounds(bounds, { animate: false });
+      map.setMaxBounds(padded);
       if (map.getZoom() < minZoom - 1.5) {
         map.setZoom(minZoom - 1.5);
       }
     };
 
-    map.fitBounds(bounds, { animate: false });
+    map.fitBounds(bounds, { animate: false, paddingTopLeft: [48, 0] });
     syncViewBounds();
     map.on('resize', syncViewBounds);
 
@@ -493,6 +495,239 @@ function CeToolZoneOverlays({ mapConfig, show }: { mapConfig: MapConfig; show: b
   );
 }
 
+function TerritoryBitmapOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpression; show: boolean }) {
+  const territoryBitmaps = useServerStore(s => s.territoryBitmaps);
+  const territoryBitmapSize = useServerStore(s => s.territoryBitmapSize);
+  const ceToolLayers = useServerStore(s => s.ceToolLayers);
+  const visibleLayers = useUiStore(s => s.territoryVisibleLayers);
+
+  const overlays = useMemo(() => {
+    if (!show || !territoryBitmapSize || territoryBitmaps.size === 0 || visibleLayers.size === 0) return [];
+    const { width, height } = territoryBitmapSize;
+    const SCALE = 512 / Math.max(width, height);
+    const outW = Math.round(width * SCALE);
+    const outH = Math.round(height * SCALE);
+    const step = Math.round(1 / SCALE);
+    const results: { key: string; url: string }[] = [];
+
+    for (const [layerName, pixels] of territoryBitmaps) {
+      if (!visibleLayers.has(layerName)) continue;
+      const meta = ceToolLayers.find(l => l.name === layerName);
+      const usageName = meta?.usageName ?? layerName.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
+      const rgb = hexToRgb(TIER_COLORS[usageName] ?? getUsageColor(usageName)) ?? { r: 255, g: 255, b: 255 };
+      const { r, g, b } = rgb;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+
+      const imgData = ctx.createImageData(outW, outH);
+      for (let y = 0; y < outH; y++) {
+        for (let x = 0; x < outW; x++) {
+          const srcX = Math.min(x * step, width - 1);
+          const srcY = Math.min(y * step, height - 1);
+          const active = pixels[(srcY * width + srcX) * 4] > 127;
+          const i = (y * outW + x) * 4;
+          imgData.data[i]     = active ? r : 0;
+          imgData.data[i + 1] = active ? g : 0;
+          imgData.data[i + 2] = active ? b : 0;
+          imgData.data[i + 3] = active ? 160 : 0;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      results.push({ key: layerName, url: canvas.toDataURL() });
+    }
+    return results;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, territoryBitmaps, territoryBitmapSize, ceToolLayers, visibleLayers]);
+
+  if (!show) return null;
+  return (
+    <>
+      {overlays.map(o => (
+        <ImageOverlay key={o.key} url={o.url} bounds={bounds} opacity={1} />
+      ))}
+    </>
+  );
+}
+
+function TerritoryPainter({ mapConfig, bitmapSize }: { mapConfig: MapConfig; bitmapSize: { width: number; height: number } }) {
+  const map = useMap();
+  const paintLayer      = useUiStore(s => s.territoryPaintLayer);
+  const brushRadius     = useUiStore(s => s.territoryPaintBrushRadius);
+  const erase           = useUiStore(s => s.territoryPaintErase);
+  const ceToolLayers    = useServerStore(s => s.ceToolLayers);
+  const territoryBitmaps = useServerStore(s => s.territoryBitmaps);
+  const commitTerritoryPaint = useServerStore(s => s.commitTerritoryPaint);
+  const undoTerritoryPaint = useServerStore(s => s.undoTerritoryPaint);
+
+  // Refs to avoid stale closures in useMapEvent handlers (react-leaflet only re-registers on map change)
+  const paintLayerRef      = useRef(paintLayer);
+  const brushRadiusRef     = useRef(brushRadius);
+  const eraseRef           = useRef(erase);
+  const bitmapsRef         = useRef(territoryBitmaps);
+  const ceToolLayersRef    = useRef(ceToolLayers);
+  useEffect(() => { paintLayerRef.current = paintLayer; }, [paintLayer]);
+  useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
+  useEffect(() => { eraseRef.current = erase; }, [erase]);
+  useEffect(() => { bitmapsRef.current = territoryBitmaps; }, [territoryBitmaps]);
+  useEffect(() => { ceToolLayersRef.current = ceToolLayers; }, [ceToolLayers]);
+
+  const paintingRef      = useRef(false);
+  const workingPixelsRef = useRef<Uint8ClampedArray | null>(null);
+  const strokeCanvasRef  = useRef<HTMLCanvasElement | null>(null);
+  const cursorCanvasRef  = useRef<HTMLCanvasElement | null>(null);
+
+  // Inject preview canvases directly into the map container
+  useEffect(() => {
+    const container = map.getContainer();
+    const make = (z: string) => {
+      const c = document.createElement('canvas');
+      c.style.cssText = `position:absolute;inset:0;pointer-events:none;z-index:${z}`;
+      c.width = container.clientWidth;
+      c.height = container.clientHeight;
+      container.appendChild(c);
+      return c;
+    };
+    const sc = make('450');
+    const cc = make('451');
+    strokeCanvasRef.current = sc;
+    cursorCanvasRef.current = cc;
+    const ro = new ResizeObserver(() => {
+      sc.width = container.clientWidth; sc.height = container.clientHeight;
+      cc.width = container.clientWidth; cc.height = container.clientHeight;
+    });
+    ro.observe(container);
+    return () => { ro.disconnect(); sc.remove(); cc.remove(); };
+  }, [map]);
+
+  // Disable map drag + hide cursor while in paint mode
+  useEffect(() => {
+    map.dragging.disable();
+    map.getContainer().style.cursor = 'none';
+    return () => { map.dragging.enable(); map.getContainer().style.cursor = ''; };
+  }, [map]);
+
+  // Ctrl+Z undo
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); undoTerritoryPaint(); }
+    };
+    document.addEventListener('keydown', h, { capture: true });
+    return () => document.removeEventListener('keydown', h, { capture: true });
+  }, [undoTerritoryPaint]);
+
+  function getScreenRadius(latlng: L.LatLng): number {
+    const r = brushRadiusRef.current;
+    const cp = map.latLngToContainerPoint(latlng);
+    const ep = map.latLngToContainerPoint(L.latLng(latlng.lat, latlng.lng + (r / bitmapSize.width) * mapConfig.imageWidth));
+    return Math.max(2, Math.abs(ep.x - cp.x));
+  }
+
+  function getLayerRgb(): { r: number; g: number; b: number } {
+    const layer = paintLayerRef.current;
+    if (!layer) return { r: 255, g: 255, b: 255 };
+    const meta = ceToolLayersRef.current.find(l => l.name === layer);
+    const usage = meta?.usageName ?? layer.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
+    return hexToRgb(getUsageColor(usage)) ?? { r: 255, g: 255, b: 255 };
+  }
+
+  function drawCursor(latlng: L.LatLng) {
+    const cc = cursorCanvasRef.current;
+    if (!cc) return;
+    const ctx = cc.getContext('2d')!;
+    ctx.clearRect(0, 0, cc.width, cc.height);
+    const pt = map.latLngToContainerPoint(latlng);
+    const sr = getScreenRadius(latlng);
+    const color = eraseRef.current ? 'rgba(255,100,100,0.9)' : 'rgba(255,255,255,0.9)';
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, sr, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 2, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawStroke(latlng: L.LatLng) {
+    const sc = strokeCanvasRef.current;
+    if (!sc) return;
+    const ctx = sc.getContext('2d')!;
+    const pt = map.latLngToContainerPoint(latlng);
+    const sr = getScreenRadius(latlng);
+    ctx.globalCompositeOperation = 'source-over';
+    if (eraseRef.current) {
+      ctx.fillStyle = 'rgba(220,50,50,0.45)';
+    } else {
+      const { r, g, b } = getLayerRgb();
+      ctx.fillStyle = `rgba(${r},${g},${b},0.5)`;
+    }
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, sr, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function latlngToBitmapPx(latlng: L.LatLng) {
+    return {
+      bx: Math.round(latlng.lng / mapConfig.imageWidth * bitmapSize.width),
+      by: Math.round(-latlng.lat / mapConfig.imageHeight * bitmapSize.height),
+    };
+  }
+
+  function paintCircle(pixels: Uint8ClampedArray, bx: number, by: number) {
+    const { width, height } = bitmapSize;
+    const r = brushRadiusRef.current;
+    const val = eraseRef.current ? 0 : 255;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const px = bx + dx; const py = by + dy;
+        if (px < 0 || py < 0 || px >= width || py >= height) continue;
+        const idx = (py * width + px) * 4;
+        pixels[idx] = val; pixels[idx + 1] = val; pixels[idx + 2] = val; pixels[idx + 3] = val > 0 ? 255 : 0;
+      }
+    }
+  }
+
+  useMapEvent('mousedown', (e) => {
+    const layer = paintLayerRef.current;
+    if (!layer) return;
+    const src = bitmapsRef.current.get(layer);
+    if (!src) return;
+    paintingRef.current = true;
+    workingPixelsRef.current = src.slice();
+    const sc = strokeCanvasRef.current;
+    if (sc) sc.getContext('2d')?.clearRect(0, 0, sc.width, sc.height);
+    const { bx, by } = latlngToBitmapPx(e.latlng);
+    paintCircle(workingPixelsRef.current, bx, by);
+    drawStroke(e.latlng);
+    drawCursor(e.latlng);
+  });
+
+  useMapEvent('mousemove', (e) => {
+    drawCursor(e.latlng);
+    if (!paintingRef.current || !workingPixelsRef.current) return;
+    const { bx, by } = latlngToBitmapPx(e.latlng);
+    paintCircle(workingPixelsRef.current, bx, by);
+    drawStroke(e.latlng);
+  });
+
+  useMapEvent('mouseup', () => {
+    if (!paintingRef.current || !workingPixelsRef.current) return;
+    const layer = paintLayerRef.current;
+    if (!layer) return;
+    paintingRef.current = false;
+    commitTerritoryPaint(layer, workingPixelsRef.current);
+    workingPixelsRef.current = null;
+    const sc = strokeCanvasRef.current;
+    if (sc) sc.getContext('2d')?.clearRect(0, 0, sc.width, sc.height);
+  });
+
+  useMapEvent('mouseout', () => {
+    const cc = cursorCanvasRef.current;
+    if (cc) cc.getContext('2d')?.clearRect(0, 0, cc.width, cc.height);
+  });
+
+  return null;
+}
+
 function PlayerSpawnMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const playerSpawnData  = useServerStore(s => s.playerSpawnData);
   const showPlayerSpawns = useUiStore(s => s.showPlayerSpawns);
@@ -581,7 +816,23 @@ export function MapView() {
   const buildingInstances      = useServerStore(s => s.buildingInstances);
   const playerSpawnData        = useServerStore(s => s.playerSpawnData);
   const ceToolProject          = useServerStore(s => s.ceToolProject);
+  const ceToolLayers           = useServerStore(s => s.ceToolLayers);
+  const territoryBitmaps       = useServerStore(s => s.territoryBitmaps);
+  const territoryBitmapSize    = useServerStore(s => s.territoryBitmapSize);
   const mission                = useServerStore(s => s.mission);
+  const showTerritoryOverlay   = useUiStore(s => s.showTerritoryOverlay);
+  const setShowTerritoryOverlay = useUiStore(s => s.setShowTerritoryOverlay);
+  const territoryPaintMode     = useUiStore(s => s.territoryPaintMode);
+  const setTerritoryPaintMode  = useUiStore(s => s.setTerritoryPaintMode);
+  const territoryPaintLayer    = useUiStore(s => s.territoryPaintLayer);
+  const setTerritoryPaintLayer = useUiStore(s => s.setTerritoryPaintLayer);
+  const territoryPaintBrushRadius = useUiStore(s => s.territoryPaintBrushRadius);
+  const setTerritoryPaintBrushRadius = useUiStore(s => s.setTerritoryPaintBrushRadius);
+  const territoryPaintErase    = useUiStore(s => s.territoryPaintErase);
+  const setTerritoryPaintErase = useUiStore(s => s.setTerritoryPaintErase);
+  const territoryVisibleLayers = useUiStore(s => s.territoryVisibleLayers);
+  const toggleTerritoryVisibleLayer = useUiStore(s => s.toggleTerritoryVisibleLayer);
+  const paintableLayers = useMemo(() => ceToolLayers.filter(l => l.isPaintable), [ceToolLayers]);
   const [overlaysReady, setOverlaysReady] = useState(false);
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(44);
@@ -669,7 +920,7 @@ export function MapView() {
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
-  const [showUsageZones, setShowUsageZones] = useState(false);
+  const [showUsageZones] = useState(false);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
@@ -866,7 +1117,7 @@ export function MapView() {
           crs={CRS.Simple}
           preferCanvas
           bounds={bounds}
-          maxBoundsViscosity={1.0}
+          maxBoundsViscosity={0.5}
           maxZoom={maxLeafletZoom}
           zoomAnimation
           markerZoomAnimation
@@ -880,6 +1131,7 @@ export function MapView() {
           <MapClickDeselect />
           <PopupAutoFlip />
           <ZoomControlOffset sidebarWidth={sidebarWidth} />
+
 
           {/* Tile pyramid for known maps; overview image for custom/fallback */}
           {isKnownMap && tilesBaseDir
@@ -901,6 +1153,10 @@ export function MapView() {
           {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
           {isMapActive && mapHeavyReady && overlaysReady && <UsageLayerOverlays bounds={bounds} show={showUsageZones} />}
           {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
+          {isMapActive && mapHeavyReady && overlaysReady && <TerritoryBitmapOverlays bounds={bounds} show={showTerritoryOverlay} />}
+          {isMapActive && mapHeavyReady && overlaysReady && territoryBitmapSize && territoryPaintMode && (
+            <TerritoryPainter mapConfig={mapConfig} bitmapSize={territoryBitmapSize} />
+          )}
         </MapContainer>
 
         {/* CE Tool not found notice */}
@@ -1046,20 +1302,20 @@ export function MapView() {
             Player Spawns
           </button>
         )}
-        {tierZonesLoaded && getUsageMasks() !== null && (
-          <button
-            onClick={() => setShowUsageZones(v => !v)}
-            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showUsageZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
-          >
-            Usage Zones
-          </button>
-        )}
         {ceToolProject && ceToolProject.territories.length > 0 && (
           <button
             onClick={() => setShowCeZones(v => !v)}
             className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showCeZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
           >
             Spawn Territories
+          </button>
+        )}
+        {paintableLayers.length > 0 && (
+          <button
+            onClick={() => setShowTerritoryOverlay(!showTerritoryOverlay)}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showTerritoryOverlay ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            Territory Zones
           </button>
         )}
         {buildingInstances.length > 0 && (
@@ -1072,6 +1328,74 @@ export function MapView() {
         )}
         </div>
       </div>
+
+      {/* Territory paint toolbar */}
+      {showTerritoryOverlay && paintableLayers.length > 0 && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto">
+          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 shadow-xl">
+            <span className="text-[11px] text-slate-500 whitespace-nowrap">Layer:</span>
+            <div className="flex flex-wrap gap-1 max-w-[480px]">
+              {paintableLayers.map(layer => {
+                const usageName = layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
+                const color = TIER_COLORS[usageName] ?? getUsageColor(usageName);
+                const visible = territoryVisibleLayers.has(layer.name);
+                const isPaintLayer = territoryPaintLayer === layer.name;
+                return (
+                  <button
+                    key={layer.name}
+                    onClick={() => {
+                      toggleTerritoryVisibleLayer(layer.name);
+                      if (!visible) setTerritoryPaintLayer(layer.name);
+                      else if (isPaintLayer) setTerritoryPaintLayer(null);
+                    }}
+                    className={`h-6 px-2 rounded text-[11px] font-medium transition-colors border ${visible ? 'border-transparent text-white' : 'border-slate-600 text-slate-400 hover:border-slate-400'}`}
+                    style={visible ? { backgroundColor: color } : {}}
+                    title={layer.name}
+                  >
+                    {usageName}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="w-px h-4 bg-slate-700 mx-1" />
+            <span className="text-[11px] text-slate-500">Brush:</span>
+            {([15, 30, 60] as const).map(r => (
+              <button
+                key={r}
+                onClick={() => setTerritoryPaintBrushRadius(r)}
+                className={`h-6 w-6 rounded text-[11px] font-medium transition-colors ${territoryPaintBrushRadius === r ? 'bg-lime-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+              >
+                {r === 15 ? 'S' : r === 30 ? 'M' : 'L'}
+              </button>
+            ))}
+            <div className="w-px h-4 bg-slate-700 mx-1" />
+            <button
+              onClick={() => {
+                const activating = !territoryPaintMode || territoryPaintErase;
+                setTerritoryPaintErase(false);
+                setTerritoryPaintMode(activating);
+                if (activating) setShowTerritoryOverlay(true);
+              }}
+              className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${territoryPaintMode && !territoryPaintErase ? 'bg-lime-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+              disabled={!territoryPaintLayer}
+            >
+              Paint
+            </button>
+            <button
+              onClick={() => {
+                const activating = !territoryPaintMode || !territoryPaintErase;
+                setTerritoryPaintErase(true);
+                setTerritoryPaintMode(activating);
+                if (activating) setShowTerritoryOverlay(true);
+              }}
+              className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${territoryPaintMode && territoryPaintErase ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+              disabled={!territoryPaintLayer}
+            >
+              Erase
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="absolute top-4 right-4 z-[1000] flex flex-col items-end gap-2">
         <div className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-400">

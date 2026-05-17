@@ -92,6 +92,10 @@ export function TopBar({
   const revertGameplay = useServerStore(s => s.revertGameplay);
   const revertLimitsDefinition = useServerStore(s => s.revertLimitsDefinition);
   const revertLimitsDefinitionUser = useServerStore(s => s.revertLimitsDefinitionUser);
+  const saveTerritoryBitmaps = useServerStore(s => s.saveTerritoryBitmaps);
+  const revertTerritoryBitmaps = useServerStore(s => s.revertTerritoryBitmaps);
+  const undoTerritoryPaint = useServerStore(s => s.undoTerritoryPaint);
+  const territoryPaintHistory = useServerStore(s => s.territoryPaintHistory);
   const undoType = useServerStore(s => s.undoType);
   const undoMapGroupProto = useServerStore(s => s.undoMapGroupProto);
   const undoZoneRemove = useServerStore(s => s.undoZoneRemove);
@@ -180,7 +184,7 @@ export function TopBar({
     setActiveTab(targetTab);
   };
 
-  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay || dirty.limitsDefinition || dirty.limitsDefinitionUser;
+  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay || dirty.limitsDefinition || dirty.limitsDefinitionUser || dirty.territoryBitmaps;
   const pendingItems: Array<{ id: string; label: string; detail: string; onRevert: () => void }> = [
     ...dirty.typesSources.map(source => ({
       id: `types:${source}`,
@@ -211,6 +215,9 @@ export function TopBar({
       : []),
     ...(dirty.limitsDefinitionUser
       ? [{ id: 'limitsDefinitionUser', label: 'cfglimitsdefinitionuser.xml', detail: 'Usage & value group aliases', onRevert: () => revertLimitsDefinitionUser() }]
+      : []),
+    ...(dirty.territoryBitmaps
+      ? [{ id: 'territoryBitmaps', label: 'territory zones', detail: 'areaflags.map will be recompiled', onRevert: () => revertTerritoryBitmaps() }]
       : []),
   ];
 
@@ -297,6 +304,7 @@ export function TopBar({
       if (dirty.gameplay) await saveGameplay();
       if (dirty.limitsDefinition) await saveLimitsDefinition();
       if (dirty.limitsDefinitionUser) await saveLimitsDefinitionUser();
+      if (dirty.territoryBitmaps) await saveTerritoryBitmaps();
     } finally {
       setSavingPending(false);
     }
@@ -319,6 +327,7 @@ export function TopBar({
     if (dirty.gameplay) revertGameplay();
     if (dirty.limitsDefinition) revertLimitsDefinition();
     if (dirty.limitsDefinitionUser) revertLimitsDefinitionUser();
+    if (dirty.territoryBitmaps) revertTerritoryBitmaps();
   };
 
   return (
@@ -419,9 +428,9 @@ export function TopBar({
 
               <div className="flex items-center gap-1.5">
                 <button
-                  onClick={typeHistory.length > 0 ? undoType : mapGroupProtoHistory.length > 0 ? undoMapGroupProto : zoneRemoveHistory.length > 0 ? undoZoneRemove : undoLastSave}
-                  disabled={typeHistory.length === 0 && mapGroupProtoHistory.length === 0 && zoneRemoveHistory.length === 0 && saveCheckpoints.length === 0}
-                  title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : mapGroupProtoHistory.length > 0 ? `Undo last building change (${mapGroupProtoHistory.length} step${mapGroupProtoHistory.length !== 1 ? 's' : ''})` : zoneRemoveHistory.length > 0 ? `Undo zone deletion "${zoneRemoveHistory[0].usage}"` : 'Revert most recent saved change set'}
+                  onClick={typeHistory.length > 0 ? undoType : mapGroupProtoHistory.length > 0 ? undoMapGroupProto : zoneRemoveHistory.length > 0 ? undoZoneRemove : territoryPaintHistory.length > 0 ? undoTerritoryPaint : undoLastSave}
+                  disabled={typeHistory.length === 0 && mapGroupProtoHistory.length === 0 && zoneRemoveHistory.length === 0 && territoryPaintHistory.length === 0 && saveCheckpoints.length === 0}
+                  title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : mapGroupProtoHistory.length > 0 ? `Undo last building change (${mapGroupProtoHistory.length} step${mapGroupProtoHistory.length !== 1 ? 's' : ''})` : zoneRemoveHistory.length > 0 ? `Undo zone deletion "${zoneRemoveHistory[0].usage}"` : territoryPaintHistory.length > 0 ? `Undo territory paint (${territoryPaintHistory.length} stroke${territoryPaintHistory.length !== 1 ? 's' : ''})` : 'Revert most recent saved change set'}
                   className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 disabled:opacity-50 flex items-center gap-1.5"
                 >
                   <span aria-hidden="true">↩</span>

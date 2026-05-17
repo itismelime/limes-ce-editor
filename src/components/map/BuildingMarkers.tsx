@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { CircleMarker, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { sampleTierAtPos, sampleUsageAtPos } from '../../lib/tierZoneResolver';
+import { sampleTierAtPos, sampleUsageAtPos, hasCeToolBitmaps } from '../../lib/tierZoneResolver';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet } from '../../lib/coordinateTransform';
@@ -70,7 +70,7 @@ const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
       position={latlng}
       icon={buildingMarkerIcon(usageColor, hasUnsavedChanges)}
       eventHandlers={{
-        click: () => setSelectedBuilding(building.typeName),
+        click: () => setSelectedBuilding(building.typeName, { x: building.x, z: building.z }),
       }}
     />
   );
@@ -97,6 +97,8 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const hiddenUsages        = useUiStore(s => s.hiddenUsages);
   const hiddenTiers         = useUiStore(s => s.hiddenTiers);
   const tierZonesLoaded     = useUiStore(s => s.tierZonesLoaded);
+  const territoryBitmaps    = useServerStore(s => s.territoryBitmaps);
+  const useZoneData         = tierZonesLoaded || (territoryBitmaps.size > 0 && hasCeToolBitmaps());
 
   const dirtyTypeAffectedBuildingKeys = useMemo(() => {
     if (!mission || typeHistory.length === 0) return new Set<string>();
@@ -207,9 +209,9 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
     const hiddenUsageSet = new Set(hiddenUsages.map(u => u.trim().toLowerCase()));
 
     return buildingInstances.flatMap(b => {
-      const zoneUsage = tierZonesLoaded ? sampleUsageAtPos(b.x, b.z) : null;
+      const zoneUsage = useZoneData ? sampleUsageAtPos(b.x, b.z) : null;
 
-      if (tierZonesLoaded) {
+      if (useZoneData) {
         const effectiveUsage = zoneUsage ?? 'unknown';
         if (hiddenUsageSet.has(effectiveUsage.toLowerCase())) return [];
       } else {
@@ -223,7 +225,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       if (buildingMinLootmax > 0 && b.lootmax < buildingMinLootmax) return [];
       if (itemFilter !== null && !itemFilter(b)) return [];
 
-      const zoneTier = tierZonesLoaded ? sampleTierAtPos(b.x, b.z) : null;
+      const zoneTier = useZoneData ? sampleTierAtPos(b.x, b.z) : null;
       const protoTiers = TIER_ORDER.filter(t => b.tiers.includes(t));
       const zoneTierArr = zoneTier && zoneTier !== 'unknown' ? [zoneTier] : [];
       const mergedTiers = TIER_ORDER.filter(t => zoneTierArr.includes(t) || protoTiers.includes(t));
@@ -240,7 +242,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const markerUsage = zoneUsage ?? primaryUsage;
       return [{ b, markerKey, primaryUsage, usageColor: getUsageColor(markerUsage), latlng, hasUnsavedChanges }];
     });
-  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, tierZonesLoaded, mapConfig, viewportBounds, dirtyBuildingKeys]);
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, useZoneData, mapConfig, viewportBounds, dirtyBuildingKeys]);
 
   const zoom = map.getZoom();
   const showClusters = zoom <= clusterZoomThreshold;

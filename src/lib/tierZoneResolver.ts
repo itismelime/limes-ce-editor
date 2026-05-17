@@ -29,6 +29,72 @@ interface AreaFlagsData {
 
 let _cfg: AreaFlagsData | null = null;
 
+// CE Tool painted territory bitmaps (primary source)
+interface CeToolBitmapEntry {
+  pixels: Uint8ClampedArray;
+  isTier: boolean;
+  tierName: string | null;
+  usageName: string | null;
+}
+interface CeToolBitmapData {
+  entries: CeToolBitmapEntry[];
+  width: number;
+  height: number;
+  worldSize: number;
+}
+let _ceToolData: CeToolBitmapData | null = null;
+
+export function setCeToolBitmapSource(
+  bitmaps: Map<string, Uint8ClampedArray>,
+  layers: Array<{ name: string; isPaintable: boolean; usageName: string | null }>,
+  bitmapSize: { width: number; height: number },
+  worldSize: number,
+): void {
+  const entries: CeToolBitmapEntry[] = [];
+  for (const layer of layers) {
+    if (!layer.isPaintable) continue;
+    const pixels = bitmaps.get(layer.name);
+    if (!pixels) continue;
+    const tierMatch = layer.name.match(/^valueFlg_Tier(\d+)/i);
+    if (tierMatch) {
+      entries.push({ pixels, isTier: true, tierName: `Tier${tierMatch[1]}`, usageName: null });
+    } else {
+      const usageName = (layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '')) || null;
+      entries.push({ pixels, isTier: false, tierName: null, usageName });
+    }
+  }
+  _ceToolData = entries.length > 0 ? { entries, width: bitmapSize.width, height: bitmapSize.height, worldSize } : null;
+}
+
+export function clearCeToolBitmapSource(): void {
+  _ceToolData = null;
+}
+
+function sampleCeToolPixel(x: number, z: number): { tierName: string | null; usageName: string | null } | null {
+  if (!_ceToolData) return null;
+  const { entries, width, height, worldSize } = _ceToolData;
+  if (x < 0 || x >= worldSize || z < 0 || z >= worldSize) return null;
+  const bx = Math.min(Math.floor(x / worldSize * width), width - 1);
+  const by = Math.min(Math.floor((1 - z / worldSize) * height), height - 1);
+  const idx = (by * width + bx) * 4;
+
+  // Check highest-numbered tiers first
+  const tierEntries = entries.filter(e => e.isTier && e.tierName);
+  tierEntries.sort((a, b) => {
+    const na = parseInt(a.tierName!.replace(/\D/g, ''), 10);
+    const nb = parseInt(b.tierName!.replace(/\D/g, ''), 10);
+    return nb - na; // highest first
+  });
+  for (const e of tierEntries) {
+    if (e.pixels[idx] > 127) return { tierName: e.tierName, usageName: null };
+  }
+
+  for (const e of entries) {
+    if (!e.isTier && e.pixels[idx] > 127) return { tierName: null, usageName: e.usageName };
+  }
+  return null;
+}
+
 export function loadAreaFlags(raw: Uint8Array): void {
   const view   = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
   const gridW  = view.getUint32(0, true);
@@ -330,14 +396,22 @@ function sampleLayerUsage(x: number, z: number): string | null {
 }
 
 export function sampleUsageAtPos(x: number, z: number): string | null {
+  const ceToolHit = sampleCeToolPixel(x, z);
+  if (ceToolHit?.usageName) return ceToolHit.usageName;
   return sampleLayerUsage(x, z);
 }
 
 export function sampleTierAtPos(x: number, z: number): string {
+  const ceToolHit = sampleCeToolPixel(x, z);
+  if (ceToolHit?.tierName) return ceToolHit.tierName;
   const layerTier = sampleLayerTier(x, z);
-  if (layerTier !== null) return layerTier;  // could be a tier name; null = not in layers or no layers loaded
+  if (layerTier !== null) return layerTier;
   const areaFlagsTier = sampleAreaFlags(x, z);
   if (areaFlagsTier) return areaFlagsTier.tier;
   return 'unknown';
+}
+
+export function hasCeToolBitmaps(): boolean {
+  return _ceToolData !== null;
 }
 

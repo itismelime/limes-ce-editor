@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
 import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData, WeatherData, GameplayData, CeToolProject, LimitsDefinition, LimitsDefinitionUser } from '../types/dayz';
 import {
   serializeTypesXml, serializeEventSpawnsXml,
@@ -7,8 +8,22 @@ import {
   serializeWeatherXml, serializeGameplayJson,
   serializeLimitsDefinitionXml, serializeLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
-import { writeFile, createDir } from '../lib/fileDiscovery';
+import { writeFile, createDir, readBinaryFile, writeBinaryFile } from '../lib/fileDiscovery';
+import { setCeToolBitmapSource, clearCeToolBitmapSource } from '../lib/tierZoneResolver';
 import type { ContainerDef } from '../types/dayz';
+
+export interface CeToolLayerMeta {
+  name: string;
+  usageFlags: number;
+  valueFlags: number;
+  isPaintable: boolean;
+  usageName: string | null;
+}
+
+interface TerritoryPaintDiff {
+  layerName: string;
+  diffs: Array<{ idx: number; prev: number }>;
+}
 
 interface FilePaths {
   missionPath: string | null;
@@ -22,6 +37,8 @@ interface FilePaths {
   gameplayPath: string | null;
   limitsDefinitionPath: string | null;
   limitsDefinitionUserPath: string | null;
+  ceToolXmlPath: string | null;
+  ceToolLayersDir: string | null;
 }
 
 type MapGroupProtoEntry = {
@@ -134,6 +151,19 @@ interface ServerState {
   removeBuildingUsage: (buildingType: string, usage: string) => void;
   removeLimitsUsage: (usage: string) => void;
 
+  ceToolLayers: CeToolLayerMeta[];
+  territoryBitmaps: Map<string, Uint8ClampedArray>;
+  originalTerritoryBitmaps: Map<string, Uint8ClampedArray>;
+  territoryPaintHistory: TerritoryPaintDiff[];
+  territoryBitmapSize: { width: number; height: number } | null;
+  ceToolWorldSize: number | null;
+
+  loadTerritoryBitmaps: () => Promise<void>;
+  commitTerritoryPaint: (layerName: string, pixels: Uint8ClampedArray) => void;
+  undoTerritoryPaint: () => void;
+  saveTerritoryBitmaps: () => Promise<void>;
+  revertTerritoryBitmaps: () => void;
+
   addCustomTypePack: (name: string, xmlContent: string) => Promise<void>;
   removeEconomyCoreEntry: (folder: string) => Promise<void>;
   saveTypesSource: (sourcePath: string) => Promise<void>;
@@ -147,7 +177,103 @@ interface ServerState {
   saveLimitsDefinitionUser: () => Promise<void>;
 }
 
-const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false, limitsDefinition: false, limitsDefinitionUser: false };
+function parseTgaLayer(bytes: Uint8Array): { pixels: Uint8ClampedArray; width: number; height: number } {
+  const idLen = bytes[0];
+  const imageType = bytes[2];
+  const colorMapLen = bytes[5] | (bytes[6] << 8);
+  const colorMapEntryBytes = Math.ceil(bytes[7] / 8);
+  const dataOffset = 18 + idLen + colorMapLen * colorMapEntryBytes;
+  const width = bytes[12] | (bytes[13] << 8);
+  const height = bytes[14] | (bytes[15] << 8);
+  const bpp = bytes[16];
+  const topDown = (bytes[17] & 0x20) !== 0;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+
+  if (bpp === 8 && (imageType === 3 || imageType === 1)) {
+    for (let row = 0; row < height; row++) {
+      const srcRow = topDown ? row : (height - 1 - row);
+      for (let col = 0; col < width; col++) {
+        const g = bytes[dataOffset + srcRow * width + col] ?? 0;
+        const pi = (row * width + col) * 4;
+        pixels[pi] = g; pixels[pi + 1] = g; pixels[pi + 2] = g; pixels[pi + 3] = g > 127 ? 255 : 0;
+      }
+    }
+  } else if (bpp === 8 && imageType === 11) {
+    // RLE compressed grayscale
+    const raw = new Uint8Array(width * height);
+    let src = dataOffset; let dst = 0;
+    while (dst < raw.length && src < bytes.length) {
+      const hdr = bytes[src++];
+      if (hdr & 0x80) { const val = bytes[src++]; const cnt = (hdr & 0x7f) + 1; for (let i = 0; i < cnt && dst < raw.length; i++) raw[dst++] = val; }
+      else { const cnt = hdr + 1; for (let i = 0; i < cnt && dst < raw.length; i++) raw[dst++] = bytes[src++]; }
+    }
+    for (let row = 0; row < height; row++) {
+      const srcRow = topDown ? row : (height - 1 - row);
+      for (let col = 0; col < width; col++) {
+        const g = raw[srcRow * width + col] ?? 0;
+        const pi = (row * width + col) * 4;
+        pixels[pi] = g; pixels[pi + 1] = g; pixels[pi + 2] = g; pixels[pi + 3] = g > 127 ? 255 : 0;
+      }
+    }
+  } else if (imageType === 2 && (bpp === 24 || bpp === 32)) {
+    // Uncompressed true-color (CE Tool may output 24bpp BGR)
+    const Bpp = bpp / 8;
+    for (let row = 0; row < height; row++) {
+      const srcRow = topDown ? row : (height - 1 - row);
+      for (let col = 0; col < width; col++) {
+        const si = dataOffset + (srcRow * width + col) * Bpp;
+        const active = (bytes[si] ?? 0) > 127 || (bytes[si + 1] ?? 0) > 127 || (bytes[si + 2] ?? 0) > 127;
+        const v = active ? 255 : 0;
+        const pi = (row * width + col) * 4;
+        pixels[pi] = v; pixels[pi + 1] = v; pixels[pi + 2] = v; pixels[pi + 3] = active ? 255 : 0;
+      }
+    }
+  } else if (imageType === 10 && (bpp === 24 || bpp === 32)) {
+    // RLE true-color
+    const Bpp = bpp / 8;
+    const raw = new Uint8Array(width * height * Bpp);
+    let src = dataOffset; let dst = 0;
+    while (dst < raw.length && src < bytes.length) {
+      const hdr = bytes[src++];
+      if (hdr & 0x80) {
+        const cnt = (hdr & 0x7f) + 1;
+        for (let k = 0; k < Bpp; k++) raw[dst + k] = bytes[src + k] ?? 0;
+        src += Bpp;
+        for (let i = 1; i < cnt; i++) for (let k = 0; k < Bpp; k++) raw[dst + i * Bpp + k] = raw[dst + k];
+        dst += cnt * Bpp;
+      } else {
+        const cnt = hdr + 1;
+        for (let i = 0; i < cnt * Bpp; i++) raw[dst++] = bytes[src++] ?? 0;
+      }
+    }
+    for (let row = 0; row < height; row++) {
+      const srcRow = topDown ? row : (height - 1 - row);
+      for (let col = 0; col < width; col++) {
+        const si = (srcRow * width + col) * Bpp;
+        const active = raw[si] > 127 || raw[si + 1] > 127 || raw[si + 2] > 127;
+        const v = active ? 255 : 0;
+        const pi = (row * width + col) * 4;
+        pixels[pi] = v; pixels[pi + 1] = v; pixels[pi + 2] = v; pixels[pi + 3] = active ? 255 : 0;
+      }
+    }
+  }
+
+  return { pixels, width, height };
+}
+
+function encodeTgaLayer(pixels: Uint8ClampedArray, width: number, height: number): Uint8Array {
+  const out = new Uint8Array(18 + width * height);
+  out[2] = 3; // uncompressed grayscale
+  out[12] = width & 0xff; out[13] = (width >> 8) & 0xff;
+  out[14] = height & 0xff; out[15] = (height >> 8) & 0xff;
+  out[16] = 8; out[17] = 0x20; // 8bpp, top-left origin
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++)
+      out[18 + y * width + x] = pixels[(y * width + x) * 4] > 127 ? 255 : 0;
+  return out;
+}
+
+const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false, limitsDefinition: false, limitsDefinitionUser: false, territoryBitmaps: false };
 
 function cloneMapGroupProtoEntry(entry: MapGroupProtoEntry): MapGroupProtoEntry {
   return {
@@ -210,7 +336,7 @@ export const useServerStore = create<ServerState>((set, get) => {
 
   return {
   mission: null,
-  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null, limitsDefinitionPath: null, limitsDefinitionUserPath: null },
+  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null, limitsDefinitionPath: null, limitsDefinitionUserPath: null, ceToolXmlPath: null, ceToolLayersDir: null },
   dirty: emptyDirty,
   saveError: null,
   saveStatus: 'idle' as const,
@@ -242,6 +368,12 @@ export const useServerStore = create<ServerState>((set, get) => {
   typeHistory: [],
   mapGroupProtoHistory: [],
   zoneRemoveHistory: [],
+  ceToolLayers: [],
+  territoryBitmaps: new Map(),
+  originalTerritoryBitmaps: new Map(),
+  territoryPaintHistory: [],
+  territoryBitmapSize: null,
+  ceToolWorldSize: null,
 
   setMission: (mission) => set({
     mission,
@@ -886,6 +1018,174 @@ export const useServerStore = create<ServerState>((set, get) => {
       await writeFile(paths.limitsDefinitionUserPath!, serializeLimitsDefinitionUserXml(limitsDefinitionUser));
       set(s => ({ dirty: { ...s.dirty, limitsDefinitionUser: false }, originalLimitsDefinitionUser: s.limitsDefinitionUser }));
     });
+  },
+
+  loadTerritoryBitmaps: async () => {
+    const { paths } = get();
+    if (!paths.ceToolXmlPath || !paths.ceToolLayersDir) return;
+
+    let xmlText: string;
+    try {
+      const { readFile } = await import('../lib/fileDiscovery');
+      xmlText = await readFile(paths.ceToolXmlPath);
+    } catch {
+      return;
+    }
+
+    const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+
+    // Parse world/layer sizes
+    const globalLayer = doc.querySelector('global > layer');
+    const globalWorld = doc.querySelector('global > world');
+    const bitmapSize = parseInt(globalLayer?.getAttribute('size') ?? '4096', 10);
+    const worldSize = parseInt(globalWorld?.getAttribute('size') ?? '15360', 10);
+
+    // Build usage index (position in <usages> list = bit index)
+    const usageNames: string[] = [];
+    doc.querySelectorAll('areas > usages > usage').forEach(el => {
+      const name = el.getAttribute('name');
+      if (name) usageNames.push(name);
+    });
+
+    // Parse layer metadata
+    const layers: CeToolLayerMeta[] = [];
+    doc.querySelectorAll('layers > layer').forEach(el => {
+      const name = el.getAttribute('name') ?? '';
+      const usageFlags = parseInt(el.getAttribute('usage_flags') ?? '0', 10);
+      const valueFlags = parseInt(el.getAttribute('value_flags') ?? '0', 10);
+      const isPaintable = /^usgFlg_Paint-/i.test(name) || /^valueFlg_/i.test(name);
+      const paintMatch = name.match(/^usgFlg_Paint-(.+)$/i);
+      const usageName = paintMatch ? paintMatch[1] : null;
+      layers.push({ name, usageFlags, valueFlags, isPaintable, usageName });
+    });
+
+    // Load TGA pixels for each paintable layer
+    const bitmaps = new Map<string, Uint8ClampedArray>();
+    const originals = new Map<string, Uint8ClampedArray>();
+
+    await Promise.all(
+      layers.filter(l => l.isPaintable).map(async (layer) => {
+        const tgaPath = `${paths.ceToolLayersDir}/${layer.name}.tga`;
+        try {
+          const raw = await readBinaryFile(tgaPath);
+          const { pixels: arr } = parseTgaLayer(raw);
+          bitmaps.set(layer.name, arr);
+          originals.set(layer.name, arr.slice());
+        } catch {
+          // layer file missing — create empty bitmap
+          const empty = new Uint8ClampedArray(bitmapSize * bitmapSize * 4);
+          bitmaps.set(layer.name, empty);
+          originals.set(layer.name, empty.slice());
+        }
+      })
+    );
+
+    set({
+      ceToolLayers: layers,
+      territoryBitmaps: bitmaps,
+      originalTerritoryBitmaps: originals,
+      territoryBitmapSize: { width: bitmapSize, height: bitmapSize },
+      ceToolWorldSize: worldSize,
+    });
+    setCeToolBitmapSource(bitmaps, layers, { width: bitmapSize, height: bitmapSize }, worldSize);
+  },
+
+  commitTerritoryPaint: (layerName, newPixels) => {
+    set(s => {
+      const current = s.territoryBitmaps.get(layerName);
+      const diffs: TerritoryPaintDiff['diffs'] = [];
+      if (current) {
+        for (let i = 0; i < current.length; i += 4) {
+          if (current[i] !== newPixels[i]) diffs.push({ idx: i, prev: current[i] });
+        }
+      }
+      const next = new Map(s.territoryBitmaps);
+      next.set(layerName, newPixels);
+      return {
+        territoryBitmaps: next,
+        territoryPaintHistory: [...s.territoryPaintHistory, { layerName, diffs }],
+        dirty: { ...s.dirty, territoryBitmaps: true },
+      };
+    });
+    const { territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize } = get();
+    if (territoryBitmapSize && ceToolWorldSize)
+      setCeToolBitmapSource(territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize);
+  },
+
+  undoTerritoryPaint: () => {
+    set(s => {
+      if (s.territoryPaintHistory.length === 0) return s;
+      const history = s.territoryPaintHistory.slice(0, -1);
+      const { layerName, diffs } = s.territoryPaintHistory[s.territoryPaintHistory.length - 1];
+      const current = s.territoryBitmaps.get(layerName);
+      if (!current) return { territoryPaintHistory: history };
+      const restored = current.slice();
+      for (const { idx, prev } of diffs) {
+        restored[idx] = prev; restored[idx + 1] = prev; restored[idx + 2] = prev;
+        restored[idx + 3] = prev > 127 ? 255 : 0;
+      }
+      const next = new Map(s.territoryBitmaps);
+      next.set(layerName, restored);
+      return { territoryBitmaps: next, territoryPaintHistory: history, dirty: { ...s.dirty, territoryBitmaps: history.length > 0 } };
+    });
+    const { territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize } = get();
+    if (territoryBitmapSize && ceToolWorldSize)
+      setCeToolBitmapSource(territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize);
+  },
+
+  saveTerritoryBitmaps: async () => {
+    const { paths, ceToolLayers, territoryBitmaps, originalTerritoryBitmaps, territoryBitmapSize, ceToolWorldSize } = get();
+    if (!paths.ceToolLayersDir || !paths.missionPath || !territoryBitmapSize) return;
+
+    await trySave('territory zones', async () => {
+      const { width, height } = territoryBitmapSize;
+      // Write each modified paintable TGA
+      for (const layer of ceToolLayers.filter(l => l.isPaintable)) {
+        const pixels = territoryBitmaps.get(layer.name);
+        if (!pixels) continue;
+        await writeBinaryFile(
+          `${paths.ceToolLayersDir}/${layer.name}.tga`,
+          encodeTgaLayer(pixels, width, height),
+        );
+      }
+
+      // Compile areaflags.map from all layers
+      const layerMetas = ceToolLayers
+        .filter(l => l.usageFlags !== 0 || l.valueFlags !== 0)
+        .map(l => ({
+          path: `${paths.ceToolLayersDir}/${l.name}.tga`,
+          usage_flags: l.usageFlags,
+          value_flags: l.valueFlags,
+        }));
+
+      await invoke('compile_areaflags', {
+        layers: layerMetas,
+        width,
+        height,
+        worldWidth: ceToolWorldSize ?? 15360,
+        worldHeight: ceToolWorldSize ?? 15360,
+        outPath: `${paths.missionPath}/areaflags.map`,
+      });
+
+      // Update originals
+      const newOriginals = new Map<string, Uint8ClampedArray>();
+      for (const [name, arr] of territoryBitmaps) newOriginals.set(name, arr.slice());
+      set(s => ({
+        dirty: { ...s.dirty, territoryBitmaps: false },
+        originalTerritoryBitmaps: newOriginals,
+      }));
+    });
+  },
+
+  revertTerritoryBitmaps: () => {
+    set(s => {
+      const restored = new Map<string, Uint8ClampedArray>();
+      for (const [name, arr] of s.originalTerritoryBitmaps) restored.set(name, arr.slice());
+      return { territoryBitmaps: restored, territoryPaintHistory: [], dirty: { ...s.dirty, territoryBitmaps: false } };
+    });
+    const { territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize } = get();
+    if (territoryBitmapSize && ceToolWorldSize)
+      setCeToolBitmapSource(territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize);
   },
   };
 });
