@@ -15,28 +15,14 @@ import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
 import { getUsageColor } from '../../types/map';
 import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
+// MAX_PYRAMID_Z = 5 (matching tiles.rs MAX_ZOOM)
 import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
 import { BuildingMarkers } from './BuildingMarkers';
 import { BuildingSidebar } from './BuildingSidebar';
 import type { MapConfig } from '../../types/map';
 
-const BUILTIN_MAX_XAM_ZOOM: Record<string, number> = {
-  namalsk: 6,
-  chernarus: 8,
-  livonia: 7,
-  sakhal: 8,
-};
-
-// Leaflet zoom 0 = xam.nu zoom 4. Delay detail tiles until zoom 1 to cut heavy decode work.
-const DETAIL_MIN_ZOOM = 1;
-const XAM_ZOOM_OFFSET = 4;
 const PLAYER_MARKER_SIZE = 20;
-
-function getLeafletTileMaxZoom(mapId: string, communityMaxZoom: Record<string, number>): number {
-  const xamZoom = BUILTIN_MAX_XAM_ZOOM[mapId] ?? communityMaxZoom[mapId] ?? 8;
-  return xamZoom - XAM_ZOOM_OFFSET;
-}
 
 function FilterInput({ placeholder, value, onChange }: { placeholder: string; value: string; onChange: (v: string) => void }) {
   return (
@@ -215,7 +201,7 @@ function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
 
     const syncViewBounds = () => {
       const minZoom = map.getBoundsZoom(bounds, false);
-      map.setMinZoom(minZoom - 1.5);
+      map.setMinZoom(minZoom - 3);
       map.setMaxBounds(bounds);
       map.panInsideBounds(bounds, { animate: false });
       if (map.getZoom() < minZoom - 1.5) {
@@ -244,93 +230,106 @@ function MapVisibilitySync({ isActive }: { isActive: boolean }) {
   return null;
 }
 
-/** High-res tile layer — only activates at Leaflet zoom ≥ DETAIL_MIN_ZOOM. */
-function DayZTileLayer({ mapId, communityMaxZoom }: { mapId: string; communityMaxZoom: Record<string, number> }) {
+
+// ImageBitmap cache: decoded once, drawImage is a GPU blit on revisit.
+const tileCache = new Map<string, ImageBitmap>();
+
+// zoomOffset = log2(imageWidth / 256).  For imageWidth=4096 → 4.
+// maxNativeLeafletZoom = MAX_PZ - zoomOffset = 1.  Leaflet handles overzoom via CSS scale.
+function DayZTileLayer({
+  mapId, mapsDir, imageWidth, maxReadyLevelRef, onLayerReady,
+}: {
+  mapId: string;
+  mapsDir: string;
+  imageWidth: number;
+  maxReadyLevelRef: React.RefObject<number>;
+  onLayerReady: (layer: L.TileLayer) => void;
+}) {
   const map = useMap();
-  const maxTileZoom = getLeafletTileMaxZoom(mapId, communityMaxZoom);
-
   useEffect(() => {
-    const layer = L.gridLayer({
-      tileSize:  256,
-      opacity:   1.0,
-      minZoom:   DETAIL_MIN_ZOOM,
-      maxZoom:   maxTileZoom,
-      keepBuffer: 4,
-      updateWhenZooming: true,
-      updateWhenIdle: false,
-    });
+    const zo = Math.round(Math.log2(imageWidth / 256));
+    const maxNative = 5 - zo;
 
-    (layer as any).createTile = function (
-      coords: L.Coords,
-      done:   L.DoneCallback,
-    ): HTMLElement {
-      const tileSize = 256;
-      const minXamZoom = 4;
-      const targetXamZoom = coords.z + XAM_ZOOM_OFFSET;
-      const canvas = document.createElement('canvas');
-      canvas.width = tileSize;
-      canvas.height = tileSize;
-      const ctx = canvas.getContext('2d');
+    const MyTileLayer = L.TileLayer.extend({
+      getTileUrl(coords: L.Coords) {
+        // Only used as fallback; createTile handles all rendering.
+        const pz = Math.max(0, Math.min(5, coords.z + zo));
+        const maxTile = (1 << pz) - 1;
+        if (coords.x < 0 || coords.y < 0 || coords.x > maxTile || coords.y > maxTile) {
+          return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        }
+        return convertFileSrc(`${mapsDir}/${mapId}/tiles/${pz}/${coords.x}/${coords.y}.webp`);
+      },
 
-      if (!ctx) {
-        done(new Error('tile context unavailable'), canvas);
-        return canvas;
-      }
+      createTile(coords: L.Coords, done: (err: Error | null, tile: HTMLElement) => void): HTMLElement {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
 
-      ctx.imageSmoothingEnabled = false;
+        const maxReady  = Math.max(0, maxReadyLevelRef.current ?? 5);
+        const naturalPz = Math.max(0, Math.min(5, coords.z + zo));
+        // Clamp to highest ready level; shift coords into that level's space.
+        const pz    = Math.min(naturalPz, maxReady);
+        const shift = naturalPz - pz;          // levels we're downsampling by
+        const tx    = coords.x >> shift;
+        const ty    = coords.y >> shift;
+        const maxTile = (1 << pz) - 1;
 
-      const loadImage = (url: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = document.createElement('img');
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('tile image load failed'));
-        img.src = url;
-      });
-
-      const drawTile = async () => {
-        for (let fallbackZoom = targetXamZoom; fallbackZoom >= minXamZoom; fallbackZoom--) {
-          const zoomDiff = targetXamZoom - fallbackZoom;
-          const scale = 1 << zoomDiff;
-          const fallbackX = Math.floor(coords.x / scale);
-          const fallbackY = Math.floor(coords.y / scale);
-
-          try {
-            const path = await invoke<string>('get_tile_path', {
-              mapId,
-              zoom: fallbackZoom,
-              x: fallbackX,
-              y: fallbackY,
-            });
-            const img = await loadImage(convertFileSrc(path));
-
-            if (zoomDiff === 0) {
-              ctx.clearRect(0, 0, tileSize, tileSize);
-              ctx.drawImage(img, 0, 0, tileSize, tileSize);
-            } else {
-              const part = tileSize / scale;
-              const sx = (coords.x % scale) * part;
-              const sy = (coords.y % scale) * part;
-              ctx.clearRect(0, 0, tileSize, tileSize);
-              ctx.drawImage(img, sx, sy, part, part, 0, 0, tileSize, tileSize);
-            }
-
-            done(undefined, canvas);
-            return;
-          } catch {
-            // Try next lower zoom tile when this exact level is missing.
-          }
+        if (tx < 0 || ty < 0 || tx > maxTile || ty > maxTile) {
+          queueMicrotask(() => done(null, canvas));
+          return canvas;
         }
 
-        done(new Error('no tile available at any zoom level'), canvas);
-      };
+        const url = convertFileSrc(`${mapsDir}/${mapId}/tiles/${pz}/${tx}/${ty}.webp`);
 
-      void drawTile();
-      return canvas;
-    };
+        const draw = (bitmap: ImageBitmap) => {
+          const ctx = canvas.getContext('2d')!;
+          if (shift > 0) {
+            // Crop the region of the lower-quality tile that belongs to this slot.
+            const tileCount = 1 << shift;
+            const subX  = coords.x - (tx << shift);
+            const subY  = coords.y - (ty << shift);
+            const srcX  = (subX / tileCount) * 256;
+            const srcY  = (subY / tileCount) * 256;
+            const srcSz = 256 / tileCount;
+            ctx.drawImage(bitmap, srcX, srcY, srcSz, srcSz, 0, 0, 256, 256);
+          } else {
+            ctx.drawImage(bitmap, 0, 0);
+          }
+        };
 
+        const cached = tileCache.get(url);
+        if (cached) {
+          draw(cached);
+          // Microtask fires before next paint but after Leaflet sets _tiles[key],
+          // so tiles report ready in the same frame they're requested — no flash.
+          queueMicrotask(() => done(null, canvas));
+          return canvas;
+        }
+
+        fetch(url)
+          .then(r => r.blob())
+          .then(blob => createImageBitmap(blob))
+          .then(bitmap => { tileCache.set(url, bitmap); draw(bitmap); done(null, canvas); })
+          .catch(err => done(err instanceof Error ? err : new Error(String(err)), canvas));
+
+        return canvas;
+      },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const layer = new (MyTileLayer as any)('', {
+      tileSize: 256,
+      noWrap: true,
+      attribution: '',
+      minZoom: -10,
+      maxNativeZoom: maxNative,
+      updateWhenZooming: false,
+      keepBuffer: 4,
+    }) as L.TileLayer;
     map.addLayer(layer);
+    onLayerReady(layer);
     return () => { map.removeLayer(layer); };
-  }, [map, mapId, maxTileZoom]);
-
+  }, [map, mapId, mapsDir, imageWidth]);
   return null;
 }
 
@@ -654,12 +653,18 @@ export function MapView() {
     }
   }, [markers.length, eventNames, eventSignature, setHiddenEvents]);
 
+  const [tilesBaseDir, setTilesBaseDir]     = useState<string | null>(null);
   const [downloading, setDownloading]       = useState(false);
-  const [downloadProgress, setProgress]     = useState(0);
-  const [downloadStatus, setDownloadStatus] = useState('');
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [downloadError, setDownloadError]   = useState<string | null>(null);
-  const [downloadElapsed, setDownloadElapsed] = useState(0);
-  const downloadStartRef = useRef<number>(0);
+  const lastProgressRef  = useRef<number>(0);
+  // maxReadyLevelRef: highest pyramid zoom level fully written to disk (-1 = none yet, 5 = all done)
+  const maxReadyLevelRef = useRef<number>(5);
+  // ref to the live TileLayer so we can call redraw() as new levels land
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const [extractionWorker, setExtractionWorker] = useState<{
+    level: number; progress: number; status: string;
+  } | null>(null);
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
@@ -670,55 +675,92 @@ export function MapView() {
   const isKnownMap  = tileMaps.has(activeMap);
   const isCustomMap = activeMap === 'custom';
   const hasImage    = !!mapConfig.imageUrl;
-  const maxLeafletZoom = isKnownMap ? getLeafletTileMaxZoom(activeMap, communityMaxZoom) : 4;
+  // zoomOffset = log2(imageWidth/256). Native tile max leaflet zoom = MAX_PYRAMID_Z - zoomOffset.
+  const zoomOffset     = Math.round(Math.log2(mapConfig.imageWidth / 256));
+  // Native max = 5 - zoomOffset. Allow 3 overzoom levels on top.
+  const maxLeafletZoom = isKnownMap ? (5 - zoomOffset + 3) : (communityMaxZoom[activeMap] ?? 4);
 
-  // Auto-download overview for known maps that don't have a cached image yet.
+  // For known tile maps: check if tiles are ready, else extract from PBO progressively.
   useEffect(() => {
-    if (!isMapActive || !isKnownMap || hasImage || downloading) return;
+    if (!isMapActive || !isKnownMap) return;
 
     let cancelled = false;
+    setTilesBaseDir(null);
+    maxReadyLevelRef.current = -1;
+    setExtractionWorker(null);
 
     (async () => {
-      setDownloading(true);
-      setProgress(0);
-      setDownloadStatus('');
-      setDownloadElapsed(0);
-      setDownloadError(null);
-      downloadStartRef.current = Date.now();
+      const dir = await invoke<string | null>('get_tiles_base_dir', { mapId: activeMap });
+      if (cancelled) return;
+      if (dir) {
+        // Already fully extracted.
+        maxReadyLevelRef.current = 5;
+        setTilesBaseDir(dir);
+        return;
+      }
 
-      const elapsed = setInterval(() => {
-        if (!cancelled) setDownloadElapsed(Math.floor((Date.now() - downloadStartRef.current) / 1000));
-      }, 1000);
+      // Tiles not ready — start extraction.
+      setDownloading(true);
+      setLoadingProgress(0);
+      setDownloadError(null);
 
       const unlisten = await listen<number>('tile-progress', e => {
-        if (!cancelled) setProgress(e.payload);
+        if (!cancelled) {
+          const now = Date.now();
+          if (now - lastProgressRef.current >= 150 || e.payload >= 1) {
+            lastProgressRef.current = now;
+            setLoadingProgress(e.payload);
+          }
+        }
       });
       const unlistenStatus = await listen<string>('tile-status', e => {
-        console.log('[tile-status]', e.payload);
-        if (!cancelled) setDownloadStatus(e.payload);
+        if (!cancelled) {
+          setExtractionWorker(w => w ? { ...w, status: e.payload } : null);
+        }
+      });
+      const unlistenLevel = await listen<{ mapId: string; level: number }>('tile-level-done', async e => {
+        if (cancelled || e.payload.mapId !== activeMap) return;
+        const level = e.payload.level;
+        maxReadyLevelRef.current = level;
+        // Progress = levels completed / total levels (0-5 → 1/6..6/6).
+        const levelProgress = (level + 1) / 6;
+        setExtractionWorker(w => w ? { ...w, level, progress: levelProgress } : { level, progress: levelProgress, status: '' });
+
+        if (level === 0) {
+          // Show map immediately with the low-quality z=0 tile.
+          const earlyDir = await invoke<string | null>('get_tiles_base_dir', { mapId: activeMap });
+          if (!cancelled && earlyDir) setTilesBaseDir(earlyDir);
+        } else {
+          // Refresh visible tiles to the newly available higher-quality level.
+          tileLayerRef.current?.redraw();
+        }
       });
 
       try {
-        const result = await invoke<{ path: string; width: number; height: number }>(
-          'download_map_tiles', { mapId: activeMap }
-        );
+        await invoke('extract_map_tiles', { mapId: activeMap });
         if (!cancelled) {
-          setMapImagePath(activeMap, convertFileSrc(result.path));
-          setMapImageSize(activeMap, result.width, result.height);
+          const newDir = await invoke<string | null>('get_tiles_base_dir', { mapId: activeMap });
+          if (!cancelled) {
+            maxReadyLevelRef.current = 5;
+            setTilesBaseDir(newDir);
+          }
         }
       } catch (err) {
         if (!cancelled) setDownloadError(err instanceof Error ? err.message : String(err));
       } finally {
-        clearInterval(elapsed);
         unlisten();
         unlistenStatus();
-        if (!cancelled) setDownloading(false);
+        unlistenLevel();
+        if (!cancelled) {
+          setDownloading(false);
+          setExtractionWorker(null);
+        }
       }
     })();
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMap, hasImage, isMapActive]);
+  }, [activeMap, isMapActive]);
 
   // ── Custom map: no image yet ──────────────────────────────────────────────
   if (isCustomMap && !hasImage) {
@@ -757,32 +799,29 @@ export function MapView() {
     );
   }
 
-  // ── Known map: downloading overview ──────────────────────────────────────
-  if (isKnownMap && !hasImage) {
+  // ── Known map: tiles not ready yet ───────────────────────────────────────
+  if (isKnownMap && !tilesBaseDir) {
     return (
       <div className="h-full flex flex-col">
         {downloading && (
           <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-950">
-            <p className="text-slate-300 text-sm font-medium">Downloading map tiles…</p>
+            <p className="text-slate-300 text-sm font-medium">Building map tiles…</p>
             <div className="w-64 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              {downloadProgress > 0 ? (
+              {loadingProgress > 0 ? (
                 <div
-                  className="h-full bg-lime-500 rounded-full transition-all"
-                  style={{ width: `${downloadProgress * 100}%` }}
+                  className="h-full bg-lime-500 rounded-full transition-[width] duration-150"
+                  style={{ width: `${Math.round(loadingProgress * 100)}%` }}
                 />
               ) : (
-                <div className="h-full w-1/3 bg-lime-500 rounded-full animate-pulse" />
+                <div className="h-full w-full bg-lime-500/30 rounded-full animate-pulse" />
               )}
             </div>
             <p className="text-slate-500 text-xs">
-              {downloadStatus || (downloadProgress > 0 ? `${Math.round(downloadProgress * 100)}%` : 'Connecting…')}
-              {downloadElapsed > 0 && <span className="text-slate-600 ml-2">{downloadElapsed}s</span>}
+              {loadingProgress > 0 ? `${Math.round(loadingProgress * 100)}%` : 'Starting…'}
             </p>
-            {downloadElapsed >= 15 && (
-              <p className="text-slate-600 text-xs max-w-xs text-center">
-                Still connecting — check your internet connection or try a different map.
-              </p>
-            )}
+            <p className="text-slate-600 text-xs max-w-xs text-center">
+              Building the overview tile first — higher resolution tiles will continue loading in the background.
+            </p>
           </div>
         )}
         {downloadError && (
@@ -793,7 +832,7 @@ export function MapView() {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => { setDownloadError(null); setProgress(0); }}
+                onClick={() => { setDownloadError(null); }}
                 className="px-4 py-1.5 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
               >
                 Retry
@@ -823,7 +862,6 @@ export function MapView() {
           maxBoundsViscosity={1.0}
           maxZoom={maxLeafletZoom}
           zoomAnimation
-          fadeAnimation
           markerZoomAnimation
           zoomSnap={0.25}
           zoomDelta={0.25}
@@ -836,11 +874,18 @@ export function MapView() {
           <PopupAutoFlip />
           <ZoomControlOffset sidebarWidth={sidebarWidth} />
 
-          {/* Background overview — hidden once detail zoom takes over */}
-          <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
+          {/* Tile pyramid for known maps; overview image for custom/fallback */}
+          {isKnownMap && tilesBaseDir
+            ? <DayZTileLayer
+                mapId={activeMap}
+                mapsDir={tilesBaseDir}
+                imageWidth={mapConfig.imageWidth}
+                maxReadyLevelRef={maxReadyLevelRef}
+                onLayerReady={layer => { tileLayerRef.current = layer; }}
+              />
+            : hasImage && <OverviewOverlay mapConfig={mapConfig} bounds={bounds} />
+          }
 
-          {/* Detail tile layer — capped per map at the highest available xam zoom */}
-          {isMapActive && mapHeavyReady && isKnownMap && <DayZTileLayer mapId={activeMap} communityMaxZoom={communityMaxZoom} />}
 
           {isMapActive && mapHeavyReady && initializedEventSignature === eventSignature && (
             <EventMarkers markers={markers} mapConfig={mapConfig} />
@@ -880,6 +925,22 @@ export function MapView() {
           >
             Browse for CE Tool folder…
           </button>
+        </div>
+      )}
+
+      {/* Tile extraction worker */}
+      {extractionWorker && (
+        <div className="absolute bottom-4 left-4 z-[1000] bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 w-52 pointer-events-none">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium text-slate-300">Building zoom levels…</span>
+            <span className="text-xs text-slate-500">{extractionWorker.level + 1}/6</span>
+          </div>
+          <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-lime-500 rounded-full transition-[width] duration-300"
+              style={{ width: `${Math.round(extractionWorker.progress * 100)}%` }}
+            />
+          </div>
         </div>
       )}
 

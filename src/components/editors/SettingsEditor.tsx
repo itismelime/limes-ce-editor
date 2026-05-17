@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
+
 import { readFile, writeFile, clearCeToolCaches } from '../../lib/fileDiscovery';
 import { CATEGORY_OPTIONS } from '../../lib/itemClassifier';
 import { BUNDLED_CE_MAPS, deployBundledCeProject } from '../../lib/ceToolBundle';
@@ -72,8 +74,28 @@ export function SettingsEditor() {
   const [deployingMap, setDeployingMap] = useState<string | null>(null);
 
   // Map image cache
-  const mapImagePaths   = useUiStore(s => s.mapImagePaths);
-  const clearMapImagePath = useUiStore(s => s.clearMapImagePath);
+  const mapImagePaths        = useUiStore(s => s.mapImagePaths);
+  const clearAllMapImagePaths = useUiStore(s => s.clearAllMapImagePaths);
+  const imagePathCount       = Object.keys(mapImagePaths).length;
+  const [clearingTiles, setClearingTiles] = useState(false);
+  const [tilesClearState, setTilesClearState] = useState<'idle' | 'done' | 'error'>('idle');
+  const [tilesClearError, setTilesClearError] = useState<string | null>(null);
+
+  async function handleClearAllTiles() {
+    setClearingTiles(true);
+    setTilesClearState('idle');
+    setTilesClearError(null);
+    try {
+      await invoke('clear_all_map_tiles');
+      setTilesClearState('done');
+      setTimeout(() => setTilesClearState('idle'), 3000);
+    } catch (err) {
+      setTilesClearError(err instanceof Error ? err.message : String(err));
+      setTilesClearState('error');
+    } finally {
+      setClearingTiles(false);
+    }
+  }
 
   // Cluster zoom
   const clusterZoom    = useUiStore(s => s.mapClusterZoomThreshold);
@@ -135,7 +157,6 @@ export function SettingsEditor() {
 
   function handleClearOverrides() {
     if (overrideCount === 0) return;
-    if (!window.confirm(`Clear all ${overrideCount} category override${overrideCount !== 1 ? 's' : ''}? This cannot be undone.`)) return;
     clearCategoryOverrides();
   }
 
@@ -143,12 +164,6 @@ export function SettingsEditor() {
     if (!missionPath) return;
     const entry = BUNDLED_CE_MAPS[mapId];
     if (!entry) return;
-    const confirmed = window.confirm(
-      `Deploy bundled CE project for ${entry.label} to your mission folder?\n\n` +
-      `${entry.files.length} files will be copied to:\n${missionPath}\\CETool\\${entry.folder}\\\n\n` +
-      `Existing files will be overwritten.`
-    );
-    if (!confirmed) return;
     setDeployingMap(mapId);
     try {
       await deployBundledCeProject(mapId, missionPath);
@@ -162,9 +177,6 @@ export function SettingsEditor() {
     }
   }
 
-  function handleClearMapCache(mapId: string) {
-    clearMapImagePath(mapId);
-  }
 
   return (
     <div className="h-full overflow-y-auto bg-slate-950">
@@ -295,34 +307,44 @@ export function SettingsEditor() {
           </div>
         </section>
 
-        {/* Map cache */}
+        {/* Cache */}
         <section>
-          <SectionHeading>Cached Map Images</SectionHeading>
+          <SectionHeading>Cache</SectionHeading>
           <div className="bg-slate-900 border border-slate-800 rounded-xl px-4">
-            {KNOWN_MAPS.map(({ id, label }) => {
-              const cached = !!mapImagePaths[id];
-              return (
-                <SettingRow
-                  key={id}
-                  title={label}
-                  description={cached
-                    ? 'Overview image is cached locally. Clear to force a fresh download next time the map tab is opened.'
-                    : 'No cached overview image. It will be downloaded automatically when you open the map tab.'}
-                >
-                  <span className={`text-xs ${cached ? 'text-emerald-400' : 'text-slate-600'}`}>
-                    {cached ? 'Cached' : 'Not cached'}
-                  </span>
-                  {cached && (
-                    <button
-                      onClick={() => handleClearMapCache(id)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </SettingRow>
-              );
-            })}
+            <SettingRow
+              title="Overview images"
+              description={imagePathCount > 0
+                ? `${imagePathCount} map overview image${imagePathCount !== 1 ? 's' : ''} cached locally. Clear to re-download next time those maps are opened.`
+                : 'No overview images cached.'}
+            >
+              <span className={`text-xs ${imagePathCount > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
+                {imagePathCount > 0 ? `${imagePathCount} cached` : 'Empty'}
+              </span>
+              <button
+                onClick={clearAllMapImagePaths}
+                disabled={imagePathCount === 0}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Clear
+              </button>
+            </SettingRow>
+            <SettingRow
+              title="Tile data (AppData)"
+              description={tilesClearState === 'error'
+                ? `Error: ${tilesClearError}`
+                : 'Satellite tile pyramids extracted from PBO files. Stored in AppData. Clear to force re-extraction next time a map is opened.'}
+            >
+              {tilesClearState === 'done' && (
+                <span className="text-xs text-emerald-400">Cleared</span>
+              )}
+              <button
+                onClick={() => void handleClearAllTiles()}
+                disabled={clearingTiles}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {clearingTiles ? 'Clearing…' : 'Clear'}
+              </button>
+            </SettingRow>
           </div>
         </section>
 

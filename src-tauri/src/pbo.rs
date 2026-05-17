@@ -1,27 +1,23 @@
-/// Extract a satellite map overview PNG from a DayZ community mod PBO file.
-///
-/// Reads all `S_COL_ROW_lco.paa` satellite tiles, decodes PAA→RGBA,
-/// stitches at native resolution with overlap-crop, downsamples to 4096×4096.
-///
-/// Only works on unencrypted community mod PBOs (Namalsk, Deer Isle, Banov, etc.).
-/// Vanilla DayZ PBOs are signed/encrypted and will fail.
 use std::io::Read;
+use std::collections::HashMap;
+use std::sync::Arc;
 use hemtt_pbo::ReadablePbo;
 use image::{ImageBuffer, RgbaImage};
+use rayon::prelude::*;
+use crate::tiles::{MAX_ZOOM, TILE_SIZE};
 
-const OVERVIEW: u32 = 4096;
-const OCEAN: image::Rgba<u8> = image::Rgba([28u8, 42, 58, 255]);
-
-/// Generate a 4096×4096 satellite overview PNG from a community mod PBO.
+/// Generate a tile pyramid from a DayZ *_data.pbo.
 ///
-/// `world_size_m` — terrain side length in metres (e.g. 12800 for Namalsk).
-/// Used to compute the correct tile overlap.
-pub fn generate_overview(
+/// Output: `maps_dir/{map_id}/tiles/{z}/{x}/{y}.webp` for z=0..=MAX_ZOOM.
+/// `world_size_m` is the terrain side length in metres (e.g. 12800, 15360).
+pub fn generate_tile_pyramid(
     pbo_path: &std::path::Path,
-    output_path: &std::path::Path,
+    maps_dir: &std::path::Path,
+    map_id: &str,
     world_size_m: u32,
     on_progress: impl Fn(f32),
     on_status: impl Fn(String),
+    on_level_done: impl Fn(u32),
 ) -> Result<(), String> {
     on_status("Opening PBO…".into());
 
@@ -30,7 +26,7 @@ pub fn generate_overview(
     let mut pbo = ReadablePbo::from(std::io::BufReader::new(file))
         .map_err(|e| format!("PBO parse failed: {:?}", e))?;
 
-    // Collect all _lco.paa satellite tile filenames
+    // Collect all _lco.paa filenames first so we can give specific errors.
     let lco_files: Vec<String> = pbo.files()
         .into_iter()
         .filter(|h| h.filename().to_ascii_lowercase().contains("_lco.paa"))
@@ -38,87 +34,264 @@ pub fn generate_overview(
         .collect();
 
     if lco_files.is_empty() {
-        return Err("No satellite tiles (_lco.paa) found — not a *_data.pbo or PBO is encrypted".into());
+        return Err(
+            "No satellite tiles (_lco.paa) found in this PBO. \
+             Make sure you selected a map data PBO (e.g. namalsk_data.pbo).".into()
+        );
     }
 
-    on_status(format!("Found {} tiles, scanning grid…", lco_files.len()));
-
-    // Determine grid dimensions from filenames
-    let mut max_col = 0u32;
-    let mut max_row = 0u32;
-    for name in &lco_files {
-        if let Some((col, row)) = parse_tile_coords(name) {
-            max_col = max_col.max(col);
-            max_row = max_row.max(row);
+    // Build (col, row) → filename map — prefer files in "layers\" over overlay
+    // directories (e.g. "usermap\") that newer PBOs include alongside satellite tiles.
+    let tile_map: HashMap<(u32, u32), String> = {
+        let mut map: HashMap<(u32, u32), String> = HashMap::new();
+        for name in lco_files {
+            if let Some(coords) = parse_tile_coords(&name) {
+                let is_layers = name.to_ascii_lowercase().starts_with("layers");
+                use std::collections::hash_map::Entry;
+                match map.entry(coords) {
+                    Entry::Vacant(e) => { e.insert(name); }
+                    Entry::Occupied(mut e) => {
+                        let existing_is_layers = e.get().to_ascii_lowercase().starts_with("layers");
+                        if is_layers && !existing_is_layers {
+                            *e.get_mut() = name;
+                        }
+                    }
+                }
+            }
         }
+        map
+    };
+
+    if tile_map.is_empty() {
+        return Err(
+            "_lco.paa files were found but none had parseable tile coordinates \
+             (expected S_COL_ROW_lco.paa naming). The PBO format may be unsupported.".into()
+        );
     }
+
+    let max_col = tile_map.keys().map(|(c, _)| *c).max().unwrap_or(0);
+    let max_row = tile_map.keys().map(|(_, r)| *r).max().unwrap_or(0);
     let grid_cols = max_col + 1;
     let grid_rows = max_row + 1;
 
-    // Detect tile pixel size from first large tile
-    let sample = lco_files.iter().find(|n| parse_tile_coords(n).is_some()).cloned()
-        .ok_or("No parseable tile filenames")?;
-    let sample_data = read_pbo_file(&mut pbo, &sample);
+    let sample_name = tile_map.values().next()
+        .ok_or("tile_map unexpectedly empty")?
+        .clone();
+    let sample_data = read_pbo_file(&mut pbo, &sample_name);
     let tile_dim = paa_base_dim(&sample_data).unwrap_or(512);
 
-    // Compute overlap: overlap = (tile_size - world_size / grid_cols) / 2
-    // e.g. Namalsk: (512 - 12800/32) / 2 = (512 - 400) / 2 = 56 px
-    let stride = world_size_m / grid_cols;
-    let overlap = tile_dim.saturating_sub(stride) / 2;
+    // Detect overlap by pixel-comparing two horizontally adjacent tiles.
+    // Falls back to the formula-based value if detection fails or no adjacent pair exists.
+    let formula_overlap = tile_dim.saturating_sub(world_size_m / grid_cols) / 2;
+    let overlap = match detect_tile_overlap(&mut pbo, &tile_map, tile_dim) {
+        Some(detected) => {
+            on_status(format!("Detected overlap: {}px (formula: {}px)", detected, formula_overlap));
+            detected
+        }
+        None => {
+            on_status(format!("Overlap detection failed, using formula: {}px", formula_overlap));
+            formula_overlap
+        }
+    };
+
     let effective = tile_dim.saturating_sub(overlap * 2);
     let canvas_w = effective * grid_cols;
     let canvas_h = effective * grid_rows;
 
-    on_status(format!(
-        "Grid {}×{}, tile {}px, overlap {}px, canvas {}×{}px…",
-        grid_cols, grid_rows, tile_dim, overlap, canvas_w, canvas_h
-    ));
+    on_status(format!("Painting {} tiles…", tile_map.len()));
 
-    let mut canvas: RgbaImage = ImageBuffer::from_pixel(canvas_w, canvas_h, OCEAN);
+    // Sequential read — PBO is a single seekable file, can't read in parallel.
+    let raw_tiles: Vec<((u32, u32), Vec<u8>)> = tile_map.iter()
+        .map(|(coords, path)| (*coords, read_pbo_file(&mut pbo, path)))
+        .collect();
 
-    let total = grid_cols * grid_rows;
+    // Parallel PAA decode across all CPU cores.
+    let decoded_tiles: Vec<((u32, u32), Result<RgbaImage, String>)> = raw_tiles
+        .into_par_iter()
+        .map(|(coords, data)| (coords, decode_paa(&data)))
+        .collect();
+
+    // Transparent canvas — no ocean pre-fill, water areas show map background.
+    let mut canvas: RgbaImage = ImageBuffer::new(canvas_w, canvas_h);
+
+    let total = decoded_tiles.len() as u32;
     let mut done = 0u32;
+    let mut decoded = 0u32;
+    let mut first_err: Option<String> = None;
 
-    for x_arma in 0..grid_cols {
-        for y_arma in 0..grid_rows {
-            let filename = format!("S_{:03}_{:03}_lco.paa", x_arma, y_arma);
-            let found = lco_files.iter().find(|f| {
-                f.to_ascii_lowercase().ends_with(&filename.to_ascii_lowercase())
-            });
-            if let Some(path) = found {
-                let data = read_pbo_file(&mut pbo, path);
-                if let Ok(tile_img) = decode_paa(&data) {
-                    if tile_img.width() >= 32 {
-                        let cropped = image::imageops::crop_imm(
-                            &tile_img, overlap, overlap, effective, effective,
-                        ).to_image();
-                        image::imageops::replace(
-                            &mut canvas, &cropped,
-                            (x_arma * effective) as i64,
-                            (y_arma * effective) as i64,
-                        );
-                    }
-                }
+    for ((x_arma, y_arma), result) in decoded_tiles {
+        if first_err.is_none() {
+            if let Err(ref e) = result { first_err = Some(e.clone()); }
+        }
+        if let Ok(tile_img) = result {
+            if tile_img.width() >= 32 {
+                decoded += 1;
+                let cropped = image::imageops::crop_imm(
+                    &tile_img, overlap, overlap, effective, effective,
+                ).to_image();
+                image::imageops::replace(
+                    &mut canvas, &cropped,
+                    (x_arma * effective) as i64,
+                    (y_arma * effective) as i64,
+                );
             }
-            done += 1;
-            if done % 16 == 0 || done == total {
-                on_progress(done as f32 / total as f32 * 0.9); // 0–90%
-            }
+        }
+        done += 1;
+        if done % 16 == 0 || done == total {
+            on_progress(done as f32 / total as f32);
         }
     }
 
-    on_status(format!("Downsampling {}×{} → {}×{}…", canvas_w, canvas_h, OVERVIEW, OVERVIEW));
-    let overview = image::imageops::resize(&canvas, OVERVIEW, OVERVIEW, image::imageops::FilterType::Lanczos3);
-    drop(canvas);
-
-    on_progress(0.98);
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", e))?;
+    if decoded == 0 {
+        let reason = first_err.unwrap_or_else(|| "unknown".into());
+        return Err(format!(
+            "Found {} tile file(s) but none could be decoded (first error: {}). \
+             The PBO may be corrupted or use an unsupported PAA format.",
+            total, reason
+        ));
     }
-    overview.save(output_path).map_err(|e| format!("PNG save: {}", e))?;
-    on_progress(1.0);
 
+    // Chop canvas into zoom pyramid. Loading screen exits after z=0 fires tile-level-done,
+    // so no per-tile progress needed here.
+    // Canvas wrapped in Arc so rayon workers can share it read-only.
+    let canvas = Arc::new(canvas);
+
+    for z in 0..=MAX_ZOOM {
+        let grid = 1u32 << z;
+        let tile_canvas_px = canvas_w / grid;
+
+        on_status(format!("Generating zoom {}…", z));
+
+        let canvas_ref = Arc::clone(&canvas);
+        let tile_results: Vec<Result<(), String>> = (0..grid * grid)
+            .into_par_iter()
+            .map(|i| {
+                let tx = i % grid;
+                let ty = i / grid;
+                let x_px = tx * tile_canvas_px;
+                let y_px = ty * tile_canvas_px;
+
+                let cropped = image::imageops::crop_imm(
+                    &*canvas_ref, x_px, y_px, tile_canvas_px, tile_canvas_px,
+                ).to_image();
+                let resized = image::imageops::resize(
+                    &cropped, TILE_SIZE, TILE_SIZE, image::imageops::FilterType::Triangle,
+                );
+                let out = crate::tiles::tile_path(maps_dir, map_id, z, tx, ty);
+                let parent = out.parent()
+                    .ok_or_else(|| format!("tile path has no parent: {}", out.display()))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", e))?;
+                resized.save_with_format(&out, image::ImageFormat::WebP)
+                    .map_err(|e| format!("WebP save z={} ({},{}): {}", z, tx, ty, e))
+            })
+            .collect();
+
+        for r in tile_results { r?; }
+        on_level_done(z);
+    }
     Ok(())
+}
+
+// ── Public helpers ───────────────────────────────────────────────────────────
+
+/// Recursively search `dir` (up to `depth` levels) for any `*_data.pbo` file.
+pub fn find_data_pbo(dir: &std::path::Path, depth: usize) -> Option<std::path::PathBuf> {
+    if depth == 0 { return None; }
+    let Ok(entries) = std::fs::read_dir(dir) else { return None };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.to_ascii_lowercase().ends_with("_data.pbo") {
+                    return Some(path);
+                }
+            }
+        } else if path.is_dir() {
+            if let Some(found) = find_data_pbo(&path, depth - 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+// ── Overlap detection ─────────────────────────────────────────────────────────
+
+/// Detect satellite tile overlap by pixel-comparing two horizontally adjacent tiles.
+///
+/// Strategy: for each candidate overlap N, compare a fixed-width probe strip (4px wide)
+/// placed at the midpoint of the hypothetical overlap region. Fixed width keeps comparison
+/// fair across all candidates regardless of N. The correct N gives near-zero diff; wrong
+/// values give noise-level diff.
+///
+/// Also computes a baseline using a non-adjacent pair to reject unreliable detections
+/// (e.g. uniform snow tiles where everything scores near-zero).
+///
+/// Returns None if detection is unreliable (best score not clearly below baseline).
+fn detect_tile_overlap(
+    pbo: &mut ReadablePbo<std::io::BufReader<std::fs::File>>,
+    tile_map: &HashMap<(u32, u32), String>,
+    tile_dim: u32,
+) -> Option<u32> {
+    // Find any (col, row) where (col, row) and (col+1, row) both exist.
+    let (&(col, row), _) = tile_map.iter()
+        .find(|((c, r), _)| tile_map.contains_key(&(c + 1, *r)))?;
+    let name_a = tile_map.get(&(col, row))?.clone();
+    let name_b = tile_map.get(&(col + 1, row))?.clone();
+
+    let img_a = decode_paa(&read_pbo_file(pbo, &name_a)).ok()?;
+    let img_b = decode_paa(&read_pbo_file(pbo, &name_b)).ok()?;
+    if img_a.width() != tile_dim || img_b.width() != tile_dim { return None; }
+
+    // Sample rows spread across the middle of the tile.
+    let sample_rows: Vec<u32> = (tile_dim / 8..tile_dim * 7 / 8).step_by(20).collect();
+    if sample_rows.is_empty() { return None; }
+
+    // Compare a fixed 4-px probe strip placed at the midpoint of the overlap region.
+    // This keeps comparison cost constant across all candidate values.
+    const PROBE_W: u32 = 4;
+    let score_at = |cand: u32| -> u64 {
+        if cand < PROBE_W { return u64::MAX; }
+        // Place probe at quarter-point of overlap, clamped so it fits inside.
+        let probe_start = (cand / 4).min(cand.saturating_sub(PROBE_W));
+        let mut s: u64 = 0;
+        for &r in &sample_rows {
+            for dp in 0..PROBE_W {
+                let col_a = tile_dim - cand + probe_start + dp;
+                let col_b = probe_start + dp;
+                let pa = img_a.get_pixel(col_a, r);
+                let pb = img_b.get_pixel(col_b, r);
+                s += (pa[0] as i32 - pb[0] as i32).unsigned_abs() as u64
+                   + (pa[1] as i32 - pb[1] as i32).unsigned_abs() as u64
+                   + (pa[2] as i32 - pb[2] as i32).unsigned_abs() as u64;
+            }
+        }
+        s
+    };
+
+    // Baseline: compare the same probe strip but shifted by half a tile (clearly wrong offset).
+    // If best score is not < 30% of baseline, the content is too uniform to trust.
+    let baseline = score_at(tile_dim / 4);
+
+    let max_overlap = (tile_dim / 2).min(128);
+    let mut best_overlap = 0u32;
+    let mut best_score = u64::MAX;
+
+    for cand in (4..=max_overlap).step_by(4) {
+        let s = score_at(cand);
+        if s < best_score {
+            best_score = s;
+            best_overlap = cand;
+        }
+    }
+
+    // Reject if detection is unreliable (uniform content) or no clear winner.
+    if baseline == 0 || best_score * 10 >= baseline * 3 {
+        return None;
+    }
+
+    // Detected value is total overlap (both edges). Convert to per-side for stitching.
+    if best_overlap == 0 { None } else { Some(best_overlap / 2) }
 }
 
 // ── PBO helper ────────────────────────────────────────────────────────────────
@@ -246,11 +419,11 @@ fn decode_paa(data: &[u8]) -> Result<RgbaImage, String> {
             .map_err(|e| format!("BC3 decode: {}", e))?;
     }
 
-    // BGRA u32 → RGBA. DXT1-transparent pixels (alpha=0) → ocean blue.
+    // BGRA u32 → RGBA. DXT1-transparent pixels (alpha=0) stay transparent.
     let rgba_bytes: Vec<u8> = rgba_u32.iter().flat_map(|&p| {
         let a = ((p >> 24) & 0xFF) as u8;
         if a == 0 {
-            [28u8, 42u8, 58u8, 255u8]
+            [0u8, 0u8, 0u8, 0u8]
         } else {
             let r = ((p >> 16) & 0xFF) as u8;
             let g = ((p >>  8) & 0xFF) as u8;

@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { listen } from '@tauri-apps/api/event';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import type { ActiveTab } from '../../store/uiStore';
 import type { MissionFiles } from '../../lib/fileDiscovery';
-import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: 'Map' },
@@ -29,20 +26,6 @@ const BUILTIN_MAPS: { id: string; label: string }[] = [
   { id: 'sakhal',    label: 'Sakhal' },
   { id: 'custom',    label: 'Custom' },
 ];
-
-const BUILTIN_MAX_XAM_ZOOM: Record<string, number> = {
-  namalsk: 6,
-  chernarus: 8,
-  livonia: 7,
-  sakhal: 8,
-};
-
-type OfflineCacheStatus = {
-  map_id: string;
-  ready: boolean;
-  cached: number;
-  total: number;
-};
 
 function Row({ label, value, mono, href }: { label: string; value: string; mono?: boolean; href?: string }) {
   return (
@@ -167,31 +150,13 @@ export function TopBar({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [communityMaps, mission, mapsWithMissions, mapImagePaths]);
 
-  const OFFLINE_MAP_ORDER = useMemo(() => [
-    ...Array.from(BUILTIN_TILE_MAP_IDS),
-    ...communityMaps.map(cm => cm.id),
-  ], [communityMaps]);
-
-  const MAX_XAM_ZOOM_BY_MAP = useMemo(() => {
-    const m: Record<string, number> = { ...BUILTIN_MAX_XAM_ZOOM };
-    for (const cm of communityMaps) m[cm.id] = cm.maxZoom;
-    return m;
-  }, [communityMaps]);
   const [showAbout, setShowAbout] = useState(false);
   const [showServerMenu, setShowServerMenu] = useState(false);
   const serverMenuRef = useRef<HTMLDivElement | null>(null);
   const [showMapDropdown, setShowMapDropdown] = useState(false);
   const mapDropdownRef = useRef<HTMLDivElement | null>(null);
   const [appVersion, setAppVersion] = useState('');
-  const [showOfflinePanel, setShowOfflinePanel] = useState(false);
-  const [preparingOffline, setPreparingOffline] = useState(false);
-  const [offlineProgress, setOfflineProgress] = useState(0);
-  const [offlineStatus, setOfflineStatus] = useState<string | null>(null);
-  const [offlineCurrentMap, setOfflineCurrentMap] = useState<string | null>(null);
-  const [offlineStatuses, setOfflineStatuses] = useState<Record<string, OfflineCacheStatus>>({});
-  const offlineRefreshInFlightRef = useRef(false);
   const [savingPending, setSavingPending] = useState(false);
-  const offlinePanelRef = useRef<HTMLDivElement | null>(null);
   const pendingTabRef = useRef<ActiveTab | null>(null);
   const tabSwitchInFlightRef = useRef(false);
 
@@ -244,197 +209,29 @@ export function TopBar({
       ? [{ id: 'limitsDefinitionUser', label: 'cfglimitsdefinitionuser.xml', detail: 'Usage & value group aliases', onRevert: () => revertLimitsDefinitionUser() }]
       : []),
   ];
-  const isKnownMap = OFFLINE_MAP_ORDER.includes(activeMap);
-  const currentMapReady = isKnownMap && !!offlineStatuses[activeMap]?.ready;
-
-  const refreshOfflineStatuses = async () => {
-    if (offlineRefreshInFlightRef.current) return;
-    offlineRefreshInFlightRef.current = true;
-    try {
-      const statuses = await invoke<OfflineCacheStatus[]>('get_offline_cache_statuses');
-      const next: Record<string, OfflineCacheStatus> = {};
-      statuses.forEach(s => { next[s.map_id] = s; });
-      setOfflineStatuses(next);
-    } catch {
-      // Ignore status refresh errors in top bar.
-    } finally {
-      offlineRefreshInFlightRef.current = false;
-    }
-  };
-
-  const prepareCurrentOffline = async () => {
-    if (!isKnownMap || preparingOffline) return;
-    setPreparingOffline(true);
-    setOfflineProgress(0);
-    setOfflineStatus(null);
-    setOfflineCurrentMap(activeMap);
-    try {
-      const result = await invoke<{ total: number; cached: number; downloaded: number; failed: number }>(
-        'prepare_map_offline',
-        { mapId: activeMap, maxZoom: MAX_XAM_ZOOM_BY_MAP[activeMap] ?? 6 },
-      );
-      setOfflineStatus(
-        `Offline cache ready: ${result.cached.toLocaleString()} cached, ${result.downloaded.toLocaleString()} downloaded${result.failed > 0 ? `, ${result.failed.toLocaleString()} missing` : ''}`,
-      );
-    } catch (err) {
-      setOfflineStatus(`Offline prepare failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPreparingOffline(false);
-      setOfflineCurrentMap(null);
-      void refreshOfflineStatuses();
-    }
-  };
-
-  const prepareAllOffline = async () => {
-    if (preparingOffline) return;
-    setPreparingOffline(true);
-    setOfflineProgress(0);
-    setOfflineStatus(null);
-    setOfflineCurrentMap(null);
-    try {
-      const result = await invoke<{ total: number; cached: number; downloaded: number; failed: number }>('prepare_all_maps_offline');
-      setOfflineStatus(
-        `All maps prepared: ${result.cached.toLocaleString()} cached, ${result.downloaded.toLocaleString()} downloaded${result.failed > 0 ? `, ${result.failed.toLocaleString()} missing` : ''}`,
-      );
-    } catch (err) {
-      setOfflineStatus(`Offline prepare failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPreparingOffline(false);
-      setOfflineCurrentMap(null);
-      void refreshOfflineStatuses();
-    }
-  };
-
-  const cancelOfflinePrepare = async () => {
-    if (!preparingOffline) return;
-    setOfflineStatus('Cancelling offline preparation...');
-    try {
-      await invoke('cancel_offline_prepare');
-    } catch {
-      // Ignore cancellation races.
-    }
-  };
 
   useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (showOfflinePanel) {
-      void refreshOfflineStatuses();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showOfflinePanel, activeMap]);
-
-  useEffect(() => {
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-
-    let idleId: number | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const scheduleRefresh = (immediate: boolean) => {
-      if (preparingOffline) return;
-
-      const run = () => {
-        if (document.hidden || preparingOffline) return;
-        void refreshOfflineStatuses();
-      };
-
-      if (immediate) {
-        run();
-        return;
-      }
-
-      if (idleWindow.requestIdleCallback) {
-        idleId = idleWindow.requestIdleCallback(run, { timeout: 1200 });
-        return;
-      }
-
-      timeoutId = setTimeout(run, 250);
-    };
-
-    // Seed quickly, then keep status reasonably fresh without frequent work.
-    scheduleRefresh(true);
-    const intervalId = setInterval(() => scheduleRefresh(false), 180000);
-
-    const onOnline = () => scheduleRefresh(true);
-    const onFocus = () => scheduleRefresh(false);
-    const onVisible = () => {
-      if (!document.hidden) scheduleRefresh(false);
-    };
-
-    window.addEventListener('online', onOnline);
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      clearInterval(intervalId);
-      if (idleId !== null) idleWindow.cancelIdleCallback?.(idleId);
-      if (timeoutId !== null) clearTimeout(timeoutId);
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preparingOffline]);
-
-  useEffect(() => {
-    let unlistenProgress: (() => void) | undefined;
-    let unlistenMap: (() => void) | undefined;
-    (async () => {
-      unlistenProgress = await listen<number>('offline-cache-progress', e => {
-        setOfflineProgress(Math.max(0, Math.min(1, e.payload)));
-      });
-      unlistenMap = await listen<string>('offline-cache-map', e => {
-        setOfflineCurrentMap(e.payload);
-      });
-    })();
-
-    return () => {
-      if (unlistenProgress) unlistenProgress();
-      if (unlistenMap) unlistenMap();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!showOfflinePanel) return;
-
-    const onMouseDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (offlinePanelRef.current && target && !offlinePanelRef.current.contains(target)) {
-        setShowOfflinePanel(false);
-      }
-    };
-
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [showOfflinePanel]);
-
-  useEffect(() => {
     if (!showServerMenu) return;
-
     const onMouseDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (serverMenuRef.current && target && !serverMenuRef.current.contains(target)) {
         setShowServerMenu(false);
       }
     };
-
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [showServerMenu]);
 
   useEffect(() => {
     if (!showMapDropdown) return;
-
     const onMouseDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (mapDropdownRef.current && target && !mapDropdownRef.current.contains(target)) {
         setShowMapDropdown(false);
       }
     };
-
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [showMapDropdown]);
@@ -455,17 +252,6 @@ export function TopBar({
     }
   }, [showSaveReview, hasDirty]);
 
-  const handleTabClick = (tabId: ActiveTab) => {
-    pendingTabRef.current = tabId;
-
-    if (!tabSwitchInFlightRef.current) {
-      const currentTab = useUiStore.getState().activeTab;
-      if (tabId !== currentTab) {
-        commitPendingTab();
-      }
-    }
-  };
-
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
@@ -479,9 +265,18 @@ export function TopBar({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [undoType]);
 
+  const handleTabClick = (tabId: ActiveTab) => {
+    pendingTabRef.current = tabId;
+    if (!tabSwitchInFlightRef.current) {
+      const currentTab = useUiStore.getState().activeTab;
+      if (tabId !== currentTab) {
+        commitPendingTab();
+      }
+    }
+  };
+
   const savePendingChanges = async () => {
     if (savingPending || !hasDirty) return;
-
     setSavingPending(true);
     try {
       createSaveCheckpointFromDirty('TopBar save');
@@ -511,9 +306,7 @@ export function TopBar({
   };
 
   const revertAllPending = () => {
-    for (const source of dirty.typesSources) {
-      revertTypesSource(source);
-    }
+    for (const source of dirty.typesSources) revertTypesSource(source);
     if (dirty.eventSpawns) revertEventSpawns();
     if (dirty.events) revertEvents();
     if (dirty.spawnableTypes) revertSpawnableTypes();
@@ -532,6 +325,7 @@ export function TopBar({
           <button onClick={clearSaveError} className="text-red-400 hover:text-red-200 font-medium">Dismiss</button>
         </div>
       )}
+
       {/* Top row */}
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="flex items-center gap-2 mr-2">
@@ -638,134 +432,56 @@ export function TopBar({
             </button>
           </div>
 
-          <>
-              <div className="w-px h-4 bg-slate-700 mx-1" />
-              <div ref={mapDropdownRef} className="relative">
-                <button
-                  onClick={() => setShowMapDropdown(v => !v)}
-                  className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${showMapDropdown ? 'bg-lime-600 text-white' : 'bg-lime-500 text-white'}`}
-                >
-                  {MAPS.find(m => m.id === activeMap)?.label ?? activeMap}
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+          <div className="w-px h-4 bg-slate-700 mx-1" />
 
-                {showMapDropdown && (
-                  <div className="absolute top-full right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px] py-1">
-                    {MAPS.map(m => (
-                      <div key={m.id}>
-                        {m.id === 'custom' && <div className="my-1 border-t border-slate-700" />}
-                      <button
-                        onClick={() => {
-                          setShowMapDropdown(false);
-                          if (m.id === 'custom') {
-                            if (activeTab === 'settings') {
-                              setSettingsScrollTarget('community-maps');
-                            } else {
-                              setShowCommunityMapsModal(true);
-                            }
+          <div ref={mapDropdownRef} className="relative">
+            <button
+              onClick={() => setShowMapDropdown(v => !v)}
+              className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${showMapDropdown ? 'bg-lime-600 text-white' : 'bg-lime-500 text-white'}`}
+            >
+              {MAPS.find(m => m.id === activeMap)?.label ?? activeMap}
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {showMapDropdown && (
+              <div className="absolute top-full right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[160px] py-1">
+                {MAPS.map(m => (
+                  <div key={m.id}>
+                    {m.id === 'custom' && <div className="my-1 border-t border-slate-700" />}
+                    <button
+                      onClick={() => {
+                        setShowMapDropdown(false);
+                        if (m.id === 'custom') {
+                          if (activeTab === 'settings') {
+                            setSettingsScrollTarget('community-maps');
                           } else {
-                            setActiveMap(m.id);
+                            setShowCommunityMapsModal(true);
                           }
-                        }}
-                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
-                          activeMap === m.id
-                            ? 'text-lime-400 bg-slate-800'
-                            : 'text-slate-200 hover:bg-slate-800'
-                        }`}
-                      >
-                        {activeMap === m.id && (
-                          <svg className="w-3 h-3 text-lime-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                          </svg>
-                        )}
-                        {activeMap !== m.id && <span className="w-3 flex-shrink-0" />}
-                        {m.label}
-                      </button>
-                      </div>
-                    ))}
+                        } else {
+                          setActiveMap(m.id);
+                        }
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 ${
+                        activeMap === m.id
+                          ? 'text-lime-400 bg-slate-800'
+                          : 'text-slate-200 hover:bg-slate-800'
+                      }`}
+                    >
+                      {activeMap === m.id && (
+                        <svg className="w-3 h-3 text-lime-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        </svg>
+                      )}
+                      {activeMap !== m.id && <span className="w-3 flex-shrink-0" />}
+                      {m.label}
+                    </button>
                   </div>
-                )}
+                ))}
               </div>
-
-              <div ref={offlinePanelRef} className="relative">
-                <button
-                  onClick={() => setShowOfflinePanel(v => !v)}
-                  className={`h-8 bg-slate-900 border border-slate-700 rounded-lg px-3 text-xs transition-colors flex items-center gap-2 ${showOfflinePanel ? 'bg-lime-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                  <span className={`w-2.5 h-2.5 rounded-full ${currentMapReady ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                  Offline
-                </button>
-
-                {showOfflinePanel && (
-                  <div className="absolute top-full right-0 mt-2 bg-slate-900 border rounded-xl p-3 w-[320px] z-40">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-medium text-slate-300">Offline Cache</span>
-                      <span className="text-[11px] text-slate-500">{preparingOffline ? `${Math.round(offlineProgress * 100)}%` : 'Idle'}</span>
-                    </div>
-
-                    <div className="space-y-1 mb-2">
-                      {OFFLINE_MAP_ORDER.map(mapId => {
-                        const status = offlineStatuses[mapId];
-                        const ready = !!status?.ready;
-                        return (
-                          <div key={mapId} className="flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className={`w-2.5 h-2.5 rounded-full ${ready ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                              <span className={mapId === activeMap ? 'text-slate-200' : 'text-slate-300'}>
-                                {MAPS.find(m => m.id === mapId)?.label ?? mapId}
-                              </span>
-                            </div>
-                            <span className="text-slate-500 text-[11px]">
-                              {status ? `${status.cached.toLocaleString()}/${status.total.toLocaleString()}` : '...'}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {preparingOffline && (
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mb-2">
-                        <div className="h-full bg-lime-400 rounded-full transition-all" style={{ width: `${offlineProgress * 100}%` }} />
-                      </div>
-                    )}
-
-                    {offlineCurrentMap && (
-                      <p className="text-[11px] text-slate-500 mb-2 truncate">
-                        Preparing: {MAPS.find(m => m.id === offlineCurrentMap)?.label ?? offlineCurrentMap}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={prepareCurrentOffline}
-                        disabled={preparingOffline || !isKnownMap}
-                        className={`h-8 border rounded-lg px-2 text-xs transition-colors ${preparingOffline || !isKnownMap ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'}`}
-                      >
-                        Prepare Current
-                      </button>
-                      <button
-                        onClick={prepareAllOffline}
-                        disabled={preparingOffline}
-                        className={`h-8 border rounded-lg px-2 text-xs transition-colors ${preparingOffline ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-300 hover:border-slate-500 hover:text-slate-100'}`}
-                      >
-                        Prepare All
-                      </button>
-                      <button
-                        onClick={cancelOfflinePrepare}
-                        disabled={!preparingOffline}
-                        className={`h-8 border rounded-lg px-2 text-xs transition-colors ${!preparingOffline ? 'border-slate-700 text-slate-500' : 'border-red-500/70 text-red-300 hover:border-red-400 hover:text-red-200'}`}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-
-                    {offlineStatus && <p className="mt-2 text-[11px] text-slate-500 truncate">{offlineStatus}</p>}
-                  </div>
-                )}
-              </div>
-            </>
+            )}
+          </div>
 
           <div className="w-px h-4 bg-slate-700 mx-1" />
 
@@ -921,8 +637,6 @@ export function TopBar({
           Settings
         </button>
       </div>
-
-
     </div>
   );
 }

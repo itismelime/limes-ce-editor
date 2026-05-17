@@ -32,7 +32,20 @@ zip   = { version = "2", default-features = false, features = ["deflate"] }
 hemtt-pbo        = "1"
 lzokay           = "2"
 texture2ddecoder = "0.1"
+rayon            = "1"
 
 [[bin]]
 name = "test_pbo"
 path = "src/bin/test_pbo.rs"
+
+[[bin]]
+name = "dump_coords"
+path = "src/bin/dump_coords.rs"
+
+[[bin]]
+name = "inspect_pbo"
+path = "src/bin/inspect_pbo.rs"
+
+[[bin]]
+name = "dump_cfg"
+path = "src/bin/dump_cfg.rs"
