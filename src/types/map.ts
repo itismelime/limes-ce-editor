@@ -5,11 +5,9 @@ export const BUILTIN_TILE_MAP_IDS = new Set<string>(['namalsk', 'chernarus', 'li
 export interface CommunityMapDef {
   id: string;
   label: string;
-  xamName: string;
   maxZoom: number;
   worldWidth: number;
   worldHeight: number;
-  /** Path to the mod's *_data.pbo for offline satellite tile extraction. */
   pboPath?: string;
 }
 

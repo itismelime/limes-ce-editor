@@ -65,6 +65,7 @@ interface UiState {
   setEventFilter: (v: string) => void;
   setMapImagePath: (mapId: string, url: string) => void;
   clearMapImagePath: (mapId: string) => void;
+  clearAllMapImagePaths: () => void;
   setMapImageSize: (mapId: string, w: number, h: number) => void;
   setCustomMap: (url: string, width: number, height: number) => void;
   setLoading: (v: boolean) => void;
@@ -225,6 +226,10 @@ export const useUiStore = create<UiState>((set) => ({
     localStorage.setItem('mapImagePaths', JSON.stringify(next));
     return { mapImagePaths: next };
   }),
+  clearAllMapImagePaths: () => {
+    localStorage.removeItem('mapImagePaths');
+    set({ mapImagePaths: {} });
+  },
   setMapImageSize: (mapId, w, h) => set(s => {
     const next = { ...s.mapImageSizes, [mapId]: { w, h } };
     localStorage.setItem('mapImageSizes', JSON.stringify(next));
