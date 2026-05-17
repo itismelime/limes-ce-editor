@@ -158,7 +158,7 @@ function CategorySection({
               e.stopPropagation();
               onBlockCategory(categoryKey);
             }}
-            className="w-5 h-5 rounded-md border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200"
+            className="w-5 h-5 rounded-md border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200 flex items-center justify-center"
             title="Remove this category from building type (XML)"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
