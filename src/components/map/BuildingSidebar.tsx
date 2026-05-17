@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
-import { sampleTierAtPos, sampleUsageAtPos, hasCeToolBitmaps } from '../../lib/tierZoneResolver';
+import { sampleAllZonesAtPos, hasCeToolBitmaps } from '../../lib/tierZoneResolver';
 import { BuildingPopup } from './BuildingPopup';
 
 export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number) => void }) {
@@ -34,16 +34,13 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
 
   const samplePos = selectedBuildingPos ?? (building ? { x: building.x, z: building.z } : null);
 
-  const zoneTier = useMemo(() => {
+  const allZones = useMemo(() => {
     if (!samplePos || !useZoneData) return null;
-    const t = sampleTierAtPos(samplePos.x, samplePos.z);
-    return t !== 'unknown' ? t : null;
+    return sampleAllZonesAtPos(samplePos.x, samplePos.z);
   }, [samplePos, useZoneData, territoryBitmaps]);
 
-  const zoneUsage = useMemo(() => {
-    if (!samplePos || !useZoneData) return building?.usages[0] ?? null;
-    return sampleUsageAtPos(samplePos.x, samplePos.z) ?? building?.usages[0] ?? null;
-  }, [samplePos, useZoneData, territoryBitmaps, building]);
+  const zoneTiers  = allZones?.tiers.filter(t => t !== 'unknown') ?? [];
+  const zoneUsages = allZones?.usages ?? [];
 
 
   useEffect(() => {
@@ -131,8 +128,8 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
           <BuildingPopup
             building={building}
             tiers={building.tiers.length > 0 ? building.tiers : ['unknown']}
-            zoneUsage={zoneUsage}
-            zoneTier={zoneTier}
+            zoneUsages={zoneUsages}
+            zoneTiers={zoneTiers}
             protoTiers={building.tiers}
             embedded
           />

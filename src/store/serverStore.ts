@@ -1055,7 +1055,8 @@ export const useServerStore = create<ServerState>((set, get) => {
       const valueFlags = parseInt(el.getAttribute('value_flags') ?? '0', 10);
       const isPaintable = /^usgFlg_Paint-/i.test(name) || /^valueFlg_/i.test(name);
       const paintMatch = name.match(/^usgFlg_Paint-(.+)$/i);
-      const usageName = paintMatch ? paintMatch[1] : null;
+      const valueMatch = name.match(/^valueFlg_(.+)$/i);
+      const usageName = paintMatch ? paintMatch[1] : valueMatch ? valueMatch[1] : null;
       layers.push({ name, usageFlags, valueFlags, isPaintable, usageName });
     });
 

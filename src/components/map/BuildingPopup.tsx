@@ -8,8 +8,8 @@ import { useServerStore } from '../../store/serverStore';
 interface Props {
   building: BuildingInstance;
   tiers: string[];
-  zoneTier?: string | null;
-  zoneUsage?: string | null;
+  zoneTiers?: string[];
+  zoneUsages?: string[];
   protoTiers?: string[];
   inferredTier?: string | null;
   embedded?: boolean;
@@ -534,8 +534,8 @@ function AddLootModal({
 export function BuildingPopup({
   building: buildingProp,
   tiers,
-  zoneTier,
-  zoneUsage,
+  zoneTiers = [],
+  zoneUsages = [],
   protoTiers = [],
   inferredTier,
   embedded = false,
@@ -676,38 +676,32 @@ export function BuildingPopup({
     });
   }, [byCategory]);
 
-  const hasZoneTier = !!zoneTier && zoneTier !== 'unknown';
+  const cleanZoneTiers  = zoneTiers.filter(t => t && t !== 'unknown');
+  const cleanZoneUsages = zoneUsages.filter(u => u && u !== 'unknown');
+  const hasZoneTier = cleanZoneTiers.length > 0;
   const orderedProtoTiers = [...new Set(protoTiers)];
   const hasInferredTier = !!inferredTier && inferredTier !== 'unknown';
   const displaySourceSignals = useMemo(() => {
     const normalizedTiers = [...new Set(tiers.map(t => t.trim()).filter(Boolean))];
     const normalizedUsages = [...new Set(building.usages.map(u => u.trim()).filter(Boolean))];
-    const normalizedZoneUsage = zoneUsage?.trim() ?? '';
+    const zoneUsageSet = new Set(cleanZoneUsages.map(u => u.toLowerCase()));
 
     const hasKnownTier = normalizedTiers.some(t => t.toLowerCase() !== 'unknown');
     const hasKnownUsage = normalizedUsages.some(u => u.toLowerCase() !== 'unknown');
-    const hasKnownZoneUsage = normalizedZoneUsage !== '' && normalizedZoneUsage.toLowerCase() !== 'unknown';
-    const hasKnownSignal = hasKnownTier || hasKnownUsage || hasKnownZoneUsage;
+    const hasKnownSignal = hasKnownTier || hasKnownUsage || cleanZoneUsages.length > 0;
 
     const visibleTiers = hasKnownSignal
       ? normalizedTiers.filter(t => t.toLowerCase() !== 'unknown')
       : normalizedTiers;
 
-    const visibleUsages = hasKnownSignal
+    // proto usages that aren't already shown as zone usages
+    const visibleUsages = (hasKnownSignal
       ? normalizedUsages.filter(u => u.toLowerCase() !== 'unknown')
-      : normalizedUsages;
+      : normalizedUsages
+    ).filter(u => !zoneUsageSet.has(u.toLowerCase()));
 
-    const showZoneUsageBadge = normalizedZoneUsage !== '' && (
-      normalizedZoneUsage.toLowerCase() !== 'unknown' || !hasKnownSignal
-    );
-
-    return {
-      visibleTiers,
-      visibleUsages,
-      showZoneUsageBadge,
-      zoneUsageValue: normalizedZoneUsage,
-    };
-  }, [tiers, building.usages, zoneUsage]);
+    return { visibleTiers, visibleUsages };
+  }, [tiers, building.usages, cleanZoneUsages]);
 
   const openAddModal = (category = '') => {
     setAddModalCategory(category);
@@ -862,21 +856,22 @@ export function BuildingPopup({
         <span className="text-slate-500 whitespace-nowrap">lootmax {building.lootmax}</span>
       </div>
       <div className="flex flex-wrap items-center gap-1 mb-3">
-        {displaySourceSignals.visibleTiers.map(t => (
+        {[...new Set([...cleanZoneTiers, ...displaySourceSignals.visibleTiers])].map(t => (
           <span
             key={t}
             className="px-1.5 py-0.5 rounded text-white text-xs font-semibold"
             style={{ backgroundColor: TIER_COLORS[t] ?? TIER_COLORS.unknown }}
           >{t}</span>
         ))}
-        {displaySourceSignals.showZoneUsageBadge && (
+        {cleanZoneUsages.map(u => (
           <span
+            key={`zone-${u}`}
             className="px-1.5 py-0.5 rounded text-xs font-semibold"
-            style={{ backgroundColor: getUsageColor(displaySourceSignals.zoneUsageValue), color: getUsageTextColor(getUsageColor(displaySourceSignals.zoneUsageValue)) }}
-            title="CE zone type (from usage layer)"
-          >{formatUsageLabel(displaySourceSignals.zoneUsageValue)}</span>
-        )}
-        {displaySourceSignals.visibleUsages.filter(u => u.toLowerCase() !== displaySourceSignals.zoneUsageValue.toLowerCase()).map(u => (
+            style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}
+            title="CE territory zone"
+          >{formatUsageLabel(u)}</span>
+        ))}
+        {displaySourceSignals.visibleUsages.map(u => (
           <span
             key={u}
             className="group px-1.5 py-0.5 rounded text-xs font-semibold flex items-center gap-1"
@@ -968,7 +963,7 @@ export function BuildingPopup({
         <div className="mb-3 text-[11px] text-slate-500">
           Tier source:
           {hasZoneTier && (
-            <span className="ml-1 text-sky-300">zone {zoneTier}</span>
+            <span className="ml-1 text-sky-300">zone {cleanZoneTiers.join(' · ')}</span>
           )}
           {hasZoneTier && orderedProtoTiers.length > 0 && <span className="mx-1">+</span>}
           {orderedProtoTiers.length > 0 && (

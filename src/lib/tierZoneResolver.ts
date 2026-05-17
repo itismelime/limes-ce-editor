@@ -55,11 +55,14 @@ export function setCeToolBitmapSource(
     if (!layer.isPaintable) continue;
     const pixels = bitmaps.get(layer.name);
     if (!pixels) continue;
-    const tierMatch = layer.name.match(/^valueFlg_Tier(\d+)/i);
-    if (tierMatch) {
-      entries.push({ pixels, isTier: true, tierName: `Tier${tierMatch[1]}`, usageName: null });
+    const tierNumMatch = layer.name.match(/^valueFlg_Tier(\d+)/i);
+    const valueMatch = !tierNumMatch && layer.name.match(/^valueFlg_(.+)/i);
+    if (tierNumMatch) {
+      entries.push({ pixels, isTier: true, tierName: `Tier${tierNumMatch[1]}`, usageName: null });
+    } else if (valueMatch) {
+      entries.push({ pixels, isTier: true, tierName: valueMatch[1], usageName: null });
     } else {
-      const usageName = (layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '')) || null;
+      const usageName = (layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '')) || null;
       entries.push({ pixels, isTier: false, tierName: null, usageName });
     }
   }
@@ -409,6 +412,38 @@ export function sampleTierAtPos(x: number, z: number): string {
   const areaFlagsTier = sampleAreaFlags(x, z);
   if (areaFlagsTier) return areaFlagsTier.tier;
   return 'unknown';
+}
+
+export function sampleAllZonesAtPos(x: number, z: number): { tiers: string[]; usages: string[] } {
+  const tiers: string[] = [];
+  const usages: string[] = [];
+
+  if (_ceToolData) {
+    const { entries, width, height, worldSize } = _ceToolData;
+    if (x >= 0 && x < worldSize && z >= 0 && z < worldSize) {
+      const bx = Math.min(Math.floor(x / worldSize * width), width - 1);
+      const by = Math.min(Math.floor((1 - z / worldSize) * height), height - 1);
+      const idx = (by * width + bx) * 4;
+      for (const e of entries) {
+        if (e.pixels[idx] > 127) {
+          if (e.isTier && e.tierName && !tiers.includes(e.tierName)) tiers.push(e.tierName);
+          if (!e.isTier && e.usageName && !usages.includes(e.usageName)) usages.push(e.usageName);
+        }
+      }
+    }
+  }
+
+  if (tiers.length === 0) {
+    const layerTier = sampleLayerTier(x, z);
+    if (layerTier) tiers.push(layerTier);
+    else { const af = sampleAreaFlags(x, z); if (af) tiers.push(af.tier); }
+  }
+  if (usages.length === 0) {
+    const lu = sampleLayerUsage(x, z);
+    if (lu) usages.push(lu);
+  }
+
+  return { tiers, usages };
 }
 
 export function hasCeToolBitmaps(): boolean {

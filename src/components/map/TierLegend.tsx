@@ -14,6 +14,7 @@ export function TierLegend() {
   const tierZonesLoaded   = useUiStore(s => s.tierZonesLoaded);
   const buildingInstances = useServerStore(s => s.buildingInstances);
   const mission           = useServerStore(s => s.mission);
+  const ceToolLayers      = useServerStore(s => s.ceToolLayers);
 
   const usageGroups = useMemo(() => {
     const byKey = new Map<string, { label: string; rawUsages: Set<string> }>();
@@ -42,6 +43,19 @@ export function TierLegend() {
       if (mission) for (const t of mission.types.values()) t.usages.forEach(register);
     }
 
+    // Always register paintable usage layers from CE Tool so "Hide all" covers them
+    // even when no buildings carry that usage.
+    for (const layer of ceToolLayers) {
+      if (!layer.isPaintable) continue;
+      if (layer.name.startsWith('valueFlg_')) {
+        // Non-numeric value layers (Unique, Contamination) go in Type (fill)
+        if (layer.usageName && !/^Tier\d+$/i.test(layer.usageName)) register(layer.usageName);
+        continue;
+      }
+      const name = layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '');
+      if (name) register(name);
+    }
+
     return [...byKey.values()]
       .map(group => ({ label: group.label, rawUsages: [...group.rawUsages] }))
       .sort((a, b) => {
@@ -62,10 +76,16 @@ export function TierLegend() {
     const found = new Set<string>(getLoadedTierNames());
     for (const b of buildingInstances) b.tiers.forEach(t => found.add(t));
     if (mission) for (const type of mission.types.values()) type.tiers.forEach(t => found.add(t));
+    for (const layer of ceToolLayers) {
+      if (layer.isPaintable && layer.name.startsWith('valueFlg_') && layer.usageName) {
+        found.add(layer.usageName);
+      }
+    }
     return found;
-  }, [buildingInstances, mission, tierZonesLoaded]);
+  }, [buildingInstances, mission, tierZonesLoaded, ceToolLayers]);
 
-  const allTiers = [...TIER_ORDER.filter(t => activeTierSet.has(t)), 'unknown'];
+  const extraTiers = [...activeTierSet].filter(t => t !== 'unknown' && !TIER_ORDER.includes(t)).sort();
+  const allTiers = [...TIER_ORDER.filter(t => activeTierSet.has(t)), ...extraTiers, 'unknown'];
   const allTiersHidden = allTiers.every(t => hiddenTiers.includes(t));
   const allUsagesHidden = usageGroups.every(g => g.rawUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase())));
 

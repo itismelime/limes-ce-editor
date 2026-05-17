@@ -105,14 +105,11 @@ interface UiState {
   territoryPaintLayer: string | null;
   territoryPaintBrushRadius: number;
   territoryPaintErase: boolean;
-  territoryVisibleLayers: Set<string>;
   setShowTerritoryOverlay: (v: boolean) => void;
   setTerritoryPaintMode: (v: boolean) => void;
   setTerritoryPaintLayer: (name: string | null) => void;
   setTerritoryPaintBrushRadius: (r: number) => void;
   setTerritoryPaintErase: (v: boolean) => void;
-  toggleTerritoryVisibleLayer: (name: string) => void;
-  clearTerritoryVisibleLayers: () => void;
 }
 
 const CATEGORY_OVERRIDES_KEY = 'categoryOverrides';
@@ -424,19 +421,12 @@ export const useUiStore = create<UiState>((set) => ({
   territoryPaintLayer: null,
   territoryPaintBrushRadius: 30,
   territoryPaintErase: false,
-  territoryVisibleLayers: new Set<string>(),
   setShowTerritoryOverlay: (v) => set(s => ({
     showTerritoryOverlay: v,
-    ...(v ? {} : { territoryPaintMode: false, territoryPaintLayer: null, territoryVisibleLayers: new Set<string>() }),
+    ...(v ? {} : { territoryPaintMode: false, territoryPaintLayer: null }),
   })),
   setTerritoryPaintMode: (v) => set({ territoryPaintMode: v }),
   setTerritoryPaintLayer: (name) => set({ territoryPaintLayer: name }),
   setTerritoryPaintBrushRadius: (r) => set({ territoryPaintBrushRadius: r }),
   setTerritoryPaintErase: (v) => set({ territoryPaintErase: v }),
-  toggleTerritoryVisibleLayer: (name) => set(s => {
-    const next = new Set(s.territoryVisibleLayers);
-    if (next.has(name)) { next.delete(name); } else { next.add(name); }
-    return { territoryVisibleLayers: next };
-  }),
-  clearTerritoryVisibleLayers: () => set({ territoryVisibleLayers: new Set<string>() }),
 }));

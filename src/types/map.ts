@@ -29,6 +29,8 @@ export const TIER_COLORS: Record<string, string> = {
   Tier5: '#fb923c',
   Tier6: '#f87171',
   Tier7: '#fbbf24',
+  Unique: '#e879f9',
+  Contamination: '#a3e635',
   unknown: '#6b7280',
 };
 

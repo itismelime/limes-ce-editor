@@ -499,21 +499,27 @@ function TerritoryBitmapOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpre
   const territoryBitmaps = useServerStore(s => s.territoryBitmaps);
   const territoryBitmapSize = useServerStore(s => s.territoryBitmapSize);
   const ceToolLayers = useServerStore(s => s.ceToolLayers);
-  const visibleLayers = useUiStore(s => s.territoryVisibleLayers);
+  const hiddenUsages = useUiStore(s => s.hiddenUsages);
+  const hiddenTiers  = useUiStore(s => s.hiddenTiers);
 
   const overlays = useMemo(() => {
-    if (!show || !territoryBitmapSize || territoryBitmaps.size === 0 || visibleLayers.size === 0) return [];
+    if (!show || !territoryBitmapSize || territoryBitmaps.size === 0) return [];
     const { width, height } = territoryBitmapSize;
     const SCALE = 512 / Math.max(width, height);
     const outW = Math.round(width * SCALE);
     const outH = Math.round(height * SCALE);
     const step = Math.round(1 / SCALE);
     const results: { key: string; url: string }[] = [];
+    const hiddenUsageSet = new Set(hiddenUsages.map(u => u.trim().toLowerCase()));
 
     for (const [layerName, pixels] of territoryBitmaps) {
-      if (!visibleLayers.has(layerName)) continue;
       const meta = ceToolLayers.find(l => l.name === layerName);
       const usageName = meta?.usageName ?? layerName.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
+      const isTierLayer = layerName.startsWith('valueFlg_') && /^Tier\d+$/i.test(usageName);
+      const isVisible = isTierLayer
+        ? !hiddenTiers.includes(usageName)
+        : !hiddenUsageSet.has(usageName.toLowerCase());
+      if (!isVisible) continue;
       const rgb = hexToRgb(TIER_COLORS[usageName] ?? getUsageColor(usageName)) ?? { r: 255, g: 255, b: 255 };
       const { r, g, b } = rgb;
 
@@ -541,7 +547,7 @@ function TerritoryBitmapOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpre
     }
     return results;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show, territoryBitmaps, territoryBitmapSize, ceToolLayers, visibleLayers]);
+  }, [show, territoryBitmaps, territoryBitmapSize, ceToolLayers, hiddenUsages, hiddenTiers]);
 
   if (!show) return null;
   return (
@@ -830,8 +836,6 @@ export function MapView() {
   const setTerritoryPaintBrushRadius = useUiStore(s => s.setTerritoryPaintBrushRadius);
   const territoryPaintErase    = useUiStore(s => s.territoryPaintErase);
   const setTerritoryPaintErase = useUiStore(s => s.setTerritoryPaintErase);
-  const territoryVisibleLayers = useUiStore(s => s.territoryVisibleLayers);
-  const toggleTerritoryVisibleLayer = useUiStore(s => s.toggleTerritoryVisibleLayer);
   const paintableLayers = useMemo(() => ceToolLayers.filter(l => l.isPaintable), [ceToolLayers]);
   const [overlaysReady, setOverlaysReady] = useState(false);
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
@@ -1334,29 +1338,17 @@ export function MapView() {
         <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto">
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 shadow-xl">
             <span className="text-[11px] text-slate-500 whitespace-nowrap">Layer:</span>
-            <div className="flex flex-wrap gap-1 max-w-[480px]">
+            <select
+              value={territoryPaintLayer ?? ''}
+              onChange={e => setTerritoryPaintLayer(e.target.value || null)}
+              className="h-6 bg-slate-800 border border-slate-700 rounded px-1 text-[11px] text-slate-200 focus:outline-none focus:border-lime-500"
+            >
+              <option value="">— pick —</option>
               {paintableLayers.map(layer => {
                 const usageName = layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
-                const color = TIER_COLORS[usageName] ?? getUsageColor(usageName);
-                const visible = territoryVisibleLayers.has(layer.name);
-                const isPaintLayer = territoryPaintLayer === layer.name;
-                return (
-                  <button
-                    key={layer.name}
-                    onClick={() => {
-                      toggleTerritoryVisibleLayer(layer.name);
-                      if (!visible) setTerritoryPaintLayer(layer.name);
-                      else if (isPaintLayer) setTerritoryPaintLayer(null);
-                    }}
-                    className={`h-6 px-2 rounded text-[11px] font-medium transition-colors border ${visible ? 'border-transparent text-white' : 'border-slate-600 text-slate-400 hover:border-slate-400'}`}
-                    style={visible ? { backgroundColor: color } : {}}
-                    title={layer.name}
-                  >
-                    {usageName}
-                  </button>
-                );
+                return <option key={layer.name} value={layer.name}>{usageName}</option>;
               })}
-            </div>
+            </select>
             <div className="w-px h-4 bg-slate-700 mx-1" />
             <span className="text-[11px] text-slate-500">Brush:</span>
             {([15, 30, 60] as const).map(r => (
@@ -1368,6 +1360,17 @@ export function MapView() {
                 {r === 15 ? 'S' : r === 30 ? 'M' : 'L'}
               </button>
             ))}
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={territoryPaintBrushRadius}
+              onChange={e => {
+                const v = Math.max(1, Math.min(500, Number(e.target.value) || 1));
+                setTerritoryPaintBrushRadius(v);
+              }}
+              className="w-12 h-6 bg-slate-800 border border-slate-700 rounded px-1 text-[11px] text-slate-200 text-center focus:outline-none focus:border-lime-500"
+            />
             <div className="w-px h-4 bg-slate-700 mx-1" />
             <button
               onClick={() => {
