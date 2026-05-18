@@ -1,5 +1,6 @@
 pub mod tiles;
 pub mod pbo;
+pub mod bitmap;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
@@ -19,6 +20,8 @@ struct CommunityMapEntry {
     world_height: f64,
     #[serde(default)]
     pbo_path: Option<String>,
+    #[serde(default)]
+    ce_tool_project_path: Option<String>,
 }
 
 struct CommunityMapRegistry(Mutex<Vec<CommunityMapEntry>>);
@@ -311,6 +314,7 @@ async fn extract_map_tiles(
                     world_width: ws as f64,
                     world_height: ws as f64,
                     pbo_path: Some(pbo.to_string_lossy().into_owned()),
+                    ce_tool_project_path: None,
                 });
             }
             CommunityMapRegistry::save_to_disk(&app_data_dir, &reg)?;
@@ -554,6 +558,65 @@ async fn download_mpmission(
     Ok(dest.to_string_lossy().into_owned())
 }
 
+// ── CE project import ────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn copy_ce_project(app: tauri::AppHandle, source_dir: String, map_id: String) -> Result<String, String> {
+    let source = std::path::Path::new(&source_dir);
+    if !source.is_dir() {
+        return Err(format!("Not a directory: {}", source_dir));
+    }
+
+    // Find CE project XML in source dir (first .xml that isn't cfgAreaFlags.xml)
+    let xml_entry = std::fs::read_dir(source)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            name.ends_with(".xml") && name != "cfgareaflags.xml"
+        })
+        .ok_or_else(|| "No CE project XML found in source directory".to_string())?;
+
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let target = app_data_dir.join("ce-custom").join(&map_id);
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(target.join("layers")).map_err(|e| e.to_string())?;
+
+    // Copy XML files in root
+    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_file() {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if matches!(ext.as_str(), "xml" | "tga" | "bmp" | "png") {
+                let dest = target.join(entry.file_name());
+                std::fs::copy(&path, &dest).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    // Copy layers/ subfolder
+    let layers_src = source.join("layers");
+    if layers_src.is_dir() {
+        for entry in std::fs::read_dir(&layers_src).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if matches!(ext.as_str(), "tga" | "bmp" | "png") {
+                    let dest = target.join("layers").join(entry.file_name());
+                    std::fs::copy(&path, &dest).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    // Return path to copied project XML
+    let xml_name = xml_entry.file_name();
+    let result = target.join(xml_name);
+    Ok(result.to_string_lossy().replace('\\', "/"))
+}
+
 // ── App entry point ─────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -594,6 +657,10 @@ pub fn run() {
             download_mpmission,
             find_map_pbo,
             discover_installed_maps,
+            bitmap::read_tga_layer,
+            bitmap::write_tga_layer,
+            bitmap::compile_areaflags,
+            copy_ce_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -148,6 +148,7 @@ export type DirtyFlags = {
   gameplay: boolean;
   limitsDefinition: boolean;
   limitsDefinitionUser: boolean;
+  territoryBitmaps: boolean;
 };
 
 export interface CeFile {

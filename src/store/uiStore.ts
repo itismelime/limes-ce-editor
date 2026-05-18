@@ -20,6 +20,7 @@ interface UiState {
   selectedEventName: string | null;
   selectedBuildingType: string | null;
   selectedBuildingSeq: number;
+  selectedBuildingPos: { x: number; z: number } | null;
   typeFilter: string;
   categoryFilter: string;
   eventFilter: string;
@@ -58,7 +59,7 @@ interface UiState {
   setActiveMap: (map: string) => void;
   setTheme: (theme: ThemeId) => void;
   setShowSaveReview: (v: boolean) => void;
-  setSelectedBuilding: (type: string | null) => void;
+  setSelectedBuilding: (type: string | null, pos?: { x: number; z: number }) => void;
   setSelectedEvent: (name: string | null) => void;
   setTypeFilter: (v: string) => void;
   setCategoryFilter: (v: string) => void;
@@ -98,6 +99,17 @@ interface UiState {
   setRememberLastFolder: (v: boolean) => void;
   setCustomUsageColor: (usage: string, color: string) => void;
   removeCustomUsageColor: (usage: string) => void;
+
+  showTerritoryOverlay: boolean;
+  territoryPaintMode: boolean;
+  territoryPaintLayer: string | null;
+  territoryPaintBrushRadius: number;
+  territoryPaintErase: boolean;
+  setShowTerritoryOverlay: (v: boolean) => void;
+  setTerritoryPaintMode: (v: boolean) => void;
+  setTerritoryPaintLayer: (name: string | null) => void;
+  setTerritoryPaintBrushRadius: (r: number) => void;
+  setTerritoryPaintErase: (v: boolean) => void;
 }
 
 const CATEGORY_OVERRIDES_KEY = 'categoryOverrides';
@@ -179,6 +191,7 @@ export const useUiStore = create<UiState>((set) => ({
   selectedEventName: null,
   selectedBuildingType: null,
   selectedBuildingSeq: 0,
+  selectedBuildingPos: null,
   typeFilter: '',
   categoryFilter: '',
   eventFilter: '',
@@ -211,7 +224,7 @@ export const useUiStore = create<UiState>((set) => ({
   }),
   setShowSaveReview: (v) => set({ showSaveReview: v }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
-  setSelectedBuilding: (type) => set(s => ({ selectedBuildingType: type, selectedBuildingSeq: s.selectedBuildingSeq + 1 })),
+  setSelectedBuilding: (type, pos) => set(s => ({ selectedBuildingType: type, selectedBuildingSeq: s.selectedBuildingSeq + 1, selectedBuildingPos: pos ?? null })),
   setTypeFilter: (v) => set({ typeFilter: v }),
   setCategoryFilter: (v) => set({ categoryFilter: v }),
   setEventFilter: (v) => set({ eventFilter: v }),
@@ -402,4 +415,18 @@ export const useUiStore = create<UiState>((set) => ({
     localStorage.setItem(BUILDING_LOOT_OVERRIDES_KEY, JSON.stringify(next));
     return { buildingLootOverrides: next };
   }),
+
+  showTerritoryOverlay: false,
+  territoryPaintMode: false,
+  territoryPaintLayer: null,
+  territoryPaintBrushRadius: 30,
+  territoryPaintErase: false,
+  setShowTerritoryOverlay: (v) => set(s => ({
+    showTerritoryOverlay: v,
+    ...(v ? {} : { territoryPaintMode: false, territoryPaintLayer: null }),
+  })),
+  setTerritoryPaintMode: (v) => set({ territoryPaintMode: v }),
+  setTerritoryPaintLayer: (name) => set({ territoryPaintLayer: name }),
+  setTerritoryPaintBrushRadius: (r) => set({ territoryPaintBrushRadius: r }),
+  setTerritoryPaintErase: (v) => set({ territoryPaintErase: v }),
 }));

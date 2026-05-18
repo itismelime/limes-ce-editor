@@ -68,7 +68,8 @@ export function SettingsEditor() {
   const pickCeToolFolder        = useServerStore(s => s.pickCeToolFolder);
   const ceSources               = useServerStore(s => s.ceSources);
   const setCeSource             = useServerStore(s => s.setCeSource);
-  const reloadCeToolData        = useServerStore(s => s.reloadCeToolData);
+  const reloadCeToolData           = useServerStore(s => s.reloadCeToolData);
+  const reloadTerritoryBitmaps     = useServerStore(s => s.reloadTerritoryBitmaps);
   const missionPath             = useServerStore(s => s.paths.missionPath);
   const activeMap               = useUiStore(s => s.activeMap);
   const [deployingMap, setDeployingMap] = useState<string | null>(null);
@@ -169,7 +170,10 @@ export function SettingsEditor() {
       await deployBundledCeProject(mapId, missionPath);
       clearCeToolCaches();
       setCeSource(mapId, 'user');
-      if (activeMap === mapId) await reloadCeToolData?.();
+      if (activeMap === mapId) {
+        await reloadCeToolData?.();
+        await reloadTerritoryBitmaps?.();
+      }
     } catch (err) {
       useServerStore.setState({ saveError: `Failed to deploy CE project for ${entry.label}: ${err instanceof Error ? err.message : String(err)}` });
     } finally {

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
+import { useServerStore } from '../../store/serverStore';
+import { useUiStore } from '../../store/uiStore';
 import type { CommunityMapDef } from '../../types/map';
 
 function slugify(name: string): string {
@@ -14,12 +16,16 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 
 export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHeading?: boolean; defaultShowAdd?: boolean } = {}) {
   const { maps, addMap, removeMap } = useCommunityMapsStore();
+  const reloadTerritoryBitmaps = useServerStore(s => s.reloadTerritoryBitmaps);
+  const activeMap = useUiStore(s => s.activeMap);
 
   const [label, setLabel]             = useState('');
   const [worldWidth, setWorldWidth]   = useState(15360);
   const [worldHeight, setWorldHeight] = useState(15360);
   const [maxZoom, setMaxZoom]         = useState(7);
   const [pboPath, setPboPath]         = useState<string | undefined>(undefined);
+  const [ceToolProjectPath, setCeToolProjectPath] = useState<string | null>(null);
+  const [importingCe, setImportingCe] = useState(false);
   const [scanningPbo, setScanningPbo] = useState(false);
   const [saving, setSaving]           = useState(false);
   const [showAdd, setShowAdd]         = useState(defaultShowAdd ?? false);
@@ -32,6 +38,21 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
       multiple: false,
     });
     if (typeof selected === 'string') setPboPath(selected);
+  }
+
+  async function handleBrowseCeFolder(mapId: string) {
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (typeof selected !== 'string') return;
+    setImportingCe(true);
+    setError(null);
+    try {
+      const xmlPath = await invoke<string>('copy_ce_project', { sourceDir: selected, mapId });
+      setCeToolProjectPath(xmlPath);
+    } catch (e) {
+      setError(`CE import failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setImportingCe(false);
+    }
   }
 
   async function handleBrowseModFolder() {
@@ -60,6 +81,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     setWorldHeight(cm.worldHeight);
     setMaxZoom(cm.maxZoom);
     setPboPath(cm.pboPath);
+    setCeToolProjectPath(cm.ceToolProjectPath ?? null);
     setError(null);
     setShowAdd(true);
   }
@@ -70,6 +92,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     setWorldHeight(15360);
     setMaxZoom(7);
     setPboPath(undefined);
+    setCeToolProjectPath(null);
     setEditingId(null);
     setError(null);
     setShowAdd(false);
@@ -82,15 +105,20 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     setSaving(true);
     setError(null);
     try {
+      const mapId = editingId ?? slugify(label);
       const def: CommunityMapDef = {
-        id: editingId ?? slugify(label),
+        id: mapId,
         label: label.trim(),
         maxZoom,
         worldWidth: clampedWidth,
         worldHeight: clampedHeight,
         pboPath: pboPath || undefined,
+        ceToolProjectPath: ceToolProjectPath || null,
       };
       await addMap(def);
+      if (ceToolProjectPath && activeMap === mapId) {
+        await reloadTerritoryBitmaps?.();
+      }
       resetForm();
     } catch (err) {
       setError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -123,6 +151,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
                     <p className="text-xs text-slate-500 font-mono">
                       {cm.id} · zoom max {cm.maxZoom} · {cm.worldWidth}×{cm.worldHeight}m
                       {cm.pboPath && <span className="text-emerald-600"> · PBO</span>}
+                      {cm.ceToolProjectPath && <span className="text-lime-600"> · CE zones</span>}
                     </p>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
@@ -235,6 +264,31 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
                   Tiles extracted on first map load (~2 min). Cached afterward.
                 </p>
               )}
+            </div>
+
+            {/* CE Tool project */}
+            <div>
+              <p className="text-[11px] text-slate-500 mb-1">Territory zones (CE Tool project)</p>
+              <div className="flex gap-2 items-center">
+                <button
+                  onClick={() => void handleBrowseCeFolder((editingId ?? slugify(label)) || 'custom')}
+                  disabled={importingCe}
+                  className="px-2.5 py-1.5 rounded-lg text-xs border border-lime-700 text-lime-400 hover:border-lime-500 hover:text-lime-200 transition-colors flex-shrink-0 disabled:opacity-40"
+                >
+                  {importingCe ? 'Importing…' : 'Browse CE folder…'}
+                </button>
+                {ceToolProjectPath ? (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs text-lime-400 truncate">Configured</span>
+                    <button onClick={() => setCeToolProjectPath(null)} className="text-slate-500 hover:text-slate-300 flex-shrink-0">✕</button>
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-600">None</span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-600 mt-1">
+                Select the CE Tool project folder (containing the .xml + layers/ subfolder). Files are copied to app data.
+              </p>
             </div>
 
             {error && <p className="text-xs text-red-400">{error}</p>}
