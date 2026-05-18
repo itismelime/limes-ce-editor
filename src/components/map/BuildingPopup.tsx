@@ -566,6 +566,7 @@ export function BuildingPopup({
   const removeContainerCategory = useServerStore(s => s.removeContainerCategory);
   const updateContainerLootmax = useServerStore(s => s.updateContainerLootmax);
   const [containersOpen, setContainersOpen] = useState(false);
+  const [zoneFilterActive, setZoneFilterActive] = useState(true);
   const [containerTagInputs, setContainerTagInputs] = useState<Record<string, string>>({});
   const [containerCatInputs, setContainerCatInputs] = useState<Record<string, string>>({});
   const [containerLootmaxDrafts, setContainerLootmaxDrafts] = useState<Record<string, string>>({});
@@ -631,7 +632,19 @@ export function BuildingPopup({
     return result.sort((a, b) => b.nominal - a.nominal);
   }, [building.containers, types, originalMapGroupProto, building.typeName]);
 
-  const effectiveItems = allItems;
+  const effectiveItems = useMemo(() => {
+    const activeUsages = zoneUsages.filter(u => u && u !== 'unknown');
+    const activeTiers  = zoneTiers.filter(t => t && t !== 'unknown');
+    const hasZone = activeUsages.length > 0 || activeTiers.length > 0;
+    if (!hasZone || !zoneFilterActive) return allItems;
+    return allItems.filter(item => {
+      const usageOk = activeUsages.length === 0 || item.usages.length === 0 ||
+        item.usages.some(u => activeUsages.some(z => z.toLowerCase() === u.toLowerCase()));
+      const tierOk = activeTiers.length === 0 || item.tiers.length === 0 ||
+        item.tiers.some(t => activeTiers.some(z => z.toLowerCase() === t.toLowerCase()));
+      return usageOk && tierOk;
+    });
+  }, [allItems, zoneFilterActive, zoneUsages, zoneTiers]);
 
   const selectableCategories = useMemo(() => {
     const keys = new Map<string, string>();
@@ -1091,6 +1104,23 @@ export function BuildingPopup({
           +
         </button>
       </div>
+      {(cleanZoneTiers.length > 0 || cleanZoneUsages.length > 0) && (
+        <div className="mb-2 flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] text-slate-500">Zone:</span>
+          {cleanZoneTiers.map(t => (
+            <span key={t} className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-white" style={{ backgroundColor: TIER_COLORS[t] ?? TIER_COLORS.unknown }}>{t}</span>
+          ))}
+          {cleanZoneUsages.map(u => (
+            <span key={u} className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}>{formatUsageLabel(u)}</span>
+          ))}
+          <button
+            onClick={() => setZoneFilterActive(v => !v)}
+            className={`ml-auto text-[10px] px-2 py-0.5 rounded border transition-colors ${zoneFilterActive ? 'border-sky-700 bg-sky-900/40 text-sky-300 hover:bg-sky-900/60' : 'border-slate-600 bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+          >
+            {zoneFilterActive ? 'Showing spawn zone only' : 'Show all'}
+          </button>
+        </div>
+      )}
       {saveStatus && <div className="mb-2 text-[11px] text-slate-400">{saveStatus}</div>}
 
       {building.containers.length === 0 ? (
