@@ -250,6 +250,10 @@ function groupByMission(results: ScanResult[]): MissionFiles[] {
         const parts = normalizePath(r.path).toLowerCase().split('/');
         return parts.some(seg => CETOOL_DIR_RE.test(seg));
       })
+      .filter(r => {
+        const name = (normalizePath(r.path).split('/').pop() ?? '').toLowerCase();
+        return name !== 'cfgareaflags.xml' && name !== 'cfgareasflags.xml';
+      })
       .sort((a, b) => {
         // prefer files named after the mission (e.g. chernarusplus.xml)
         const missionLower = missionName.toLowerCase().replace(/[^a-z0-9]/g, '');

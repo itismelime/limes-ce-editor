@@ -25,6 +25,13 @@ interface TerritoryPaintDiff {
   diffs: Array<{ idx: number; prev: number }>;
 }
 
+export interface TerritoryBitmapOverride {
+  xmlContent: string;
+  layerLoader: (name: string) => Promise<Uint8Array | null>;
+  worldSize: number;
+  layersDir: string | null; // null = bundled / read-only, disables paint
+}
+
 interface FilePaths {
   missionPath: string | null;
   typesPath: string | null;
@@ -158,7 +165,10 @@ interface ServerState {
   territoryBitmapSize: { width: number; height: number } | null;
   ceToolWorldSize: number | null;
 
-  loadTerritoryBitmaps: () => Promise<void>;
+  clearTerritoryState: () => void;
+  loadTerritoryBitmaps: (override?: TerritoryBitmapOverride) => Promise<void>;
+  reloadTerritoryBitmaps?: () => Promise<void>;
+  setReloadTerritoryBitmaps: (fn: (() => Promise<void>) | undefined) => void;
   commitTerritoryPaint: (layerName: string, pixels: Uint8ClampedArray) => void;
   undoTerritoryPaint: () => void;
   saveTerritoryBitmaps: () => Promise<void>;
@@ -175,6 +185,33 @@ interface ServerState {
   saveGameplay: () => Promise<void>;
   saveLimitsDefinition: () => Promise<void>;
   saveLimitsDefinitionUser: () => Promise<void>;
+}
+
+async function decodeLayerImage(raw: Uint8Array): Promise<Uint8ClampedArray | null> {
+  // PNG magic: 89 50 4E 47
+  if (raw[0] === 0x89 && raw[1] === 0x50 && raw[2] === 0x4E && raw[3] === 0x47) {
+    try {
+      const blob = new Blob([raw], { type: 'image/png' });
+      const bmp = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close();
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const out = new Uint8ClampedArray(data.length);
+      for (let i = 0; i < data.length; i += 4) {
+        const active = data[i] > 127 || data[i + 1] > 127 || data[i + 2] > 127 || data[i + 3] > 127;
+        const v = active ? 255 : 0;
+        out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = active ? 255 : 0;
+      }
+      return out;
+    } catch { return null; }
+  }
+  try {
+    return parseTgaLayer(raw).pixels;
+  } catch { return null; }
 }
 
 function parseTgaLayer(bytes: Uint8Array): { pixels: Uint8ClampedArray; width: number; height: number } {
@@ -351,6 +388,7 @@ export const useServerStore = create<ServerState>((set, get) => {
   pickCeToolFolder: undefined,
   ceSources: {},
   reloadCeToolData: undefined,
+  reloadTerritoryBitmaps: undefined,
   weather: null,
   gameplay: null,
   limitsDefinition: null,
@@ -396,6 +434,7 @@ export const useServerStore = create<ServerState>((set, get) => {
   setPickCeToolFolder: (fn) => set({ pickCeToolFolder: fn }),
   setCeSource: (mapId, source) => set(s => ({ ceSources: { ...s.ceSources, [mapId]: source } })),
   setReloadCeToolData: (fn) => set({ reloadCeToolData: fn }),
+  setReloadTerritoryBitmaps: (fn) => set({ reloadTerritoryBitmaps: fn }),
   setWeather: (data) => set({ weather: data, originalWeather: data }),
   setGameplay: (data) => set({ gameplay: data, originalGameplay: data }),
   updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),
@@ -1020,16 +1059,41 @@ export const useServerStore = create<ServerState>((set, get) => {
     });
   },
 
-  loadTerritoryBitmaps: async () => {
+  clearTerritoryState: () => {
+    clearCeToolBitmapSource();
+    set({
+      ceToolLayers: [],
+      territoryBitmaps: new Map(),
+      originalTerritoryBitmaps: new Map(),
+      territoryBitmapSize: null,
+      ceToolWorldSize: null,
+      territoryPaintHistory: [],
+    });
+  },
+
+  loadTerritoryBitmaps: async (override?: TerritoryBitmapOverride) => {
     const { paths } = get();
-    if (!paths.ceToolXmlPath || !paths.ceToolLayersDir) return;
 
     let xmlText: string;
-    try {
-      const { readFile } = await import('../lib/fileDiscovery');
-      xmlText = await readFile(paths.ceToolXmlPath);
-    } catch {
-      return;
+    let effectiveLayersDir: string | null;
+
+    if (override) {
+      xmlText = override.xmlContent;
+      effectiveLayersDir = override.layersDir;
+    } else {
+      if (!paths.ceToolXmlPath || !paths.ceToolLayersDir) return;
+      try {
+        const { readFile } = await import('../lib/fileDiscovery');
+        xmlText = await readFile(paths.ceToolXmlPath);
+      } catch {
+        return;
+      }
+      effectiveLayersDir = paths.ceToolLayersDir;
+    }
+
+    // Update ceToolLayersDir so paint mode check reflects the source
+    if (override) {
+      set(s => ({ paths: { ...s.paths, ceToolLayersDir: override.layersDir } }));
     }
 
     const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
@@ -1038,14 +1102,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     const globalLayer = doc.querySelector('global > layer');
     const globalWorld = doc.querySelector('global > world');
     const bitmapSize = parseInt(globalLayer?.getAttribute('size') ?? '4096', 10);
-    const worldSize = parseInt(globalWorld?.getAttribute('size') ?? '15360', 10);
-
-    // Build usage index (position in <usages> list = bit index)
-    const usageNames: string[] = [];
-    doc.querySelectorAll('areas > usages > usage').forEach(el => {
-      const name = el.getAttribute('name');
-      if (name) usageNames.push(name);
-    });
+    const resolvedWorldSize = override?.worldSize ?? parseInt(globalWorld?.getAttribute('size') ?? '15360', 10);
 
     // Parse layer metadata
     const layers: CeToolLayerMeta[] = [];
@@ -1053,10 +1110,18 @@ export const useServerStore = create<ServerState>((set, get) => {
       const name = el.getAttribute('name') ?? '';
       const usageFlags = parseInt(el.getAttribute('usage_flags') ?? '0', 10);
       const valueFlags = parseInt(el.getAttribute('value_flags') ?? '0', 10);
-      const isPaintable = /^usgFlg_Paint-/i.test(name) || /^valueFlg_/i.test(name);
+      const isStandardPaint = /^usgFlg_Paint-/i.test(name);
+      const isStandardValue = /^valueFlg_/i.test(name);
+      const isPaintable = isStandardPaint || isStandardValue || valueFlags !== 0 || usageFlags !== 0;
       const paintMatch = name.match(/^usgFlg_Paint-(.+)$/i);
+      const defMatch   = name.match(/^usgFlg_Def-(.+)$/i);
       const valueMatch = name.match(/^valueFlg_(.+)$/i);
-      const usageName = paintMatch ? paintMatch[1] : valueMatch ? valueMatch[1] : null;
+      const tierNumMatch = !paintMatch && !defMatch && !valueMatch && name.match(/^tier(\d+)$/i);
+      const usageName = paintMatch ? paintMatch[1]
+        : defMatch   ? defMatch[1]
+        : valueMatch ? valueMatch[1]
+        : tierNumMatch ? `Tier${tierNumMatch[1]}`
+        : name;
       layers.push({ name, usageFlags, valueFlags, isPaintable, usageName });
     });
 
@@ -1064,16 +1129,28 @@ export const useServerStore = create<ServerState>((set, get) => {
     const bitmaps = new Map<string, Uint8ClampedArray>();
     const originals = new Map<string, Uint8ClampedArray>();
 
+    const layerLoader = override?.layerLoader ?? ((name: string) => {
+      const tgaPath = `${effectiveLayersDir}/${name}.tga`;
+      return readBinaryFile(tgaPath).catch(() => null);
+    });
+
     await Promise.all(
       layers.filter(l => l.isPaintable).map(async (layer) => {
-        const tgaPath = `${paths.ceToolLayersDir}/${layer.name}.tga`;
         try {
-          const raw = await readBinaryFile(tgaPath);
-          const { pixels: arr } = parseTgaLayer(raw);
-          bitmaps.set(layer.name, arr);
-          originals.set(layer.name, arr.slice());
-        } catch {
-          // layer file missing — create empty bitmap
+          const raw = await layerLoader(layer.name);
+          if (raw) {
+            const arr = await decodeLayerImage(raw);
+            if (arr) {
+              bitmaps.set(layer.name, arr);
+              originals.set(layer.name, arr.slice());
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('[territory] layer parse failed:', layer.name, e);
+        }
+        // Only allocate empty bitmap for file-based paths (not bundled read-only)
+        if (effectiveLayersDir !== null) {
           const empty = new Uint8ClampedArray(bitmapSize * bitmapSize * 4);
           bitmaps.set(layer.name, empty);
           originals.set(layer.name, empty.slice());
@@ -1086,9 +1163,9 @@ export const useServerStore = create<ServerState>((set, get) => {
       territoryBitmaps: bitmaps,
       originalTerritoryBitmaps: originals,
       territoryBitmapSize: { width: bitmapSize, height: bitmapSize },
-      ceToolWorldSize: worldSize,
+      ceToolWorldSize: resolvedWorldSize,
     });
-    setCeToolBitmapSource(bitmaps, layers, { width: bitmapSize, height: bitmapSize }, worldSize);
+    setCeToolBitmapSource(bitmaps, layers, { width: bitmapSize, height: bitmapSize }, resolvedWorldSize);
   },
 
   commitTerritoryPaint: (layerName, newPixels) => {
@@ -1141,7 +1218,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('territory zones', async () => {
       const { width, height } = territoryBitmapSize;
       // Write each modified paintable TGA
-      for (const layer of ceToolLayers.filter(l => l.isPaintable)) {
+      for (const layer of ceToolLayers.filter(l => l.isPaintable && !/^usgFlg_Def-/i.test(l.name))) {
         const pixels = territoryBitmaps.get(layer.name);
         if (!pixels) continue;
         await writeBinaryFile(

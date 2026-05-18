@@ -19,7 +19,7 @@ import { getAllMapConfigs } from '../lib/mapConfig';
 import { parseCeToolProjectXml } from '../lib/ceToolParser';
 import type { MissionData, CeEntry, CeToolProject, DayZType, SpawnableType } from '../types/dayz';
 import type { CommunityMapDef } from '../types/map';
-import { useServerStore } from '../store/serverStore';
+import { useServerStore, type TerritoryBitmapOverride } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
 import { useCommunityMapsStore } from '../store/communityMapsStore';
 
@@ -31,7 +31,7 @@ const MAP_KEYWORDS: Record<string, string[]> = {
 };
 
 const FILE_KEYS = ['typesPath', 'eventSpawnsPath', 'eventsPath', 'spawnableTypesPath'] as const;
-const LAYER_EXTS = ['.png', '.bmp', '.tga'];
+const LAYER_EXTS = ['.tga', '.png', '.bmp'];
 const ASSET_BASE = import.meta.env.BASE_URL || '/';
 
 const BUNDLED_CETOOL_PROJECTS: Record<string, { xmlPath: string }> = {
@@ -62,6 +62,8 @@ async function readBundledBinary(path: string): Promise<Uint8Array> {
   const url = toAssetUrl(path);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`bundled asset not found: ${url}`);
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('text/html')) throw new Error(`bundled asset returned HTML (SPA fallback): ${url}`);
   const ab = await res.arrayBuffer();
   return new Uint8Array(ab);
 }
@@ -331,6 +333,47 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
   };
 }
 
+async function loadTerritoryBitmapsFallback(
+  activeMap: string,
+  communityMaps: CommunityMapDef[],
+  loadTerritoryBitmaps: (override?: TerritoryBitmapOverride) => Promise<void>,
+  getAllConfigs: typeof getAllMapConfigs,
+): Promise<void> {
+  // 1. Community map with uploaded CE project
+  const communityMap = communityMaps.find(m => m.id === activeMap);
+  if (communityMap?.ceToolProjectPath) {
+    try {
+      const xmlText = await readFile(communityMap.ceToolProjectPath);
+      const layersDir = communityMap.ceToolProjectPath.replace(/[/\\][^/\\]+$/, '') + '/layers';
+      const worldSize = communityMap.worldWidth;
+      const layerLoader = async (name: string): Promise<Uint8Array | null> => {
+        try { return await readBinaryFile(`${layersDir}/${name}.tga`); }
+        catch { return null; }
+      };
+      await loadTerritoryBitmaps({ xmlContent: xmlText, layerLoader, worldSize, layersDir });
+      return;
+    } catch { /* fall through */ }
+  }
+
+  // 2. Bundled data for built-in maps
+  const bundledEntry = BUNDLED_CETOOL_PROJECTS[activeMap];
+  if (!bundledEntry) return;
+
+  let xmlText: string;
+  try {
+    xmlText = await readBundledText(bundledEntry.xmlPath);
+  } catch {
+    return;
+  }
+
+  const mapCfg = getAllConfigs(communityMaps)[activeMap];
+  const worldSize = mapCfg?.worldWidth ?? 15360;
+  const projectDir = bundledEntry.xmlPath.slice(0, bundledEntry.xmlPath.lastIndexOf('/'));
+
+  const layerLoader = (name: string) => loadBundledLayerByName(projectDir, name);
+  await loadTerritoryBitmaps({ xmlContent: xmlText, layerLoader, worldSize, layersDir: null });
+}
+
 export function useServerFolder() {
   const setMission           = useServerStore(s => s.setMission);
   const setPaths             = useServerStore(s => s.setPaths);
@@ -345,12 +388,14 @@ export function useServerFolder() {
   const setOpenServerFolder  = useServerStore(s => s.setOpenServerFolder);
   const setCeSource          = useServerStore(s => s.setCeSource);
   const setReloadCeToolData  = useServerStore(s => s.setReloadCeToolData);
+  const setReloadTerritoryBitmaps = useServerStore(s => s.setReloadTerritoryBitmaps);
   const ceToolFolderOverride  = useServerStore(s => s.ceToolFolderOverride);
   const setWeather           = useServerStore(s => s.setWeather);
   const setGameplay          = useServerStore(s => s.setGameplay);
   const setLimitsDefinition  = useServerStore(s => s.setLimitsDefinition);
   const setLimitsDefinitionUser = useServerStore(s => s.setLimitsDefinitionUser);
   const loadTerritoryBitmaps = useServerStore(s => s.loadTerritoryBitmaps);
+  const clearTerritoryState  = useServerStore(s => s.clearTerritoryState);
   const setLoading          = useUiStore(s => s.setLoading);
   const setLoadError        = useUiStore(s => s.setLoadError);
   const setLoadWarnings     = useUiStore(s => s.setLoadWarnings);
@@ -399,6 +444,7 @@ export function useServerFolder() {
         kws.some(kw => lowerName.includes(kw))
       )?.[0] ?? null;
       if (detectedMap) setActiveMap(detectedMap);
+      const resolvedMap = detectedMap ?? activeMap;
 
       // Economy core
       let economyCoreEntries: CeEntry[] = [];
@@ -435,13 +481,13 @@ export function useServerFolder() {
       setCeToolProject(null);
       const { ceProject, loaded: tiersLoaded, ceSource, warnings: tierWarnings } = await loadCeToolTierData({
         missionPath: m.missionPath,
-        activeMap,
+        activeMap: resolvedMap,
         ceToolFolderOverride,
         serverRootPath: serverRootRef.current,
         communityMaps,
       });
       setCeToolProject(ceProject);
-      setCeSource(activeMap, ceSource);
+      setCeSource(resolvedMap, ceSource);
       if (tiersLoaded) setTierZonesLoaded(true);
       if (!tiersLoaded) console.info('[tiers] No CE Tool tier layers found for this map.');
       else console.info('[tiers] Tier zones loaded successfully');
@@ -484,18 +530,21 @@ export function useServerFolder() {
         catch { /* optional — silently skip */ }
       }
 
+      clearTerritoryState();
       setPaths({ ceToolXmlPath: m.ceToolXmlPath ?? null, ceToolLayersDir: m.ceToolLayersDir ?? null });
       if (m.ceToolXmlPath) {
-        loadTerritoryBitmaps().catch(() => { /* optional — silently skip */ });
+        await loadTerritoryBitmaps().catch((e) => console.warn('[territory] file-based load failed', e));
+      } else {
+        await loadTerritoryBitmapsFallback(resolvedMap, communityMaps, loadTerritoryBitmaps, getAllMapConfigs).catch((e) => console.warn('[territory] fallback failed', e));
       }
 
-      if (m.mapImagePath) setMapImagePath(activeMap, convertFileSrc(m.mapImagePath));
+      if (m.mapImagePath) setMapImagePath(resolvedMap, convertFileSrc(m.mapImagePath));
     } catch (err) {
       if (err instanceof Error) setLoadError(`error:${err.message}`);
     } finally {
       setLoading(false);
     }
-  }, [activeMap, ceToolFolderOverride, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps]);
+  }, [activeMap, ceToolFolderOverride, communityMaps, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps, clearTerritoryState]);
 
   // Keep ref current every render so the effect below always has the latest version.
   selectMissionRef.current = selectMission;
@@ -636,6 +685,21 @@ export function useServerFolder() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap, ceToolFolderOverride, setCeToolProject, setTierZonesLoaded, setCeSource, setLoadWarnings]);
 
+  const reloadTerritoryBitmaps = useCallback(async () => {
+    const { missionPath } = useServerStore.getState().paths;
+    if (missionPath) {
+      const newXmlPath = await findCeToolProjectXmlInMission(missionPath, activeMap).catch(() => null);
+      if (newXmlPath) {
+        const layersDir = newXmlPath.replace(/[/\\][^/\\]+$/, '') + '/layers';
+        useServerStore.getState().setPaths({ ceToolXmlPath: newXmlPath, ceToolLayersDir: layersDir });
+        await loadTerritoryBitmaps().catch(() => {});
+        return;
+      }
+    }
+    await loadTerritoryBitmapsFallback(activeMap, communityMaps, loadTerritoryBitmaps, getAllMapConfigs).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMap, communityMaps, loadTerritoryBitmaps]);
+
   // Expose callbacks through store so other components can access them without calling hook twice
   useEffect(() => {
     setPickCeToolFolder(pickCeToolFolder);
@@ -650,6 +714,11 @@ export function useServerFolder() {
     setReloadCeToolData(reloadCeToolData);
     return () => setReloadCeToolData(undefined);
   }, [reloadCeToolData, setReloadCeToolData]);
+
+  useEffect(() => {
+    setReloadTerritoryBitmaps(reloadTerritoryBitmaps);
+    return () => setReloadTerritoryBitmaps(undefined);
+  }, [reloadTerritoryBitmaps, setReloadTerritoryBitmaps]);
 
   const cancelPicker = useCallback(() => {
     setPendingMissions(null);

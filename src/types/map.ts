@@ -9,6 +9,7 @@ export interface CommunityMapDef {
   worldWidth: number;
   worldHeight: number;
   pboPath?: string;
+  ceToolProjectPath?: string | null;
 }
 
 export interface MapConfig {

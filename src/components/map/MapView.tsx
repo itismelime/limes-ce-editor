@@ -515,7 +515,7 @@ function TerritoryBitmapOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpre
     for (const [layerName, pixels] of territoryBitmaps) {
       const meta = ceToolLayers.find(l => l.name === layerName);
       const usageName = meta?.usageName ?? layerName.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
-      const isTierLayer = layerName.startsWith('valueFlg_') && /^Tier\d+$/i.test(usageName);
+      const isTierLayer = (meta ? meta.valueFlags !== 0 : layerName.startsWith('valueFlg_')) && /^Tier\d+$/i.test(usageName);
       const isVisible = isTierLayer
         ? !hiddenTiers.includes(usageName)
         : !hiddenUsageSet.has(usageName.toLowerCase());
@@ -826,6 +826,7 @@ export function MapView() {
   const territoryBitmaps       = useServerStore(s => s.territoryBitmaps);
   const territoryBitmapSize    = useServerStore(s => s.territoryBitmapSize);
   const mission                = useServerStore(s => s.mission);
+  const canPaint               = useServerStore(s => !!s.paths.ceToolLayersDir);
   const showTerritoryOverlay   = useUiStore(s => s.showTerritoryOverlay);
   const setShowTerritoryOverlay = useUiStore(s => s.setShowTerritoryOverlay);
   const territoryPaintMode     = useUiStore(s => s.territoryPaintMode);
@@ -837,6 +838,7 @@ export function MapView() {
   const territoryPaintErase    = useUiStore(s => s.territoryPaintErase);
   const setTerritoryPaintErase = useUiStore(s => s.setTerritoryPaintErase);
   const paintableLayers = useMemo(() => ceToolLayers.filter(l => l.isPaintable), [ceToolLayers]);
+  const editableLayers  = useMemo(() => ceToolLayers.filter(l => l.isPaintable && !/^usgFlg_Def-/i.test(l.name)), [ceToolLayers]);
   const [overlaysReady, setOverlaysReady] = useState(false);
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(44);
@@ -1334,7 +1336,7 @@ export function MapView() {
       </div>
 
       {/* Territory paint toolbar */}
-      {showTerritoryOverlay && paintableLayers.length > 0 && (
+      {showTerritoryOverlay && editableLayers.length > 0 && (
         <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto">
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 shadow-xl">
             <span className="text-[11px] text-slate-500 whitespace-nowrap">Layer:</span>
@@ -1344,7 +1346,7 @@ export function MapView() {
               className="h-6 bg-slate-800 border border-slate-700 rounded px-1 text-[11px] text-slate-200 focus:outline-none focus:border-lime-500"
             >
               <option value="">— pick —</option>
-              {paintableLayers.map(layer => {
+              {editableLayers.map(layer => {
                 const usageName = layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '').replace(/^valueFlg_/i, '');
                 return <option key={layer.name} value={layer.name}>{usageName}</option>;
               })}
@@ -1380,7 +1382,8 @@ export function MapView() {
                 if (activating) setShowTerritoryOverlay(true);
               }}
               className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${territoryPaintMode && !territoryPaintErase ? 'bg-lime-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
-              disabled={!territoryPaintLayer}
+              disabled={!territoryPaintLayer || !canPaint}
+              title={!canPaint ? 'Deploy CE files to mission to enable editing' : undefined}
             >
               Paint
             </button>
@@ -1392,7 +1395,8 @@ export function MapView() {
                 if (activating) setShowTerritoryOverlay(true);
               }}
               className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${territoryPaintMode && territoryPaintErase ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
-              disabled={!territoryPaintLayer}
+              disabled={!territoryPaintLayer || !canPaint}
+              title={!canPaint ? 'Deploy CE files to mission to enable editing' : undefined}
             >
               Erase
             </button>

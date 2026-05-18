@@ -214,8 +214,11 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const zoneTiers  = zones?.tiers  ?? [];
 
       if (useZoneData) {
-        const effectiveUsages = zoneUsages.length > 0 ? zoneUsages : ['unknown'];
-        if (effectiveUsages.every(u => hiddenUsageSet.has(u.toLowerCase()))) return [];
+        // Merge CE zone usages + surface tags; show if at least one tag is visible
+        const ceUsages = zoneUsages.length > 0 ? zoneUsages : ['unknown'];
+        const protoUsages = b.usages.length > 0 ? b.usages : ['unknown'];
+        const allUsages = [...new Set([...ceUsages, ...protoUsages].map(u => u.trim().toLowerCase()))];
+        if (allUsages.every(u => hiddenUsageSet.has(u))) return [];
       } else {
         const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
         if (normalizedUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase()))) return [];

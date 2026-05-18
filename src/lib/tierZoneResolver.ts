@@ -57,13 +57,16 @@ export function setCeToolBitmapSource(
     if (!pixels) continue;
     const tierNumMatch = layer.name.match(/^valueFlg_Tier(\d+)/i);
     const valueMatch = !tierNumMatch && layer.name.match(/^valueFlg_(.+)/i);
+    const usageNameResolved = (layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '')) || null;
+    const tierFromUsageName = usageNameResolved?.match(/^Tier(\d+)$/i)?.[1];
     if (tierNumMatch) {
       entries.push({ pixels, isTier: true, tierName: `Tier${tierNumMatch[1]}`, usageName: null });
     } else if (valueMatch) {
       entries.push({ pixels, isTier: true, tierName: valueMatch[1], usageName: null });
+    } else if (tierFromUsageName) {
+      entries.push({ pixels, isTier: true, tierName: `Tier${tierFromUsageName}`, usageName: null });
     } else {
-      const usageName = (layer.usageName ?? layer.name.replace(/^usgFlg_Paint-/i, '')) || null;
-      entries.push({ pixels, isTier: false, tierName: null, usageName });
+      entries.push({ pixels, isTier: false, tierName: null, usageName: usageNameResolved });
     }
   }
   _ceToolData = entries.length > 0 ? { entries, width: bitmapSize.width, height: bitmapSize.height, worldSize } : null;
@@ -205,7 +208,6 @@ async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height
       }
       if (active) { mask[p] = 1; activeCount++; }
     }
-    console.debug(`[tier TGA] ${width}×${height} bpp=${bpp} activePixels=${activeCount}/${width * height}`);
     return { width, height, mask };
   }
 
@@ -234,7 +236,6 @@ async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height
       const active = a > 64 && brightness > 128;
       if (active) { mask[p] = 1; activeCount++; }
     }
-    console.debug(`[tier PNG/BMP] ${bitmap.width}×${bitmap.height} activePixels=${activeCount}/${bitmap.width * bitmap.height}`);
     return { width: bitmap.width, height: bitmap.height, mask };
   } finally {
     bitmap.close();
