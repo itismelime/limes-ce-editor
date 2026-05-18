@@ -560,6 +560,15 @@ export function BuildingPopup({
   const setCustomUsageColor = useUiStore(s => s.setCustomUsageColor);
   const removeCustomUsageColor = useUiStore(s => s.removeCustomUsageColor);
   const removeLimitsUsage = useServerStore(s => s.removeLimitsUsage);
+  const addContainerTag = useServerStore(s => s.addContainerTag);
+  const removeContainerTag = useServerStore(s => s.removeContainerTag);
+  const addContainerCategory = useServerStore(s => s.addContainerCategory);
+  const removeContainerCategory = useServerStore(s => s.removeContainerCategory);
+  const updateContainerLootmax = useServerStore(s => s.updateContainerLootmax);
+  const [containersOpen, setContainersOpen] = useState(false);
+  const [containerTagInputs, setContainerTagInputs] = useState<Record<string, string>>({});
+  const [containerCatInputs, setContainerCatInputs] = useState<Record<string, string>>({});
+  const [containerLootmaxDrafts, setContainerLootmaxDrafts] = useState<Record<string, string>>({});
   const [usageDropdownOpen, setUsageDropdownOpen] = useState(false);
   const [usageSearch, setUsageSearch] = useState('');
   const [pendingUsageColor, setPendingUsageColor] = useState('#94a3b8');
@@ -972,6 +981,103 @@ export function BuildingPopup({
           {(hasZoneTier || orderedProtoTiers.length > 0) && hasInferredTier && <span className="mx-1">+</span>}
           {hasInferredTier && (
             <span className="text-fuchsia-300">inferred {inferredTier}</span>
+          )}
+        </div>
+      )}
+
+      {building.containers.length > 0 && (
+        <div className="mb-3 border border-slate-700 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setContainersOpen(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-1.5 bg-slate-800/60 hover:bg-slate-800 text-xs text-slate-300 font-medium"
+          >
+            <span>Containers ({building.containers.length})</span>
+            <span className="text-slate-500">{containersOpen ? '▲' : '▼'}</span>
+          </button>
+          {containersOpen && (
+            <div className="divide-y divide-slate-800">
+              {building.containers.map(container => {
+                const cKey = container.name;
+                const lootDraft = containerLootmaxDrafts[cKey] ?? String(container.lootmax);
+                const tagInput = containerTagInputs[cKey] ?? '';
+                const catInput = containerCatInputs[cKey] ?? '';
+                return (
+                  <div key={cKey} className="px-3 py-2 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] text-slate-400 truncate flex-1" title={cKey}>{cKey}</span>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-[10px] text-slate-500">lootmax</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={lootDraft}
+                          onChange={e => setContainerLootmaxDrafts(p => ({ ...p, [cKey]: e.target.value }))}
+                          onBlur={() => {
+                            const v = parseInt(lootDraft, 10);
+                            if (!isNaN(v) && v >= 0) updateContainerLootmax(building.typeName, cKey, v);
+                            setContainerLootmaxDrafts(p => ({ ...p, [cKey]: String(container.lootmax) }));
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                          }}
+                          className="h-5 w-10 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-slate-300"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 mr-1">Tags:</span>
+                      <span className="inline-flex flex-wrap gap-1 items-center">
+                        {container.tags.map(tag => (
+                          <span key={tag} className="group inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: getUsageColor(tag), color: getUsageTextColor(getUsageColor(tag)) }}>
+                            {tag}
+                            <button onClick={() => removeContainerTag(building.typeName, cKey, tag)} className="opacity-0 group-hover:opacity-80 hover:!opacity-100 leading-none">×</button>
+                          </span>
+                        ))}
+                        <span className="inline-flex items-center gap-0.5">
+                          <input
+                            value={tagInput}
+                            onChange={e => setContainerTagInputs(p => ({ ...p, [cKey]: e.target.value }))}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && tagInput.trim()) {
+                                addContainerTag(building.typeName, cKey, tagInput.trim());
+                                setContainerTagInputs(p => ({ ...p, [cKey]: '' }));
+                              }
+                            }}
+                            placeholder="+ tag"
+                            className="h-4 w-14 bg-slate-800/60 border border-slate-700 rounded px-1 text-[10px] text-slate-300 placeholder-slate-600"
+                          />
+                        </span>
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 mr-1">Categories:</span>
+                      <span className="inline-flex flex-wrap gap-1 items-center">
+                        {container.categories.map(cat => (
+                          <span key={cat} className="group inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px]">
+                            {cat}
+                            <button onClick={() => removeContainerCategory(building.typeName, cKey, cat)} className="opacity-0 group-hover:opacity-80 hover:!opacity-100 leading-none">×</button>
+                          </span>
+                        ))}
+                        <span className="inline-flex items-center gap-0.5">
+                          <input
+                            value={catInput}
+                            onChange={e => setContainerCatInputs(p => ({ ...p, [cKey]: e.target.value }))}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && catInput.trim()) {
+                                addContainerCategory(building.typeName, cKey, catInput.trim());
+                                setContainerCatInputs(p => ({ ...p, [cKey]: '' }));
+                              }
+                            }}
+                            placeholder="+ cat"
+                            className="h-4 w-14 bg-slate-800/60 border border-slate-700 rounded px-1 text-[10px] text-slate-300 placeholder-slate-600"
+                          />
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

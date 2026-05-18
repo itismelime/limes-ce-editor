@@ -252,9 +252,14 @@ export interface LimitsDefinition {
   values: string[];
 }
 
+export interface LimitsUsageEntry {
+  name: string;
+  flags?: number;
+}
+
 export interface LimitsUsageGroup {
   name: string;
-  usages: string[];
+  usages: LimitsUsageEntry[];
 }
 
 export interface LimitsValueGroup {

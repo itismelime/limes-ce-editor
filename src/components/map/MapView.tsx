@@ -827,6 +827,11 @@ export function MapView() {
   const territoryBitmapSize    = useServerStore(s => s.territoryBitmapSize);
   const mission                = useServerStore(s => s.mission);
   const canPaint               = useServerStore(s => !!s.paths.ceToolLayersDir);
+  const addCeToolLayer         = useServerStore(s => s.addCeToolLayer);
+  const removeCeToolLayer      = useServerStore(s => s.removeCeToolLayer);
+  const limitsDefinition       = useServerStore(s => s.limitsDefinition);
+  const missionPath            = useServerStore(s => s.paths.missionPath);
+  const limitsDefinitionUserPath = useServerStore(s => s.paths.limitsDefinitionUserPath);
   const showTerritoryOverlay   = useUiStore(s => s.showTerritoryOverlay);
   const setShowTerritoryOverlay = useUiStore(s => s.setShowTerritoryOverlay);
   const territoryPaintMode     = useUiStore(s => s.territoryPaintMode);
@@ -839,7 +844,17 @@ export function MapView() {
   const setTerritoryPaintErase = useUiStore(s => s.setTerritoryPaintErase);
   const paintableLayers = useMemo(() => ceToolLayers.filter(l => l.isPaintable), [ceToolLayers]);
   const editableLayers  = useMemo(() => ceToolLayers.filter(l => l.isPaintable && !/^usgFlg_Def-/i.test(l.name)), [ceToolLayers]);
+  const [newLayerForm, setNewLayerForm]   = useState(false);
+  const [newLayerName, setNewLayerName]   = useState('');
   const [overlaysReady, setOverlaysReady] = useState(false);
+
+  // Clear selected paint layer + deactivate mode if layer was removed (e.g. undo/delete)
+  useEffect(() => {
+    if (territoryPaintLayer && !editableLayers.some(l => l.name === territoryPaintLayer)) {
+      setTerritoryPaintLayer(null);
+      setTerritoryPaintMode(false);
+    }
+  }, [editableLayers, territoryPaintLayer, setTerritoryPaintLayer, setTerritoryPaintMode]);
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(44);
 
@@ -1337,7 +1352,15 @@ export function MapView() {
 
       {/* Territory paint toolbar */}
       {showTerritoryOverlay && editableLayers.length > 0 && (
-        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto">
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto flex flex-col items-center gap-2">
+          {newLayerForm && !missionPath && (
+            <div className="bg-amber-950/80 border border-amber-700 rounded-lg px-3 py-2 text-[11px] text-amber-300 max-w-sm text-center space-y-1">
+              <p className="font-medium">No mission folder loaded</p>
+              <p className="text-amber-400/80">
+                The usage flag mapping can't be saved — load a mission folder first so cfglimitsdefinitionuser.xml can be written.
+              </p>
+            </div>
+          )}
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 shadow-xl">
             <span className="text-[11px] text-slate-500 whitespace-nowrap">Layer:</span>
             <select
@@ -1376,10 +1399,13 @@ export function MapView() {
             <div className="w-px h-4 bg-slate-700 mx-1" />
             <button
               onClick={() => {
-                const activating = !territoryPaintMode || territoryPaintErase;
-                setTerritoryPaintErase(false);
-                setTerritoryPaintMode(activating);
-                if (activating) setShowTerritoryOverlay(true);
+                if (territoryPaintMode && !territoryPaintErase) {
+                  setTerritoryPaintMode(false);
+                } else {
+                  setTerritoryPaintErase(false);
+                  setTerritoryPaintMode(true);
+                  setShowTerritoryOverlay(true);
+                }
               }}
               className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${territoryPaintMode && !territoryPaintErase ? 'bg-lime-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
               disabled={!territoryPaintLayer || !canPaint}
@@ -1389,10 +1415,13 @@ export function MapView() {
             </button>
             <button
               onClick={() => {
-                const activating = !territoryPaintMode || !territoryPaintErase;
-                setTerritoryPaintErase(true);
-                setTerritoryPaintMode(activating);
-                if (activating) setShowTerritoryOverlay(true);
+                if (territoryPaintMode && territoryPaintErase) {
+                  setTerritoryPaintMode(false);
+                } else {
+                  setTerritoryPaintErase(true);
+                  setTerritoryPaintMode(true);
+                  setShowTerritoryOverlay(true);
+                }
               }}
               className={`h-6 px-2 rounded text-[11px] font-medium transition-colors ${territoryPaintMode && territoryPaintErase ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
               disabled={!territoryPaintLayer || !canPaint}
@@ -1400,6 +1429,70 @@ export function MapView() {
             >
               Erase
             </button>
+            {canPaint && territoryPaintLayer && !newLayerForm && (
+              <>
+                <div className="w-px h-4 bg-slate-700 mx-1" />
+                <button
+                  onClick={() => removeCeToolLayer(territoryPaintLayer)}
+                  className="h-6 px-2 rounded text-[11px] font-medium bg-slate-800 border border-slate-700 text-slate-400 hover:text-rose-300 hover:border-rose-700 transition-colors"
+                  title="Remove this layer"
+                >
+                  Delete Layer
+                </button>
+              </>
+            )}
+            {canPaint && !newLayerForm && (
+              <>
+                <div className="w-px h-4 bg-slate-700 mx-1" />
+                <button
+                  onClick={() => { setNewLayerForm(true); setNewLayerName(''); }}
+                  className="h-6 px-2 rounded text-[11px] font-medium bg-slate-800 border border-slate-700 text-slate-400 hover:text-lime-300 hover:border-lime-700 transition-colors"
+                >
+                  + New Layer
+                </button>
+              </>
+            )}
+            {canPaint && newLayerForm && (
+              <>
+                <div className="w-px h-4 bg-slate-700 mx-1" />
+                <input
+                  autoFocus
+                  value={newLayerName}
+                  onChange={e => setNewLayerName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const name = newLayerName.trim();
+                      if (!name) return;
+                      addCeToolLayer(name);
+                      setTerritoryPaintLayer(`usgFlg_Paint-${name}`);
+                      setNewLayerForm(false);
+                    }
+                    if (e.key === 'Escape') setNewLayerForm(false);
+                  }}
+                  placeholder="e.g. Endgame"
+                  className="h-6 w-28 bg-slate-800 border border-lime-700 rounded px-1.5 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-lime-500"
+                />
+                <button
+                  onClick={() => {
+                    const name = newLayerName.trim();
+                    if (!name) return;
+                    addCeToolLayer(name);
+                    setTerritoryPaintLayer(`usgFlg_Paint-${name}`);
+                    setNewLayerForm(false);
+                  }}
+                  disabled={!newLayerName.trim()}
+                  className="h-6 px-2 rounded text-[11px] font-medium bg-lime-600 hover:bg-lime-500 text-white transition-colors disabled:opacity-40"
+                >
+                  Create
+                </button>
+                <button
+                  onClick={() => setNewLayerForm(false)}
+                  className="h-6 px-1.5 rounded text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  ✕
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

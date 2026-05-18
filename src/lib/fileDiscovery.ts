@@ -1,4 +1,4 @@
-import { readDir, readTextFile, readFile as readBinaryFileNative, writeFile as writeBinaryFileNative, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
+import { readDir, readTextFile, readFile as readBinaryFileNative, writeFile as writeBinaryFileNative, writeTextFile, mkdir, remove as removeNative } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 
 const TARGET_FILES = new Set([
@@ -361,6 +361,10 @@ export async function writeBinaryFile(path: string, data: Uint8Array): Promise<v
 
 export async function createDir(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
+}
+
+export async function removeFile(path: string): Promise<void> {
+  await removeNative(path);
 }
 
 export function clearCeToolCaches(): void {

@@ -1,6 +1,6 @@
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import type { LimitsDefinition, LimitsDefinitionUser } from '../../types/dayz';
-import { BUILDER_OPTIONS, stripBom, strAttr, toObjectArray } from './shared';
+import { BUILDER_OPTIONS, stripBom, strAttr, numAttr, toObjectArray } from './shared';
 
 const LIMITS_PARSER_OPTIONS = {
   ignoreAttributes: false,
@@ -54,7 +54,13 @@ export function parseLimitsDefinitionUserXml(raw: string): LimitsDefinitionUser 
   const usageGroups = toObjectArray(usageflagsContainer?.user)
     .map(u => ({
       name:   strAttr(u, 'name'),
-      usages: toObjectArray(u.usage).map(uu => strAttr(uu, 'name')).filter(Boolean),
+      usages: toObjectArray(u.usage)
+        .map(uu => {
+          const name = strAttr(uu, 'name');
+          const flagsRaw = numAttr(uu, 'flags', -1);
+          return { name, ...(flagsRaw >= 0 ? { flags: flagsRaw } : {}) };
+        })
+        .filter(e => Boolean(e.name)),
     }))
     .filter(g => Boolean(g.name));
 
@@ -74,7 +80,10 @@ export function serializeLimitsDefinitionUserXml(data: LimitsDefinitionUser): st
       usageflags: {
         user: data.usageGroups.map(g => ({
           '@_name': g.name,
-          usage: g.usages.map(u => ({ '@_name': u })),
+          usage: g.usages.map(u => ({
+            '@_name': u.name,
+            ...(u.flags !== undefined ? { '@_flags': u.flags } : {}),
+          })),
         })),
       },
       valueflags: {

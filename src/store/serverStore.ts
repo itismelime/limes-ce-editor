@@ -8,7 +8,7 @@ import {
   serializeWeatherXml, serializeGameplayJson,
   serializeLimitsDefinitionXml, serializeLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
-import { writeFile, createDir, readBinaryFile, writeBinaryFile } from '../lib/fileDiscovery';
+import { writeFile, readFile, createDir, readBinaryFile, writeBinaryFile, removeFile } from '../lib/fileDiscovery';
 import { setCeToolBitmapSource, clearCeToolBitmapSource } from '../lib/tierZoneResolver';
 import type { ContainerDef } from '../types/dayz';
 
@@ -20,10 +20,9 @@ export interface CeToolLayerMeta {
   usageName: string | null;
 }
 
-interface TerritoryPaintDiff {
-  layerName: string;
-  diffs: Array<{ idx: number; prev: number }>;
-}
+type TerritoryPaintDiff =
+  | { type: 'paint'; layerName: string; diffs: Array<{ idx: number; prev: number }> }
+  | { type: 'layerCreated'; layerName: string };
 
 export interface TerritoryBitmapOverride {
   xmlContent: string;
@@ -156,9 +155,16 @@ interface ServerState {
   removeBuildingCategory: (buildingType: string, category: string) => void;
   addBuildingUsage: (buildingType: string, usage: string) => void;
   removeBuildingUsage: (buildingType: string, usage: string) => void;
+  addContainerTag: (buildingType: string, containerName: string, tag: string) => void;
+  removeContainerTag: (buildingType: string, containerName: string, tag: string) => void;
+  addContainerCategory: (buildingType: string, containerName: string, category: string) => void;
+  removeContainerCategory: (buildingType: string, containerName: string, category: string) => void;
+  updateContainerLootmax: (buildingType: string, containerName: string, lootmax: number) => void;
   removeLimitsUsage: (usage: string) => void;
 
   ceToolLayers: CeToolLayerMeta[];
+  newCeToolLayerNames: string[];
+  deletedCeToolLayerNames: string[];
   territoryBitmaps: Map<string, Uint8ClampedArray>;
   originalTerritoryBitmaps: Map<string, Uint8ClampedArray>;
   territoryPaintHistory: TerritoryPaintDiff[];
@@ -169,6 +175,8 @@ interface ServerState {
   loadTerritoryBitmaps: (override?: TerritoryBitmapOverride) => Promise<void>;
   reloadTerritoryBitmaps?: () => Promise<void>;
   setReloadTerritoryBitmaps: (fn: (() => Promise<void>) | undefined) => void;
+  addCeToolLayer: (usageName: string) => void;
+  removeCeToolLayer: (layerName: string) => void;
   commitTerritoryPaint: (layerName: string, pixels: Uint8ClampedArray) => void;
   undoTerritoryPaint: () => void;
   saveTerritoryBitmaps: () => Promise<void>;
@@ -407,6 +415,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   mapGroupProtoHistory: [],
   zoneRemoveHistory: [],
   ceToolLayers: [],
+  newCeToolLayerNames: [],
+  deletedCeToolLayerNames: [],
   territoryBitmaps: new Map(),
   originalTerritoryBitmaps: new Map(),
   territoryPaintHistory: [],
@@ -767,6 +777,103 @@ export const useServerStore = create<ServerState>((set, get) => {
     return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
   }),
 
+  addContainerTag: (buildingType, containerName, tag) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cName = containerName.trim().toLowerCase();
+    const t = tag.trim();
+    if (!key || !cName || !t || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    const containers = entry.containers.map(c =>
+      c.name.trim().toLowerCase() === cName && !c.tags.some(x => x.trim().toLowerCase() === t.toLowerCase())
+        ? { ...c, tags: [...c.tags, t] }
+        : c,
+    );
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
+  removeContainerTag: (buildingType, containerName, tag) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cName = containerName.trim().toLowerCase();
+    const t = tag.trim().toLowerCase();
+    if (!key || !cName || !t || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    const containers = entry.containers.map(c =>
+      c.name.trim().toLowerCase() === cName
+        ? { ...c, tags: c.tags.filter(x => x.trim().toLowerCase() !== t) }
+        : c,
+    );
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
+  addContainerCategory: (buildingType, containerName, category) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cName = containerName.trim().toLowerCase();
+    const cat = category.trim();
+    if (!key || !cName || !cat || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    const containers = entry.containers.map(c =>
+      c.name.trim().toLowerCase() === cName && !c.categories.some(x => x.trim().toLowerCase() === cat.toLowerCase())
+        ? { ...c, categories: [...c.categories, cat] }
+        : c,
+    );
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
+  removeContainerCategory: (buildingType, containerName, category) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cName = containerName.trim().toLowerCase();
+    const cat = category.trim().toLowerCase();
+    if (!key || !cName || !cat || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    const containers = entry.containers.map(c =>
+      c.name.trim().toLowerCase() === cName
+        ? { ...c, categories: c.categories.filter(x => x.trim().toLowerCase() !== cat) }
+        : c,
+    );
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
+  updateContainerLootmax: (buildingType, containerName, lootmax) => set(s => {
+    const key = buildingType.trim().toLowerCase();
+    const cName = containerName.trim().toLowerCase();
+    if (!key || !cName || !s.mapGroupProto.has(key)) return s;
+    const entry = s.mapGroupProto.get(key)!;
+    const containers = entry.containers.map(c =>
+      c.name.trim().toLowerCase() === cName ? { ...c, lootmax } : c,
+    );
+    const protoNext = new Map(s.mapGroupProto);
+    protoNext.set(key, { ...entry, containers });
+    const buildingInstances = s.buildingInstances.map(b =>
+      b.typeName.trim().toLowerCase() === key ? { ...b, containers } : b,
+    );
+    const mapGroupProtoHistory = [{ key, prev: cloneMapGroupProtoEntry(entry) }, ...s.mapGroupProtoHistory].slice(0, 200);
+    return { mapGroupProto: protoNext, buildingInstances, mapGroupProtoHistory, dirty: { ...s.dirty, mapGroupProto: isMapGroupProtoDirty(protoNext, s.originalMapGroupProto) } };
+  }),
+
   removeLimitsUsage: (usage) => set(s => {
     const uLower = usage.trim().toLowerCase();
     const nextDirty = { ...s.dirty };
@@ -1063,6 +1170,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     clearCeToolBitmapSource();
     set({
       ceToolLayers: [],
+      newCeToolLayerNames: [],
+      deletedCeToolLayerNames: [],
       territoryBitmaps: new Map(),
       originalTerritoryBitmaps: new Map(),
       territoryBitmapSize: null,
@@ -1083,7 +1192,6 @@ export const useServerStore = create<ServerState>((set, get) => {
     } else {
       if (!paths.ceToolXmlPath || !paths.ceToolLayersDir) return;
       try {
-        const { readFile } = await import('../lib/fileDiscovery');
         xmlText = await readFile(paths.ceToolXmlPath);
       } catch {
         return;
@@ -1168,10 +1276,112 @@ export const useServerStore = create<ServerState>((set, get) => {
     setCeToolBitmapSource(bitmaps, layers, { width: bitmapSize, height: bitmapSize }, resolvedWorldSize);
   },
 
+  addCeToolLayer: (usageName) => {
+    const name = `usgFlg_Paint-${usageName.trim()}`;
+    const { ceToolLayers, territoryBitmaps, originalTerritoryBitmaps, territoryBitmapSize, limitsDefinition, limitsDefinitionUser, paths } = get();
+    if (ceToolLayers.some(l => l.name.toLowerCase() === name.toLowerCase())) return;
+
+    // Find first unused power-of-2 bit across all existing layers and any declared user flags
+    const usedLayerBits = new Set(ceToolLayers.map(l => l.usageFlags));
+    const usedUserBits = new Set(
+      (limitsDefinitionUser?.usageGroups ?? []).flatMap(g => g.usages.map(u => u.flags ?? 0)).filter(f => f > 0)
+    );
+    const usedBits = new Set([...usedLayerBits, ...usedUserBits]);
+    let freeBit = 1;
+    while (usedBits.has(freeBit)) freeBit *= 2;
+
+    const meta: CeToolLayerMeta = { name, usageFlags: freeBit, valueFlags: 0, isPaintable: true, usageName: usageName.trim() };
+    const size = territoryBitmapSize ?? { width: 4096, height: 4096 };
+    const empty = new Uint8ClampedArray(size.width * size.height * 4);
+    const nextBitmaps = new Map(territoryBitmaps);
+    nextBitmaps.set(name, empty);
+    const nextOriginals = new Map(originalTerritoryBitmaps);
+    nextOriginals.set(name, empty.slice());
+
+    const nextLayers = [...ceToolLayers, meta];
+
+    // Register usage name in cfglimitsdefinition.xml (create minimal if absent)
+    const baseLimits = limitsDefinition ?? (paths.missionPath ? { categories: [], tags: [], usages: [], values: [] } : null);
+    const nextLimits = baseLimits && !baseLimits.usages.some(u => u.toLowerCase() === usageName.trim().toLowerCase())
+      ? { ...baseLimits, usages: [...baseLimits.usages, usageName.trim()] }
+      : baseLimits;
+
+    // Register usage + flags in cfglimitsdefinitionuser.xml (creates or updates "CustomZones" group)
+    const entry = { name: usageName.trim(), flags: freeBit };
+    let nextLimitsUser: typeof limitsDefinitionUser;
+    if (limitsDefinitionUser) {
+      const groupIdx = limitsDefinitionUser.usageGroups.findIndex(g => g.name === 'CustomZones');
+      if (groupIdx >= 0) {
+        const group = limitsDefinitionUser.usageGroups[groupIdx];
+        if (!group.usages.some(u => u.name.toLowerCase() === entry.name.toLowerCase())) {
+          const groups = [...limitsDefinitionUser.usageGroups];
+          groups[groupIdx] = { ...group, usages: [...group.usages, entry] };
+          nextLimitsUser = { ...limitsDefinitionUser, usageGroups: groups };
+        }
+      } else {
+        nextLimitsUser = {
+          ...limitsDefinitionUser,
+          usageGroups: [...limitsDefinitionUser.usageGroups, { name: 'CustomZones', usages: [entry] }],
+        };
+      }
+    } else if (paths.missionPath) {
+      nextLimitsUser = { usageGroups: [{ name: 'CustomZones', usages: [entry] }], valueGroups: [] };
+    }
+
+    set(s => ({
+      ceToolLayers: nextLayers,
+      newCeToolLayerNames: [...s.newCeToolLayerNames, name],
+      territoryBitmaps: nextBitmaps,
+      originalTerritoryBitmaps: nextOriginals,
+      territoryPaintHistory: [...s.territoryPaintHistory, { type: 'layerCreated' as const, layerName: name }],
+      paths: (() => {
+        let p = s.paths;
+        if (nextLimitsUser && !p.limitsDefinitionUserPath && p.missionPath)
+          p = { ...p, limitsDefinitionUserPath: `${p.missionPath}/cfglimitsdefinitionuser.xml` };
+        if (nextLimits && !p.limitsDefinitionPath && p.missionPath)
+          p = { ...p, limitsDefinitionPath: `${p.missionPath}/cfglimitsdefinition.xml` };
+        return p;
+      })(),
+      dirty: {
+        ...s.dirty,
+        territoryBitmaps: true,
+        ...(nextLimits ? { limitsDefinition: true } : {}),
+        ...(nextLimitsUser ? { limitsDefinitionUser: true } : {}),
+      },
+      ...(nextLimits ? { limitsDefinition: nextLimits } : {}),
+      ...(nextLimitsUser ? { limitsDefinitionUser: nextLimitsUser } : {}),
+    }));
+    const { ceToolWorldSize } = get();
+    if (territoryBitmapSize && ceToolWorldSize)
+      setCeToolBitmapSource(nextBitmaps, nextLayers, territoryBitmapSize, ceToolWorldSize);
+  },
+
+  removeCeToolLayer: (layerName) => {
+    set(s => {
+      const nextBitmaps = new Map(s.territoryBitmaps);
+      nextBitmaps.delete(layerName);
+      const nextOriginals = new Map(s.originalTerritoryBitmaps);
+      nextOriginals.delete(layerName);
+      const wasNew = s.newCeToolLayerNames.includes(layerName);
+      return {
+        ceToolLayers: s.ceToolLayers.filter(l => l.name !== layerName),
+        newCeToolLayerNames: s.newCeToolLayerNames.filter(n => n !== layerName),
+        deletedCeToolLayerNames: wasNew ? s.deletedCeToolLayerNames : [...s.deletedCeToolLayerNames, layerName],
+        territoryBitmaps: nextBitmaps,
+        originalTerritoryBitmaps: nextOriginals,
+        territoryPaintHistory: [],
+        dirty: { ...s.dirty, territoryBitmaps: true },
+      };
+    });
+    const { territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize } = get();
+    if (territoryBitmapSize && ceToolWorldSize)
+      setCeToolBitmapSource(territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize);
+  },
+
   commitTerritoryPaint: (layerName, newPixels) => {
     set(s => {
       const current = s.territoryBitmaps.get(layerName);
-      const diffs: TerritoryPaintDiff['diffs'] = [];
+      const diffs: Array<{ idx: number; prev: number }> = [];
       if (current) {
         for (let i = 0; i < current.length; i += 4) {
           if (current[i] !== newPixels[i]) diffs.push({ idx: i, prev: current[i] });
@@ -1181,7 +1391,7 @@ export const useServerStore = create<ServerState>((set, get) => {
       next.set(layerName, newPixels);
       return {
         territoryBitmaps: next,
-        territoryPaintHistory: [...s.territoryPaintHistory, { layerName, diffs }],
+        territoryPaintHistory: [...s.territoryPaintHistory, { type: 'paint' as const, layerName, diffs }],
         dirty: { ...s.dirty, territoryBitmaps: true },
       };
     });
@@ -1194,16 +1404,32 @@ export const useServerStore = create<ServerState>((set, get) => {
     set(s => {
       if (s.territoryPaintHistory.length === 0) return s;
       const history = s.territoryPaintHistory.slice(0, -1);
-      const { layerName, diffs } = s.territoryPaintHistory[s.territoryPaintHistory.length - 1];
-      const current = s.territoryBitmaps.get(layerName);
+      const entry = s.territoryPaintHistory[s.territoryPaintHistory.length - 1];
+
+      if (entry.type === 'layerCreated') {
+        const nextBitmaps = new Map(s.territoryBitmaps);
+        nextBitmaps.delete(entry.layerName);
+        const nextOriginals = new Map(s.originalTerritoryBitmaps);
+        nextOriginals.delete(entry.layerName);
+        return {
+          ceToolLayers: s.ceToolLayers.filter(l => l.name !== entry.layerName),
+          newCeToolLayerNames: s.newCeToolLayerNames.filter(n => n !== entry.layerName),
+          territoryBitmaps: nextBitmaps,
+          originalTerritoryBitmaps: nextOriginals,
+          territoryPaintHistory: history,
+          dirty: { ...s.dirty, territoryBitmaps: history.length > 0 },
+        };
+      }
+
+      const current = s.territoryBitmaps.get(entry.layerName);
       if (!current) return { territoryPaintHistory: history };
       const restored = current.slice();
-      for (const { idx, prev } of diffs) {
+      for (const { idx, prev } of entry.diffs) {
         restored[idx] = prev; restored[idx + 1] = prev; restored[idx + 2] = prev;
         restored[idx + 3] = prev > 127 ? 255 : 0;
       }
       const next = new Map(s.territoryBitmaps);
-      next.set(layerName, restored);
+      next.set(entry.layerName, restored);
       return { territoryBitmaps: next, territoryPaintHistory: history, dirty: { ...s.dirty, territoryBitmaps: history.length > 0 } };
     });
     const { territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize } = get();
@@ -1212,7 +1438,7 @@ export const useServerStore = create<ServerState>((set, get) => {
   },
 
   saveTerritoryBitmaps: async () => {
-    const { paths, ceToolLayers, territoryBitmaps, originalTerritoryBitmaps, territoryBitmapSize, ceToolWorldSize } = get();
+    const { paths, ceToolLayers, newCeToolLayerNames, deletedCeToolLayerNames, territoryBitmaps, territoryBitmapSize, ceToolWorldSize } = get();
     if (!paths.ceToolLayersDir || !paths.missionPath || !territoryBitmapSize) return;
 
     await trySave('territory zones', async () => {
@@ -1225,6 +1451,37 @@ export const useServerStore = create<ServerState>((set, get) => {
           `${paths.ceToolLayersDir}/${layer.name}.tga`,
           encodeTgaLayer(pixels, width, height),
         );
+      }
+
+      // Update CE Tool XML: add new layers, remove deleted layers
+      const needsXmlUpdate = (newCeToolLayerNames.length > 0 || deletedCeToolLayerNames.length > 0) && paths.ceToolXmlPath;
+      if (needsXmlUpdate) {
+        const xmlText = await readFile(paths.ceToolXmlPath!);
+        const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+        const layersEl = doc.querySelector('layers');
+        if (layersEl) {
+          // Remove deleted layers
+          const deletedSet = new Set(deletedCeToolLayerNames);
+          layersEl.querySelectorAll('layer').forEach(el => {
+            if (deletedSet.has(el.getAttribute('name') ?? '')) el.remove();
+          });
+          // Append new layers
+          for (const layerName of newCeToolLayerNames) {
+            const meta = ceToolLayers.find(l => l.name === layerName);
+            if (!meta) continue;
+            const el = doc.createElement('layer');
+            el.setAttribute('name', meta.name);
+            el.setAttribute('usage_flags', String(meta.usageFlags));
+            el.setAttribute('value_flags', String(meta.valueFlags));
+            layersEl.appendChild(el);
+          }
+          await writeFile(paths.ceToolXmlPath!, new XMLSerializer().serializeToString(doc));
+        }
+      }
+
+      // Delete TGA files for removed layers
+      for (const layerName of deletedCeToolLayerNames) {
+        try { await removeFile(`${paths.ceToolLayersDir}/${layerName}.tga`); } catch { /* already gone */ }
       }
 
       // Compile areaflags.map from all layers
@@ -1245,12 +1502,14 @@ export const useServerStore = create<ServerState>((set, get) => {
         outPath: `${paths.missionPath}/areaflags.map`,
       });
 
-      // Update originals
+      // Update originals and clear new layer tracking
       const newOriginals = new Map<string, Uint8ClampedArray>();
       for (const [name, arr] of territoryBitmaps) newOriginals.set(name, arr.slice());
       set(s => ({
         dirty: { ...s.dirty, territoryBitmaps: false },
         originalTerritoryBitmaps: newOriginals,
+        newCeToolLayerNames: [],
+        deletedCeToolLayerNames: [],
       }));
     });
   },
@@ -1259,7 +1518,17 @@ export const useServerStore = create<ServerState>((set, get) => {
     set(s => {
       const restored = new Map<string, Uint8ClampedArray>();
       for (const [name, arr] of s.originalTerritoryBitmaps) restored.set(name, arr.slice());
-      return { territoryBitmaps: restored, territoryPaintHistory: [], dirty: { ...s.dirty, territoryBitmaps: false } };
+      // Remove unsaved new layers
+      const newNames = new Set(s.newCeToolLayerNames);
+      const revertedLayers = s.ceToolLayers.filter(l => !newNames.has(l.name));
+      return {
+        ceToolLayers: revertedLayers,
+        newCeToolLayerNames: [],
+        deletedCeToolLayerNames: [],
+        territoryBitmaps: restored,
+        territoryPaintHistory: [],
+        dirty: { ...s.dirty, territoryBitmaps: false },
+      };
     });
     const { territoryBitmaps, ceToolLayers, territoryBitmapSize, ceToolWorldSize } = get();
     if (territoryBitmapSize && ceToolWorldSize)
