@@ -201,6 +201,53 @@ pub fn generate_tile_pyramid(
 
 // ── Public helpers ───────────────────────────────────────────────────────────
 
+/// Derive world size in metres from a *_data.pbo without being told it.
+///
+/// Uses the identity: world_size = (tile_dim - 2 * overlap) * grid_cols,
+/// which holds because DayZ satellite tiles are 1 px = 1 m.
+/// Returns an error if the PBO has no satellite tiles or overlap detection fails.
+pub fn world_size_from_pbo(pbo_path: &std::path::Path) -> Result<u32, String> {
+    let file = std::fs::File::open(pbo_path)
+        .map_err(|e| format!("Cannot open PBO: {}", e))?;
+    let mut pbo = ReadablePbo::from(std::io::BufReader::new(file))
+        .map_err(|e| format!("PBO parse failed: {:?}", e))?;
+
+    let tile_map: HashMap<(u32, u32), String> = {
+        let mut map: HashMap<(u32, u32), String> = HashMap::new();
+        for h in pbo.files() {
+            let name = h.filename().to_string();
+            if !name.to_ascii_lowercase().contains("_lco.paa") { continue; }
+            if let Some(coords) = parse_tile_coords(&name) {
+                let is_layers = name.to_ascii_lowercase().starts_with("layers");
+                use std::collections::hash_map::Entry;
+                match map.entry(coords) {
+                    Entry::Vacant(e) => { e.insert(name); }
+                    Entry::Occupied(mut e) => {
+                        if is_layers && !e.get().to_ascii_lowercase().starts_with("layers") {
+                            *e.get_mut() = name;
+                        }
+                    }
+                }
+            }
+        }
+        map
+    };
+
+    if tile_map.is_empty() {
+        return Err("No satellite tiles found in PBO".into());
+    }
+
+    let grid_cols = tile_map.keys().map(|(c, _)| *c).max().unwrap_or(0) + 1;
+
+    let sample_data = read_pbo_file(&mut pbo, tile_map.values().next().unwrap());
+    let tile_dim = paa_base_dim(&sample_data).unwrap_or(512);
+
+    let overlap = detect_tile_overlap(&mut pbo, &tile_map, tile_dim)
+        .ok_or_else(|| "Could not detect tile overlap — map may have uniform terrain (e.g. snow). Enter world size manually.".to_string())?;
+
+    Ok((tile_dim - overlap * 2) * grid_cols)
+}
+
 /// Recursively search `dir` (up to `depth` levels) for any `*_data.pbo` file.
 pub fn find_data_pbo(dir: &std::path::Path, depth: usize) -> Option<std::path::PathBuf> {
     if depth == 0 { return None; }

@@ -27,17 +27,34 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
   const [ceToolProjectPath, setCeToolProjectPath] = useState<string | null>(null);
   const [importingCe, setImportingCe] = useState(false);
   const [scanningPbo, setScanningPbo] = useState(false);
+  const [detectingSize, setDetectingSize] = useState(false);
   const [saving, setSaving]           = useState(false);
   const [showAdd, setShowAdd]         = useState(defaultShowAdd ?? false);
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [error, setError]             = useState<string | null>(null);
+
+  async function applyPboPath(path: string) {
+    setPboPath(path);
+    setDetectingSize(true);
+    try {
+      const size = await invoke<number>('read_pbo_world_size', { pboPath: path });
+      if (size > 0) {
+        setWorldWidth(size);
+        setWorldHeight(size);
+      }
+    } catch {
+      // detection failed — leave current values, user can edit manually
+    } finally {
+      setDetectingSize(false);
+    }
+  }
 
   async function handleBrowsePbo() {
     const selected = await openDialog({
       filters: [{ name: 'DayZ PBO', extensions: ['pbo'] }],
       multiple: false,
     });
-    if (typeof selected === 'string') setPboPath(selected);
+    if (typeof selected === 'string') await applyPboPath(selected);
   }
 
   async function handleBrowseCeFolder(mapId: string) {
@@ -63,7 +80,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     try {
       const found = await invoke<string | null>('find_map_pbo', { folder: selected });
       if (found) {
-        setPboPath(found);
+        await applyPboPath(found);
       } else {
         setError('No *_data.pbo found in that folder. Try browsing directly to the .pbo file.');
       }
@@ -131,7 +148,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     await removeMap(id);
   }
 
-  const canAdd = !!label.trim() && worldWidth > 0 && worldHeight > 0;
+  const canAdd = !!label.trim();
 
   return (
     <section>
@@ -185,6 +202,14 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
           <div className="border border-slate-700 rounded-xl p-4 space-y-3">
             <p className="text-xs font-medium text-slate-300">{editingId ? 'Edit community map' : 'Add community map'}</p>
 
+            <div className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-[11px] text-slate-400 space-y-1">
+              <p className="font-medium text-slate-300">How to get a community map</p>
+              <p>1. Subscribe to the map mod on Steam Workshop.</p>
+              <p>2. Let Steam download it (appears in your library).</p>
+              <p>3. Click <span className="text-slate-200">Browse mod folder…</span> and select the mod folder from <span className="font-mono text-slate-300">steamapps/workshop/content/221100/</span></p>
+              <p>4. The PBO and world size are detected automatically.</p>
+            </div>
+
             {/* Display name */}
             <div>
               <label className="block text-[11px] text-slate-500 mb-1">Display name</label>
@@ -196,42 +221,9 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
               />
             </div>
 
-            {/* World dimensions + max zoom */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">World width (m)</label>
-                <input
-                  type="number"
-                  min={100}
-                  max={100000}
-                  value={worldWidth}
-                  onChange={e => setWorldWidth(Number(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-lime-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">World height (m)</label>
-                <input
-                  type="number"
-                  min={100}
-                  max={100000}
-                  value={worldHeight}
-                  onChange={e => setWorldHeight(Number(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-lime-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Max zoom (4–10)</label>
-                <input
-                  type="number"
-                  min={4}
-                  max={10}
-                  value={maxZoom}
-                  onChange={e => setMaxZoom(Number(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-lime-500"
-                />
-              </div>
-            </div>
+            {detectingSize && (
+              <p className="text-[11px] text-lime-500">Detecting world size from PBO…</p>
+            )}
 
             {/* PBO path */}
             <div>

@@ -422,6 +422,12 @@ async fn discover_installed_maps() -> Result<Vec<DiscoveredMap>, String> {
     }).collect())
 }
 
+/// Read world size in metres directly from a *_data.pbo (no user input needed).
+#[tauri::command]
+async fn read_pbo_world_size(pbo_path: String) -> Result<u32, String> {
+    pbo::world_size_from_pbo(std::path::Path::new(&pbo_path))
+}
+
 /// Scan a mod folder for a *_data.pbo file (up to 4 levels deep).
 #[tauri::command]
 async fn find_map_pbo(folder: String) -> Result<Option<String>, String> {
@@ -656,6 +662,7 @@ pub fn run() {
             save_community_maps,
             download_mpmission,
             find_map_pbo,
+            read_pbo_world_size,
             discover_installed_maps,
             bitmap::read_tga_layer,
             bitmap::write_tga_layer,
