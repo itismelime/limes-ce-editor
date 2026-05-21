@@ -234,7 +234,21 @@ function MapVisibilitySync({ isActive }: { isActive: boolean }) {
 
 
 // ImageBitmap cache: decoded once, drawImage is a GPU blit on revisit.
-const tileCache = new Map<string, ImageBitmap>();
+// All tiles for a standard DayZ map: pz 0–5 = 1+4+16+64+256+1024 = 1365.
+// HTMLImageElement refs are tiny; actual pixel data lives in browser image cache.
+const MAX_TILE_CACHE = 2000;
+// Store HTMLImageElement so the browser's image memory cache is populated.
+// ctx.drawImage() accepts HTMLImageElement directly — no ImageBitmap conversion needed.
+const tileCache = new Map<string, HTMLImageElement>();
+const tileInFlight = new Map<string, Promise<HTMLImageElement>>();
+
+function setTileCache(url: string, img: HTMLImageElement) {
+  if (tileCache.size >= MAX_TILE_CACHE) {
+    const oldest = tileCache.keys().next().value!;
+    tileCache.delete(oldest);
+  }
+  tileCache.set(url, img);
+}
 
 // zoomOffset = log2(imageWidth / 256).  For imageWidth=4096 → 4.
 // maxNativeLeafletZoom = MAX_PZ - zoomOffset = 1.  Leaflet handles overzoom via CSS scale.
@@ -284,36 +298,47 @@ function DayZTileLayer({
 
         const url = convertFileSrc(`${mapsDir}/${mapId}/tiles/${pz}/${tx}/${ty}.webp`);
 
-        const draw = (bitmap: ImageBitmap) => {
+        const draw = (img: HTMLImageElement) => {
           const ctx = canvas.getContext('2d')!;
           if (shift > 0) {
-            // Crop the region of the lower-quality tile that belongs to this slot.
             const tileCount = 1 << shift;
             const subX  = coords.x - (tx << shift);
             const subY  = coords.y - (ty << shift);
             const srcX  = (subX / tileCount) * 256;
             const srcY  = (subY / tileCount) * 256;
             const srcSz = 256 / tileCount;
-            ctx.drawImage(bitmap, srcX, srcY, srcSz, srcSz, 0, 0, 256, 256);
+            ctx.drawImage(img, srcX, srcY, srcSz, srcSz, 0, 0, 256, 256);
           } else {
-            ctx.drawImage(bitmap, 0, 0);
+            ctx.drawImage(img, 0, 0);
           }
         };
 
         const cached = tileCache.get(url);
         if (cached) {
           draw(cached);
-          // Microtask fires before next paint but after Leaflet sets _tiles[key],
-          // so tiles report ready in the same frame they're requested — no flash.
           queueMicrotask(() => done(null, canvas));
           return canvas;
         }
 
-        fetch(url)
-          .then(r => r.blob())
-          .then(blob => createImageBitmap(blob))
-          .then(bitmap => { tileCache.set(url, bitmap); draw(bitmap); done(null, canvas); })
-          .catch(err => done(err instanceof Error ? err : new Error(String(err)), canvas));
+        const inflight = tileInFlight.get(url);
+        if (inflight) {
+          inflight.then(img => { draw(img); done(null, canvas); })
+                  .catch(err => done(err instanceof Error ? err : new Error(String(err)), canvas));
+          return canvas;
+        }
+
+        // new Image() + decode() populates the browser's image memory cache.
+        // Subsequent canvas re-creates for the same URL hit the browser cache instantly,
+        // whereas fetch() → createImageBitmap() bypasses it entirely.
+        const p = new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error(`tile load failed: ${url}`));
+          img.src = url;
+        });
+        tileInFlight.set(url, p);
+        p.then(img => { setTileCache(url, img); tileInFlight.delete(url); draw(img); done(null, canvas); })
+         .catch(err => { tileInFlight.delete(url); done(err instanceof Error ? err : new Error(String(err)), canvas); });
 
         return canvas;
       },
@@ -326,12 +351,48 @@ function DayZTileLayer({
       minZoom: -10,
       maxNativeZoom: maxNative,
       updateWhenZooming: false,
-      keepBuffer: 4,
+      keepBuffer: 6,
     }) as L.TileLayer;
     map.addLayer(layer);
     onLayerReady(layer);
     return () => { map.removeLayer(layer); };
   }, [map, mapId, mapsDir, imageWidth]);
+
+  // Preload all tile levels into browser image cache so Leaflet finds them ready.
+  // Runs once per map change; 16 concurrent loads to saturate local disk without blocking UI.
+  useEffect(() => {
+    const MAX_PZ = 5;
+    const CONCURRENCY = 16;
+    let cancelled = false;
+
+    const queue: string[] = [];
+    for (let pz = 0; pz <= MAX_PZ; pz++) {
+      const count = 1 << pz;
+      for (let x = 0; x < count; x++) {
+        for (let y = 0; y < count; y++) {
+          const url = convertFileSrc(`${mapsDir}/${mapId}/tiles/${pz}/${x}/${y}.webp`);
+          if (!tileCache.has(url)) queue.push(url);
+        }
+      }
+    }
+
+    let active = 0;
+    let idx = 0;
+
+    const next = () => {
+      while (!cancelled && active < CONCURRENCY && idx < queue.length) {
+        const url = queue[idx++];
+        active++;
+        const img = new Image();
+        img.onload  = () => { if (!cancelled) setTileCache(url, img); active--; next(); };
+        img.onerror = () => { active--; next(); };
+        img.src = url;
+      }
+    };
+
+    next();
+    return () => { cancelled = true; };
+  }, [mapId, mapsDir]);
   return null;
 }
 

@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import { CircleMarker, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
+import { useEffect, useMemo, useState } from 'react';
+import { CircleMarker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { sampleAllZonesAtPos, hasCeToolBitmaps } from '../../lib/tierZoneResolver';
 import { useUiStore } from '../../store/uiStore';
@@ -9,33 +9,8 @@ import { TIER_ORDER, getUsageColor } from '../../types/map';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
 import type { MapConfig } from '../../types/map';
 
-const BUILDING_MARKER_SIZE = 20;
-
 function sameStringArray(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-
-const buildingMarkerIconCache = new Map<string, L.DivIcon>();
-
-function buildingMarkerIcon(usageColor: string, hasUnsavedChanges = false): L.DivIcon {
-  const cacheKey = `${usageColor}|${hasUnsavedChanges ? 'dirty' : 'clean'}`;
-  const cached = buildingMarkerIconCache.get(cacheKey);
-  if (cached) return cached;
-  const size = BUILDING_MARKER_SIZE;
-  const cx = size / 2;
-  const cy = size / 2;
-  const fillR = 5.5;
-  const outlineR = 7.5;
-  const outlineWidth = 1.5;
-  const saveIndigo = '#4f46e5';
-  const fillColor = hasUnsavedChanges ? saveIndigo : usageColor;
-  const outlineColor = hasUnsavedChanges ? '#818cf8' : '#f8fafc';
-  const fillOpacity = hasUnsavedChanges ? '1' : '0.9';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${outlineR}" fill="#0f1117" fill-opacity="0.7" stroke="${outlineColor}" stroke-width="${outlineWidth}"/><circle cx="${cx}" cy="${cy}" r="${fillR}" fill="${fillColor}" fill-opacity="${fillOpacity}"/></svg>`;
-  const className = hasUnsavedChanges ? 'building-marker building-marker--unsaved' : 'building-marker';
-  const icon = L.divIcon({ html: svg, className, iconSize: [size, size], iconAnchor: [cx, cy], popupAnchor: [0, -cy] });
-  buildingMarkerIconCache.set(cacheKey, icon);
-  return icon;
 }
 
 function containerMatchesType(type: DayZType, containerTags: string[], containerCategories: string[]): boolean {
@@ -53,35 +28,9 @@ function containerMatchesType(type: DayZType, containerTags: string[], container
   return usageMatch && catMatch;
 }
 
-const BuildingMarkerEntry = memo(function BuildingMarkerEntry({
-  building,
-  usageColor,
-  latlng,
-  hasUnsavedChanges,
-}: {
-  building: BuildingInstance;
-  usageColor: string;
-  latlng: L.LatLngExpression;
-  hasUnsavedChanges: boolean;
-}) {
-  const setSelectedBuilding = useUiStore(s => s.setSelectedBuilding);
-  return (
-    <Marker
-      position={latlng}
-      icon={buildingMarkerIcon(usageColor, hasUnsavedChanges)}
-      eventHandlers={{
-        click: () => setSelectedBuilding(building.typeName, { x: building.x, z: building.z }),
-      }}
-    />
-  );
-}, (prev, next) => (
-  prev.building === next.building
-  && prev.usageColor === next.usageColor
-  && prev.hasUnsavedChanges === next.hasUnsavedChanges
-));
-
 export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
   const buildingInstances   = useServerStore(s => s.buildingInstances);
   const mapGroupProto       = useServerStore(s => s.mapGroupProto);
   const originalMapGroupProto = useServerStore(s => s.originalMapGroupProto);
@@ -98,6 +47,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const hiddenTiers         = useUiStore(s => s.hiddenTiers);
   const tierZonesLoaded     = useUiStore(s => s.tierZonesLoaded);
   const territoryBitmaps    = useServerStore(s => s.territoryBitmaps);
+  const setSelectedBuilding = useUiStore(s => s.setSelectedBuilding);
   const useZoneData         = tierZonesLoaded || (territoryBitmaps.size > 0 && hasCeToolBitmaps());
 
   const dirtyTypeAffectedBuildingKeys = useMemo(() => {
@@ -173,12 +123,21 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   useEffect(() => {
     const updateBounds = () => setViewportBounds(map.getBounds().pad(0.2));
     map.on('moveend zoomend', updateBounds);
-    return () => {
-      map.off('moveend zoomend', updateBounds);
-    };
+    return () => { map.off('moveend zoomend', updateBounds); };
   }, [map]);
 
-  const visible = useMemo(() => {
+  // Pre-compute zone data for ALL buildings once — NOT on every pan/zoom.
+  const buildingZoneCache = useMemo(() => {
+    if (!useZoneData) return null;
+    const cache = new Map<string, { usages: string[]; tiers: string[] }>();
+    for (const b of buildingInstances) {
+      cache.set(`${b.typeName}-${b.x}-${b.z}`, sampleAllZonesAtPos(b.x, b.z));
+    }
+    return cache;
+  }, [buildingInstances, useZoneData, territoryBitmaps]);
+
+  // Filter logic — stable across pans, no viewport check.
+  const filteredBuildings = useMemo(() => {
     if (!showBuildings) return [];
 
     const q = buildingItemFilter.trim().toLowerCase();
@@ -209,12 +168,11 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
     const hiddenUsageSet = new Set(hiddenUsages.map(u => u.trim().toLowerCase()));
 
     return buildingInstances.flatMap(b => {
-      const zones = useZoneData ? sampleAllZonesAtPos(b.x, b.z) : null;
+      const zones = buildingZoneCache?.get(`${b.typeName}-${b.x}-${b.z}`) ?? null;
       const zoneUsages = zones?.usages ?? [];
       const zoneTiers  = zones?.tiers  ?? [];
 
       if (useZoneData) {
-        // Merge CE zone usages + surface tags; show if at least one tag is visible
         const ceUsages = zoneUsages.length > 0 ? zoneUsages : ['unknown'];
         const protoUsages = b.usages.length > 0 ? b.usages : ['unknown'];
         const allUsages = [...new Set([...ceUsages, ...protoUsages].map(u => u.trim().toLowerCase()))];
@@ -237,15 +195,18 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       if (displayTiers.every(t => hiddenTiers.includes(t))) return [];
 
       const latlng = gameToLeaflet(b.x, b.z, mapConfig);
-      if (!viewportBounds.contains(latlng)) return [];
       const dirtyKey = b.typeName.trim().toLowerCase();
       const markerKey = `${dirtyKey}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`;
       const hasUnsavedChanges = dirtyBuildingKeys.has(dirtyKey);
-
       const markerUsage = zoneUsages[0] ?? primaryUsage;
       return [{ b, markerKey, primaryUsage, usageColor: getUsageColor(markerUsage), latlng, hasUnsavedChanges }];
     });
-  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, useZoneData, mapConfig, viewportBounds, dirtyBuildingKeys]);
+  }, [showBuildings, buildingInstances, mission, buildingItemFilter, buildingNameFilter, buildingMinLootmax, hiddenUsages, hiddenTiers, useZoneData, mapConfig, dirtyBuildingKeys, buildingZoneCache]);
+
+  // Viewport cull only — fast on every pan/zoom.
+  const visible = useMemo(() =>
+    filteredBuildings.filter(entry => viewportBounds.contains(entry.latlng)),
+  [filteredBuildings, viewportBounds]);
 
   const zoom = map.getZoom();
   const showClusters = zoom <= clusterZoomThreshold;
@@ -297,14 +258,22 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
         {clusters.map((cluster, idx) => {
           if (cluster.pointCount === 1 && cluster.sampleEntry) {
             const { b, usageColor, latlng, hasUnsavedChanges } = cluster.sampleEntry;
-
             return (
-              <BuildingMarkerEntry
+              <CircleMarker
                 key={`${b.typeName}-${b.x.toFixed(3)}-${b.z.toFixed(3)}`}
-                building={b}
-                usageColor={usageColor}
-                latlng={latlng}
-                hasUnsavedChanges={hasUnsavedChanges}
+                center={latlng}
+                radius={7}
+                renderer={canvasRenderer}
+                bubblingMouseEvents={false}
+                pathOptions={{
+                  fillColor: hasUnsavedChanges ? '#4f46e5' : usageColor,
+                  fillOpacity: 0.9,
+                  color: hasUnsavedChanges ? '#818cf8' : '#0f1117',
+                  weight: 2.5,
+                }}
+                eventHandlers={{
+                  click: () => setSelectedBuilding(b.typeName, { x: b.x, z: b.z }),
+                }}
               />
             );
           }
@@ -315,6 +284,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
               key={`building-cluster-${idx}`}
               center={cluster.center}
               radius={radius}
+              renderer={canvasRenderer}
               pathOptions={{
                 color: '#dcfce7',
                 fillColor: '#065f46',
@@ -322,12 +292,8 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
                 weight: 2,
               }}
               eventHandlers={{
-                click: (event) => {
-                  event.target.openPopup();
-                },
-                dblclick: () => {
-                  map.setView(cluster.center, Math.min(zoom + 2, 2));
-                },
+                click: (event) => { event.target.openPopup(); },
+                dblclick: () => { map.setView(cluster.center, Math.min(zoom + 2, 2)); },
               }}
             >
               <Tooltip permanent direction="center" className="cluster-count-label" interactive={false}>
@@ -348,12 +314,21 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   return (
     <>
       {visible.map(({ b, markerKey, usageColor, latlng, hasUnsavedChanges }) => (
-        <BuildingMarkerEntry
+        <CircleMarker
           key={markerKey}
-          building={b}
-          usageColor={usageColor}
-          latlng={latlng}
-          hasUnsavedChanges={hasUnsavedChanges}
+          center={latlng}
+          radius={7}
+          renderer={canvasRenderer}
+          bubblingMouseEvents={false}
+          pathOptions={{
+            fillColor: hasUnsavedChanges ? '#4f46e5' : usageColor,
+            fillOpacity: 0.9,
+            color: hasUnsavedChanges ? '#818cf8' : '#0f1117',
+            weight: 2.5,
+          }}
+          eventHandlers={{
+            click: () => setSelectedBuilding(b.typeName, { x: b.x, z: b.z }),
+          }}
         />
       ))}
     </>

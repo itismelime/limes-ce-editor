@@ -69,6 +69,16 @@ export function setCeToolBitmapSource(
       entries.push({ pixels, isTier: false, tierName: null, usageName: usageNameResolved });
     }
   }
+  // Pre-sort: tier entries highest-first, then usage entries. Avoids re-sorting on every pixel sample.
+  entries.sort((a, b) => {
+    if (a.isTier !== b.isTier) return a.isTier ? -1 : 1;
+    if (a.isTier && b.isTier) {
+      const na = parseInt((a.tierName ?? '0').replace(/\D/g, ''), 10);
+      const nb = parseInt((b.tierName ?? '0').replace(/\D/g, ''), 10);
+      return nb - na;
+    }
+    return 0;
+  });
   _ceToolData = entries.length > 0 ? { entries, width: bitmapSize.width, height: bitmapSize.height, worldSize } : null;
 }
 
@@ -83,20 +93,13 @@ function sampleCeToolPixel(x: number, z: number): { tierName: string | null; usa
   const bx = Math.min(Math.floor(x / worldSize * width), width - 1);
   const by = Math.min(Math.floor((1 - z / worldSize) * height), height - 1);
   const idx = (by * width + bx) * 4;
-
-  // Check highest-numbered tiers first
-  const tierEntries = entries.filter(e => e.isTier && e.tierName);
-  tierEntries.sort((a, b) => {
-    const na = parseInt(a.tierName!.replace(/\D/g, ''), 10);
-    const nb = parseInt(b.tierName!.replace(/\D/g, ''), 10);
-    return nb - na; // highest first
-  });
-  for (const e of tierEntries) {
-    if (e.pixels[idx] > 127) return { tierName: e.tierName, usageName: null };
-  }
-
+  // entries are pre-sorted: tier entries highest-first, then usages (see setCeToolBitmapSource)
   for (const e of entries) {
-    if (!e.isTier && e.pixels[idx] > 127) return { tierName: null, usageName: e.usageName };
+    if (e.pixels[idx] > 127) {
+      return e.isTier
+        ? { tierName: e.tierName, usageName: null }
+        : { tierName: null, usageName: e.usageName };
+    }
   }
   return null;
 }
