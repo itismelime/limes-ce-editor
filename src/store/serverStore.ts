@@ -1079,6 +1079,10 @@ export const useServerStore = create<ServerState>((set, get) => {
         return {
           dirty: { ...s.dirty, typesSources: s.dirty.typesSources.filter(p => p !== sourcePath) },
           originalTypes,
+          typeHistory: s.typeHistory.filter(entry => {
+            const type = s.mission?.types.get(entry.name);
+            return type ? type.source !== sourcePath : false;
+          }),
         };
       });
     });

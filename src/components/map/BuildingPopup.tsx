@@ -4,6 +4,7 @@ import type { BuildingInstance, DayZType } from '../../types/dayz';
 import { TIER_COLORS, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
+import { displayCategory, buildAttachmentNames, CATEGORY_LABELS } from '../../lib/itemClassifier';
 
 interface Props {
   building: BuildingInstance;
@@ -47,7 +48,6 @@ function CategorySection({
   onSetItemMin,
   onToggleItemTier,
   onOpenAddModal,
-  onOpenTierModal,
 }: {
   label: string;
   categoryKey: string;
@@ -59,11 +59,9 @@ function CategorySection({
   onSetItemMin: (itemName: string, min: number) => void;
   onToggleItemTier: (itemName: string, tier: string) => void;
   onOpenAddModal: (category: string) => void;
-  onOpenTierModal: (category: string) => void;
 }) {
   const [open, setOpen]         = useState(autoExpand ?? false);
   const [search, setSearch]     = useState('');
-  const [activeOnly, setActiveOnly] = useState(true);
   const [sortMode, setSortMode] = useState<'az' | 'nominal' | 'min'>('az');
   const [openTierDropdown, setOpenTierDropdown] = useState<string | null>(null);
   const [nominalDraftByItem, setNominalDraftByItem] = useState<Record<string, string>>({});
@@ -79,7 +77,7 @@ function CategorySection({
   const activeCount = items.filter(t => t.nominal > 0).length;
   const filtered = useMemo(() => {
     const next = items.filter(t => {
-      if (activeOnly && t.nominal === 0) return false;
+      if (t.nominal === 0) return false;
       if (search && !t.name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
@@ -95,7 +93,7 @@ function CategorySection({
     });
 
     return next;
-  }, [items, activeOnly, search, sortMode]);
+  }, [items, search, sortMode]);
 
   const getNominalDraft = (item: DayZType) => nominalDraftByItem[item.name] ?? String(item.nominal);
   const getMinDraft = (item: DayZType) => minDraftByItem[item.name] ?? String(item.min);
@@ -146,16 +144,6 @@ function CategorySection({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onOpenTierModal(categoryKey);
-            }}
-            className="w-5 h-5 rounded-md border border-lime-700/70 bg-lime-900/40 text-lime-300 hover:text-lime-200"
-            title="Remove one tier for this category (types.xml)"
-          >
-            T
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
               onBlockCategory(categoryKey);
             }}
             className="w-5 h-5 rounded-md border border-rose-700/70 bg-rose-900/40 text-rose-300 hover:text-rose-200 flex items-center justify-center"
@@ -188,15 +176,6 @@ function CategorySection({
               <option value="nominal">Highest nominal</option>
               <option value="min">Highest min</option>
             </select>
-            <label className="flex items-center gap-1 text-xs text-slate-400 whitespace-nowrap cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={activeOnly}
-                onChange={e => setActiveOnly(e.target.checked)}
-                className="accent-slate-500"
-              />
-              Active only
-            </label>
           </div>
           <div className="overflow-y-auto max-h-52">
             {filtered.length === 0 ? (
@@ -293,118 +272,11 @@ function CategorySection({
   );
 }
 
-type TierPatch = {
-  name: string;
-  source: string;
-  oldTiers: string[];
-  newTiers: string[];
-};
-
 function tierNum(tier: string): number | null {
   const m = /^Tier(\d+)$/i.exec(tier.trim());
   if (!m) return null;
   const n = Number.parseInt(m[1], 10);
   return Number.isFinite(n) ? n : null;
-}
-
-function TierGateModal({
-  open,
-  onClose,
-  category,
-  tierOptions,
-  selectedTier,
-  setSelectedTier,
-  preview,
-  applying,
-  onApply,
-  status,
-}: {
-  open: boolean;
-  onClose: () => void;
-  category: string;
-  tierOptions: string[];
-  selectedTier: string;
-  setSelectedTier: (v: string) => void;
-  preview: { patches: TierPatch[]; noTierCount: number; noHigherCount: number };
-  applying: boolean;
-  onApply: () => void;
-  status: string | null;
-}) {
-  if (!open) return null;
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-[1px] flex items-center justify-center p-2"
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div
-        className="w-[310px] max-h-[90%] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden flex flex-col"
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-3 py-2 border-b border-slate-700 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-200">Tier Gate Category (types.xml)</span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="p-3 border-b border-slate-800 space-y-2">
-          <div className="text-[11px] text-slate-400">Category: <span className="text-slate-200">{category}</span></div>
-          <select
-            value={selectedTier}
-            onChange={e => setSelectedTier(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-          >
-            <option value="">Select tier to remove...</option>
-            {tierOptions.map(t => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          <div className="text-[11px] text-slate-500">
-            Will remove selected tier only when item still has a higher tier. This avoids making entries unrestricted.
-          </div>
-        </div>
-
-        <div className="p-3 space-y-1 border-b border-slate-800 text-[11px]">
-          <div className="text-slate-200">Will update: {preview.patches.length}</div>
-          <div className="text-slate-500">Already not in tier: {preview.noTierCount}</div>
-          <div className="text-slate-500">Blocked (no higher tier): {preview.noHigherCount}</div>
-          {preview.patches.length > 0 && (
-            <div className="max-h-28 overflow-y-auto mt-1 border border-slate-800 rounded p-1">
-              {preview.patches.slice(0, 20).map(p => (
-                <div key={p.name} className="text-slate-300 truncate">{p.name}</div>
-              ))}
-              {preview.patches.length > 20 && (
-                <div className="text-slate-500">+{preview.patches.length - 20} more</div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="p-3 flex items-center justify-between gap-2">
-          <button
-            onClick={onApply}
-            disabled={!selectedTier || preview.patches.length === 0 || applying}
-            className="px-3 py-1 rounded bg-amber-900/40 border border-amber-700 text-amber-200 disabled:opacity-50"
-          >
-            {applying ? 'Applying...' : 'Stage Changes'}
-          </button>
-          {status && <span className="text-[11px] text-slate-400">{status}</span>}
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
 }
 
 function AddLootModal({
@@ -541,7 +413,10 @@ export function BuildingPopup({
   embedded = false,
 }: Props) {
   const types = useServerStore(s => s.mission?.types ?? EMPTY_TYPES);
+  const spawnableTypes = useServerStore(s => s.mission?.spawnableTypes);
+  const categoryOverrides = useUiStore(s => s.categoryOverrides);
   const categoryFilter  = useUiStore(s => s.categoryFilter);
+  const attachmentNames = useMemo(() => buildAttachmentNames(spawnableTypes ?? new Map()), [spawnableTypes]);
   // Read live building from store so category edits are reflected immediately without
   // relying on Leaflet re-opening the popup with updated props.
   const liveBuildingInstances = useServerStore(s => s.buildingInstances);
@@ -567,6 +442,8 @@ export function BuildingPopup({
   const updateContainerLootmax = useServerStore(s => s.updateContainerLootmax);
   const [containersOpen, setContainersOpen] = useState(false);
   const [zoneFilterActive, setZoneFilterActive] = useState(true);
+  const [tagSearch, setTagSearch] = useState('');
+  const [tagSearchOpen, setTagSearchOpen] = useState(false);
   const [containerTagInputs, setContainerTagInputs] = useState<Record<string, string>>({});
   const [containerCatInputs, setContainerCatInputs] = useState<Record<string, string>>({});
   const [containerLootmaxDrafts, setContainerLootmaxDrafts] = useState<Record<string, string>>({});
@@ -576,11 +453,6 @@ export function BuildingPopup({
   const usageDropdownRef = useRef<HTMLDivElement>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalCategory, setAddModalCategory] = useState('');
-  const [showTierModal, setShowTierModal] = useState(false);
-  const [tierModalCategory, setTierModalCategory] = useState('');
-  const [tierModalTier, setTierModalTier] = useState('');
-  const [tierApplying, setTierApplying] = useState(false);
-  const [tierStatus, setTierStatus] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -646,6 +518,29 @@ export function BuildingPopup({
     });
   }, [allItems, zoneFilterActive, zoneUsages, zoneTiers]);
 
+  // Items that match container categories but lack zone usages → can be tagged to spawn here
+  const tagSearchResults = useMemo(() => {
+    if (!tagSearch.trim()) return [];
+    const activeUsages = zoneUsages.filter(u => u && u !== 'unknown');
+    if (activeUsages.length === 0) return [];
+    const q = tagSearch.trim().toLowerCase();
+    const results: DayZType[] = [];
+    for (const item of types.values()) {
+      if (!item.name.toLowerCase().includes(q)) continue;
+      // must match at least one container's category
+      const catMatch = building.containers.some(c =>
+        c.categories.length === 0 || (item.category && c.categories.some(cat => cat.toLowerCase() === item.category!.toLowerCase()))
+      );
+      if (!catMatch) continue;
+      // exclude items already matching all zone usages
+      const alreadyTagged = activeUsages.every(u => item.usages.some(iu => iu.toLowerCase() === u.toLowerCase()));
+      if (alreadyTagged) continue;
+      results.push(item);
+      if (results.length >= 30) break;
+    }
+    return results;
+  }, [tagSearch, types, zoneUsages, building.containers]);
+
   const selectableCategories = useMemo(() => {
     const keys = new Map<string, string>();
     for (const type of types.values()) {
@@ -677,26 +572,37 @@ export function BuildingPopup({
     return Array.from({ length: maxTier }, (_, i) => `Tier${i + 1}`);
   }, [types, tiers]);
 
-  // Group by derived display category
-  const byCategory = useMemo(() => {
+  // Group by derived display category (Snipers, SMGs, etc.)
+  // Also track raw XML category per display group for block/add operations
+  const { byCategory, rawCategoryByDisplay } = useMemo(() => {
     const map = new Map<string, DayZType[]>();
+    const rawMap = new Map<string, string>(); // displayKey → raw XML category
     for (const item of effectiveItems) {
-      const key = (item.category ?? '__none__').toLowerCase();
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
+      const displayKey = displayCategory(item, attachmentNames, categoryOverrides).toLowerCase();
+      if (!map.has(displayKey)) map.set(displayKey, []);
+      map.get(displayKey)!.push(item);
+      if (!rawMap.has(displayKey)) rawMap.set(displayKey, item.category ?? '__none__');
     }
-    return map;
-  }, [effectiveItems]);
+    return { byCategory: map, rawCategoryByDisplay: rawMap };
+  }, [effectiveItems, attachmentNames, categoryOverrides]);
+
+  const hasZoneData = (zoneTiers.filter(t => t && t !== 'unknown').length > 0) ||
+    (zoneUsages.filter(u => u && u !== 'unknown').length > 0);
 
   // Sort category keys: known order first, then alphabetical unknowns, __none__ last
+  // When zone filter active, hide categories where no items can spawn (nominal > 0)
   const sortedCategories = useMemo(() => {
-    const keys = [...byCategory.keys()];
+    const zoneActive = hasZoneData && zoneFilterActive;
+    const keys = [...byCategory.keys()].filter(cat => {
+      if (!zoneActive) return true;
+      return byCategory.get(cat)!.some(item => item.nominal > 0);
+    });
     return keys.sort((a, b) => {
       if (a === '__none__') return 1;
       if (b === '__none__') return -1;
       return a.localeCompare(b);
     });
-  }, [byCategory]);
+  }, [byCategory, hasZoneData, zoneFilterActive]);
 
   const cleanZoneTiers  = zoneTiers.filter(t => t && t !== 'unknown');
   const cleanZoneUsages = zoneUsages.filter(u => u && u !== 'unknown');
@@ -728,13 +634,6 @@ export function BuildingPopup({
   const openAddModal = (category = '') => {
     setAddModalCategory(category);
     setShowAddModal(true);
-  };
-
-  const openTierModal = (category = '') => {
-    setTierModalCategory(category);
-    setTierModalTier('');
-    setTierStatus(null);
-    setShowTierModal(true);
   };
 
   const handleAddCategory = async (category: string) => {
@@ -785,91 +684,6 @@ export function BuildingPopup({
     updateType(itemName, { tiers: [...type.tiers, tier] });
     setSaveStatus(`Added ${tier} to ${itemName}.`);
   };
-
-  const tierPreview = useMemo(() => {
-    if (!tierModalCategory || !tierModalTier) {
-      return { patches: [] as TierPatch[], noTierCount: 0, noHigherCount: 0 };
-    }
-
-    const targetNum = tierNum(tierModalTier);
-    if (targetNum == null) {
-      return { patches: [] as TierPatch[], noTierCount: 0, noHigherCount: 0 };
-    }
-
-    let noTierCount = 0;
-    let noHigherCount = 0;
-    const patches: TierPatch[] = [];
-
-    for (const type of types.values()) {
-      const cat = (type.category ?? '__none__').toLowerCase();
-      if (cat !== tierModalCategory) continue;
-
-      const hasTargetTier = type.tiers.includes(tierModalTier);
-      if (!hasTargetTier) {
-        noTierCount += 1;
-        continue;
-      }
-
-      const hasHigherTier = type.tiers.some((t: string) => {
-        const n = tierNum(t);
-        return n != null && n > targetNum;
-      });
-
-      if (!hasHigherTier) {
-        noHigherCount += 1;
-        continue;
-      }
-
-      const newTiers = type.tiers.filter((t: string) => t !== tierModalTier);
-      if (newTiers.length === 0) {
-        noHigherCount += 1;
-        continue;
-      }
-
-      patches.push({
-        name: type.name,
-        source: type.source,
-        oldTiers: type.tiers,
-        newTiers,
-      });
-    }
-
-    return { patches, noTierCount, noHigherCount };
-  }, [types, tierModalCategory, tierModalTier]);
-
-  const tierOptionsForCategory = useMemo(() => {
-    if (!tierModalCategory) return [] as string[];
-    const set = new Set<string>();
-    for (const type of types.values()) {
-      const cat = (type.category ?? '__none__').toLowerCase();
-      if (cat !== tierModalCategory) continue;
-      for (const tier of type.tiers) {
-        if (/^Tier\d+$/i.test(tier)) set.add(tier);
-      }
-    }
-    return [...set].sort((a, b) => (tierNum(a) ?? 0) - (tierNum(b) ?? 0));
-  }, [types, tierModalCategory]);
-
-  const applyTierGate = async () => {
-    if (!tierModalTier || tierPreview.patches.length === 0) return;
-    setTierApplying(true);
-    setTierStatus(null);
-
-    try {
-      for (const patch of tierPreview.patches) {
-        updateType(patch.name, { tiers: patch.newTiers });
-      }
-
-      setTierStatus(`Staged ${tierPreview.patches.length} item(s).`);
-    } catch {
-      setTierStatus('Failed to stage tier edits.');
-    } finally {
-      setTierApplying(false);
-    }
-  };
-
-
-
 
   return (
     <div className={embedded ? 'relative text-xs h-full overflow-y-auto p-3' : 'relative text-xs w-80 max-h-[480px] overflow-y-auto'}>
@@ -1123,6 +937,56 @@ export function BuildingPopup({
       )}
       {saveStatus && <div className="mb-2 text-[11px] text-slate-400">{saveStatus}</div>}
 
+      {hasZoneData && zoneUsages.filter(u => u && u !== 'unknown').length > 0 && (
+        <div className="mb-3">
+          <button
+            onClick={() => setTagSearchOpen(v => !v)}
+            className="text-[10px] px-2 py-0.5 rounded border border-slate-600 bg-slate-800/60 text-slate-400 hover:text-slate-200 w-full text-left"
+          >
+            {tagSearchOpen ? '▲' : '▼'} Tag items to spawn here
+          </button>
+          {tagSearchOpen && (
+            <div className="mt-1 border border-slate-700 rounded-lg overflow-hidden">
+              <input
+                autoFocus
+                value={tagSearch}
+                onChange={e => setTagSearch(e.target.value)}
+                placeholder="Search item name…"
+                className="w-full px-2 py-1.5 text-xs bg-slate-800 border-b border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none"
+              />
+              {tagSearch.trim() && tagSearchResults.length === 0 && (
+                <p className="px-3 py-2 text-[11px] text-slate-500">No untagged items match</p>
+              )}
+              <div className="max-h-44 overflow-y-auto divide-y divide-slate-800/60">
+                {tagSearchResults.map(item => {
+                  const activeUsages = zoneUsages.filter(u => u && u !== 'unknown');
+                  const missing = activeUsages.filter(u => !item.usages.some(iu => iu.toLowerCase() === u.toLowerCase()));
+                  return (
+                    <div key={item.name} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800/40">
+                      <span className="flex-1 text-[11px] text-slate-300 truncate" title={item.name}>{item.name}</span>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {missing.map(u => (
+                          <span key={u} className="px-1 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}>{u}</span>
+                        ))}
+                        <button
+                          onClick={() => {
+                            updateType(item.name, { usages: [...item.usages, ...missing] });
+                            setSaveStatus(`Tagged ${item.name} with ${missing.join(', ')}.`);
+                          }}
+                          className="px-2 py-0.5 rounded text-[10px] bg-lime-900/50 border border-lime-700 text-lime-300 hover:bg-lime-900/80"
+                        >
+                          + Add
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {building.containers.length === 0 ? (
         <p className="text-slate-500 italic">no container data</p>
       ) : (
@@ -1130,8 +994,8 @@ export function BuildingPopup({
           {sortedCategories.map(cat => (
             <CategorySection
               key={cat}
-              categoryKey={cat.toLowerCase()}
-              label={cat === '__none__' ? 'Uncategorized' : cat}
+              categoryKey={rawCategoryByDisplay.get(cat) ?? cat}
+              label={cat === '__none__' ? 'Uncategorized' : (CATEGORY_LABELS[cat] ?? cat)}
               items={byCategory.get(cat)!}
               tierOptions={availableTierOptions}
               autoExpand={!!categoryFilter && cat === categoryFilter}
@@ -1140,7 +1004,6 @@ export function BuildingPopup({
               onSetItemMin={handleSetItemMin}
               onToggleItemTier={handleToggleItemTier}
               onOpenAddModal={(category) => openAddModal(category)}
-              onOpenTierModal={(category) => openTierModal(category)}
             />
           ))}
 
@@ -1159,18 +1022,6 @@ export function BuildingPopup({
         onAddCategory={(category) => { void handleAddCategory(category); }}
       />
 
-      <TierGateModal
-        open={showTierModal}
-        onClose={() => setShowTierModal(false)}
-        category={tierModalCategory === '__none__' ? 'Uncategorized' : tierModalCategory}
-        tierOptions={tierOptionsForCategory}
-        selectedTier={tierModalTier}
-        setSelectedTier={setTierModalTier}
-        preview={tierPreview}
-        applying={tierApplying}
-        onApply={() => { void applyTierGate(); }}
-        status={tierStatus}
-      />
     </div>
   );
 }
