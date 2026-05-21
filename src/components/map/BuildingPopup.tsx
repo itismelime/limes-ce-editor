@@ -444,6 +444,7 @@ export function BuildingPopup({
   const [zoneFilterActive, setZoneFilterActive] = useState(true);
   const [tagSearch, setTagSearch] = useState('');
   const [tagSearchOpen, setTagSearchOpen] = useState(false);
+  const [addingUsageForItem, setAddingUsageForItem] = useState<string | null>(null);
   const [containerTagInputs, setContainerTagInputs] = useState<Record<string, string>>({});
   const [containerCatInputs, setContainerCatInputs] = useState<Record<string, string>>({});
   const [containerLootmaxDrafts, setContainerLootmaxDrafts] = useState<Record<string, string>>({});
@@ -470,6 +471,13 @@ export function BuildingPopup({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [usageDropdownOpen]);
+
+  useEffect(() => {
+    if (!addingUsageForItem) return;
+    const handler = () => setAddingUsageForItem(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [addingUsageForItem]);
 
   const availableUsages = useMemo(() => {
     const current = new Set(building.usages.map(u => u.trim().toLowerCase()));
@@ -505,8 +513,17 @@ export function BuildingPopup({
   }, [building.containers, types, originalMapGroupProto, building.typeName]);
 
   const effectiveItems = useMemo(() => {
-    const activeUsages = zoneUsages.filter(u => u && u !== 'unknown');
-    const activeTiers  = zoneTiers.filter(t => t && t !== 'unknown');
+    const ceUsages = zoneUsages.filter(u => u && u !== 'unknown');
+    const buildingUsages = building.usages.filter(u => u && u !== 'unknown');
+    // Merge CE territory usages + building proto usages (deduplicated, case-insensitive)
+    const seenU = new Set<string>();
+    const activeUsages = [...ceUsages, ...buildingUsages].filter(u => {
+      const k = u.toLowerCase();
+      if (seenU.has(k)) return false;
+      seenU.add(k);
+      return true;
+    });
+    const activeTiers = zoneTiers.filter(t => t && t !== 'unknown');
     const hasZone = activeUsages.length > 0 || activeTiers.length > 0;
     if (!hasZone || !zoneFilterActive) return allItems;
     return allItems.filter(item => {
@@ -516,30 +533,19 @@ export function BuildingPopup({
         item.tiers.some(t => activeTiers.some(z => z.toLowerCase() === t.toLowerCase()));
       return usageOk && tierOk;
     });
-  }, [allItems, zoneFilterActive, zoneUsages, zoneTiers]);
+  }, [allItems, zoneFilterActive, zoneUsages, zoneTiers, building.usages]);
 
-  // Items that match container categories but lack zone usages → can be tagged to spawn here
   const tagSearchResults = useMemo(() => {
     if (!tagSearch.trim()) return [];
-    const activeUsages = zoneUsages.filter(u => u && u !== 'unknown');
-    if (activeUsages.length === 0) return [];
     const q = tagSearch.trim().toLowerCase();
     const results: DayZType[] = [];
     for (const item of types.values()) {
       if (!item.name.toLowerCase().includes(q)) continue;
-      // must match at least one container's category
-      const catMatch = building.containers.some(c =>
-        c.categories.length === 0 || (item.category && c.categories.some(cat => cat.toLowerCase() === item.category!.toLowerCase()))
-      );
-      if (!catMatch) continue;
-      // exclude items already matching all zone usages
-      const alreadyTagged = activeUsages.every(u => item.usages.some(iu => iu.toLowerCase() === u.toLowerCase()));
-      if (alreadyTagged) continue;
       results.push(item);
-      if (results.length >= 30) break;
+      if (results.length >= 50) break;
     }
     return results;
-  }, [tagSearch, types, zoneUsages, building.containers]);
+  }, [tagSearch, types]);
 
   const selectableCategories = useMemo(() => {
     const keys = new Map<string, string>();
@@ -572,6 +578,9 @@ export function BuildingPopup({
     return Array.from({ length: maxTier }, (_, i) => `Tier${i + 1}`);
   }, [types, tiers]);
 
+  const cleanZoneTiers  = zoneTiers.filter(t => t && t !== 'unknown');
+  const cleanZoneUsages = zoneUsages.filter(u => u && u !== 'unknown');
+
   // Group by derived display category (Snipers, SMGs, etc.)
   // Also track raw XML category per display group for block/add operations
   const { byCategory, rawCategoryByDisplay } = useMemo(() => {
@@ -586,8 +595,9 @@ export function BuildingPopup({
     return { byCategory: map, rawCategoryByDisplay: rawMap };
   }, [effectiveItems, attachmentNames, categoryOverrides]);
 
-  const hasZoneData = (zoneTiers.filter(t => t && t !== 'unknown').length > 0) ||
-    (zoneUsages.filter(u => u && u !== 'unknown').length > 0);
+  const hasZoneData = cleanZoneTiers.length > 0 ||
+    cleanZoneUsages.length > 0 ||
+    building.usages.filter(u => u && u !== 'unknown').length > 0;
 
   // Sort category keys: known order first, then alphabetical unknowns, __none__ last
   // When zone filter active, hide categories where no items can spawn (nominal > 0)
@@ -604,8 +614,6 @@ export function BuildingPopup({
     });
   }, [byCategory, hasZoneData, zoneFilterActive]);
 
-  const cleanZoneTiers  = zoneTiers.filter(t => t && t !== 'unknown');
-  const cleanZoneUsages = zoneUsages.filter(u => u && u !== 'unknown');
   const hasZoneTier = cleanZoneTiers.length > 0;
   const orderedProtoTiers = [...new Set(protoTiers)];
   const hasInferredTier = !!inferredTier && inferredTier !== 'unknown';
@@ -918,7 +926,7 @@ export function BuildingPopup({
           +
         </button>
       </div>
-      {(cleanZoneTiers.length > 0 || cleanZoneUsages.length > 0) && (
+      {hasZoneData && (
         <div className="mb-2 flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] text-slate-500">Zone:</span>
           {cleanZoneTiers.map(t => (
@@ -926,6 +934,9 @@ export function BuildingPopup({
           ))}
           {cleanZoneUsages.map(u => (
             <span key={u} className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}>{formatUsageLabel(u)}</span>
+          ))}
+          {building.usages.filter(u => u && u !== 'unknown' && !cleanZoneUsages.some(z => z.toLowerCase() === u.toLowerCase())).map(u => (
+            <span key={`proto-${u}`} className="px-1.5 py-0.5 rounded text-[10px] font-semibold opacity-70" style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }} title="Building proto usage">{formatUsageLabel(u)}</span>
           ))}
           <button
             onClick={() => setZoneFilterActive(v => !v)}
@@ -937,46 +948,75 @@ export function BuildingPopup({
       )}
       {saveStatus && <div className="mb-2 text-[11px] text-slate-400">{saveStatus}</div>}
 
-      {hasZoneData && zoneUsages.filter(u => u && u !== 'unknown').length > 0 && (
-        <div className="mb-3">
+      <div className="mb-3 border border-slate-700 rounded-lg overflow-hidden">
           <button
-            onClick={() => setTagSearchOpen(v => !v)}
-            className="text-[10px] px-2 py-0.5 rounded border border-slate-600 bg-slate-800/60 text-slate-400 hover:text-slate-200 w-full text-left"
+            onClick={() => { setTagSearchOpen(v => !v); setAddingUsageForItem(null); }}
+            className="w-full flex items-center justify-between px-3 py-1.5 bg-slate-800/60 hover:bg-slate-800 text-xs text-slate-300 font-medium"
           >
-            {tagSearchOpen ? '▲' : '▼'} Tag items to spawn here
+            <span>Tag items to spawn here</span>
+            <span className="text-slate-500">{tagSearchOpen ? '▲' : '▼'}</span>
           </button>
           {tagSearchOpen && (
-            <div className="mt-1 border border-slate-700 rounded-lg overflow-hidden">
+            <div className="border-t border-slate-800">
               <input
                 autoFocus
                 value={tagSearch}
-                onChange={e => setTagSearch(e.target.value)}
+                onChange={e => { setTagSearch(e.target.value); setAddingUsageForItem(null); }}
                 placeholder="Search item name…"
-                className="w-full px-2 py-1.5 text-xs bg-slate-800 border-b border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none"
+                className="w-full px-3 py-1.5 text-xs bg-slate-800 border-b border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none"
               />
               {tagSearch.trim() && tagSearchResults.length === 0 && (
-                <p className="px-3 py-2 text-[11px] text-slate-500">No untagged items match</p>
+                <p className="px-3 py-2 text-[11px] text-slate-500">No items match</p>
               )}
-              <div className="max-h-44 overflow-y-auto divide-y divide-slate-800/60">
+              {!tagSearch.trim() && (
+                <p className="px-3 py-2 text-[11px] text-slate-500">Type to search all item types…</p>
+              )}
+              <div className="max-h-44 overflow-y-auto divide-y divide-slate-800/50">
                 {tagSearchResults.map(item => {
-                  const activeUsages = zoneUsages.filter(u => u && u !== 'unknown');
-                  const missing = activeUsages.filter(u => !item.usages.some(iu => iu.toLowerCase() === u.toLowerCase()));
+                  const seenZones = new Set<string>();
+                  const availableZones = [...cleanZoneUsages, ...building.usages].filter(u => {
+                    if (!u || u === 'unknown') return false;
+                    if (item.usages.some(iu => iu.toLowerCase() === u.toLowerCase())) return false;
+                    const key = u.toLowerCase();
+                    if (seenZones.has(key)) return false;
+                    seenZones.add(key);
+                    return true;
+                  });
+                  const isPickingZone = addingUsageForItem === item.name;
                   return (
-                    <div key={item.name} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800/40">
-                      <span className="flex-1 text-[11px] text-slate-300 truncate" title={item.name}>{item.name}</span>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {missing.map(u => (
-                          <span key={u} className="px-1 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: getUsageColor(u), color: getUsageTextColor(getUsageColor(u)) }}>{u}</span>
-                        ))}
+                    <div key={item.name} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800/30">
+                      <span className="flex-1 text-xs text-slate-300 truncate" title={item.name}>{item.name}</span>
+                      <div className="relative flex-shrink-0">
                         <button
-                          onClick={() => {
-                            updateType(item.name, { usages: [...item.usages, ...missing] });
-                            setSaveStatus(`Tagged ${item.name} with ${missing.join(', ')}.`);
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] bg-lime-900/50 border border-lime-700 text-lime-300 hover:bg-lime-900/80"
+                          onClick={() => setAddingUsageForItem(isPickingZone ? null : item.name)}
+                          className="h-5 px-2 rounded-md border border-lime-700/70 bg-lime-900/40 text-lime-300 hover:text-lime-200 text-[10px]"
                         >
-                          + Add
+                          + Add ▾
                         </button>
+                        {isPickingZone && (
+                          <div className="absolute right-0 top-6 z-50 bg-slate-900 border border-slate-700 rounded shadow-lg py-1 min-w-[120px]" onMouseDown={e => e.stopPropagation()}>
+                            {availableZones.length === 0 ? (
+                              <p className="px-3 py-1.5 text-[10px] text-slate-500 whitespace-nowrap">No zones at this position</p>
+                            ) : (
+                              availableZones.map(zone => (
+                                <button
+                                  key={zone}
+                                  onClick={() => {
+                                    const missingTiers = cleanZoneTiers.filter(t => !item.tiers.some(it => it.toLowerCase() === t.toLowerCase()));
+                                    updateType(item.name, { usages: [...item.usages, zone], tiers: [...item.tiers, ...missingTiers] });
+                                    const tierNote = missingTiers.length > 0 ? ` + ${missingTiers.join(', ')}` : '';
+                                    setSaveStatus(`Tagged ${item.name} with ${zone}${tierNote}.`);
+                                    setAddingUsageForItem(null);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800"
+                                >
+                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: getUsageColor(zone) }} />
+                                  {formatUsageLabel(zone)}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -985,7 +1025,6 @@ export function BuildingPopup({
             </div>
           )}
         </div>
-      )}
 
       {building.containers.length === 0 ? (
         <p className="text-slate-500 italic">no container data</p>
