@@ -8,7 +8,7 @@ import {
   serializeWeatherXml, serializeGameplayJson,
   serializeLimitsDefinitionXml, serializeLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
-import { writeFile, readFile, createDir, readBinaryFile, writeBinaryFile, removeFile } from '../lib/fileDiscovery';
+import { writeFile, readFile, createDir, readBinaryFile, writeBinaryFile, removeFile, backupIfNeeded } from '../lib/fileDiscovery';
 import { setCeToolBitmapSource, clearCeToolBitmapSource } from '../lib/tierZoneResolver';
 import type { ContainerDef } from '../types/dayz';
 
@@ -369,9 +369,10 @@ function markSuccess(set: (fn: (s: ServerState) => Partial<ServerState>) => void
 }
 
 export const useServerStore = create<ServerState>((set, get) => {
-  async function trySave(fileName: string, operation: () => Promise<void>): Promise<void> {
+  async function trySave(fileName: string, operation: () => Promise<void>, pathsToBackup: string[] = []): Promise<void> {
     set({ saveStatus: 'saving' });
     try {
+      await Promise.all(pathsToBackup.map(backupIfNeeded));
       await operation();
       markSuccess(set);
     } catch (err) {
@@ -1044,6 +1045,7 @@ export const useServerStore = create<ServerState>((set, get) => {
         ? economyCore
         : [...economyCore, { folder: folderKey, files: [{ name: fileName, type: 'types' }] }];
 
+      await backupIfNeeded(paths.economyCorePath);
       await writeFile(paths.economyCorePath, serializeEconomyCoreXml(nextCore));
       set({ economyCore: nextCore });
     } catch (err) {
@@ -1056,6 +1058,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     if (!paths.economyCorePath) return;
     const nextCore = economyCore.filter(e => e.folder !== folder);
     try {
+      await backupIfNeeded(paths.economyCorePath);
       await writeFile(paths.economyCorePath, serializeEconomyCoreXml(nextCore));
       set({ economyCore: nextCore });
     } catch (err) {
@@ -1085,7 +1088,7 @@ export const useServerStore = create<ServerState>((set, get) => {
           }),
         };
       });
-    });
+    }, [sourcePath]);
   },
 
   saveEventSpawns: async () => {
@@ -1094,7 +1097,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('cfgeventspawns.xml', async () => {
       await writeFile(paths.eventSpawnsPath!, serializeEventSpawnsXml(mission.eventSpawns));
       set(s => ({ dirty: { ...s.dirty, eventSpawns: false }, originalEventSpawns: [...mission.eventSpawns] }));
-    });
+    }, [paths.eventSpawnsPath]);
   },
 
   saveEvents: async () => {
@@ -1103,7 +1106,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('events.xml', async () => {
       await writeFile(paths.eventsPath!, serializeEventsXml(mission.events));
       set(s => ({ dirty: { ...s.dirty, events: false }, originalEvents: new Map(mission.events) }));
-    });
+    }, [paths.eventsPath]);
   },
 
   saveSpawnableTypes: async () => {
@@ -1122,7 +1125,7 @@ export const useServerStore = create<ServerState>((set, get) => {
         await writeFile(sourcePath, serializeSpawnableTypesXml(spawnableTypes));
       }
       set(s => ({ dirty: { ...s.dirty, spawnableTypes: false }, originalSpawnableTypes: new Map(mission.spawnableTypes) }));
-    });
+    }, [...groupedBySource.keys()]);
   },
 
   saveMapGroupProto: async () => {
@@ -1131,7 +1134,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('mapgroupproto.xml', async () => {
       await writeFile(paths.mapGroupProtoPath!, serializeMapGroupProtoXml(mapGroupProto));
       set(s => ({ dirty: { ...s.dirty, mapGroupProto: false }, originalMapGroupProto: cloneMapGroupProto(s.mapGroupProto) }));
-    });
+    }, [paths.mapGroupProtoPath]);
   },
 
   saveWeather: async () => {
@@ -1140,7 +1143,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('cfgweather.xml', async () => {
       await writeFile(paths.weatherPath!, serializeWeatherXml(weather));
       set(s => ({ dirty: { ...s.dirty, weather: false }, originalWeather: s.weather }));
-    });
+    }, [paths.weatherPath]);
   },
 
   saveGameplay: async () => {
@@ -1149,7 +1152,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('cfggameplay.json', async () => {
       await writeFile(paths.gameplayPath!, serializeGameplayJson(gameplay));
       set(s => ({ dirty: { ...s.dirty, gameplay: false }, originalGameplay: s.gameplay }));
-    });
+    }, [paths.gameplayPath]);
   },
 
   saveLimitsDefinition: async () => {
@@ -1158,7 +1161,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('cfglimitsdefinition.xml', async () => {
       await writeFile(paths.limitsDefinitionPath!, serializeLimitsDefinitionXml(limitsDefinition));
       set(s => ({ dirty: { ...s.dirty, limitsDefinition: false }, originalLimitsDefinition: s.limitsDefinition }));
-    });
+    }, [paths.limitsDefinitionPath]);
   },
 
   saveLimitsDefinitionUser: async () => {
@@ -1167,7 +1170,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     await trySave('cfglimitsdefinitionuser.xml', async () => {
       await writeFile(paths.limitsDefinitionUserPath!, serializeLimitsDefinitionUserXml(limitsDefinitionUser));
       set(s => ({ dirty: { ...s.dirty, limitsDefinitionUser: false }, originalLimitsDefinitionUser: s.limitsDefinitionUser }));
-    });
+    }, [paths.limitsDefinitionUserPath]);
   },
 
   clearTerritoryState: () => {
@@ -1445,10 +1448,13 @@ export const useServerStore = create<ServerState>((set, get) => {
     const { paths, ceToolLayers, newCeToolLayerNames, deletedCeToolLayerNames, territoryBitmaps, territoryBitmapSize, ceToolWorldSize } = get();
     if (!paths.ceToolLayersDir || !paths.missionPath || !territoryBitmapSize) return;
 
+    const paintableLayers = ceToolLayers.filter(l => l.isPaintable && !/^usgFlg_Def-/i.test(l.name) && territoryBitmaps.has(l.name));
+    const tgaPaths = paintableLayers.map(l => `${paths.ceToolLayersDir}/${l.name}.tga`);
+    const xmlBackupPaths = paths.ceToolXmlPath ? [paths.ceToolXmlPath] : [];
     await trySave('territory zones', async () => {
       const { width, height } = territoryBitmapSize;
       // Write each modified paintable TGA
-      for (const layer of ceToolLayers.filter(l => l.isPaintable && !/^usgFlg_Def-/i.test(l.name))) {
+      for (const layer of paintableLayers) {
         const pixels = territoryBitmaps.get(layer.name);
         if (!pixels) continue;
         await writeBinaryFile(
@@ -1515,7 +1521,7 @@ export const useServerStore = create<ServerState>((set, get) => {
         newCeToolLayerNames: [],
         deletedCeToolLayerNames: [],
       }));
-    });
+    }, [...tgaPaths, ...xmlBackupPaths]);
   },
 
   revertTerritoryBitmaps: () => {

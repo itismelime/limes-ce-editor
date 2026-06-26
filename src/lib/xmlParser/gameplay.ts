@@ -6,6 +6,11 @@ export function parseGameplayJson(raw: string): GameplayData {
   const playerData = data.PlayerData as Record<string, unknown> | undefined;
   const worldsData = data.WorldsData as Record<string, unknown> | undefined;
 
+  // WorldsData can be an array of world entries (standard DayZ) or a plain object (older format).
+  const worldEntry: Record<string, unknown> | undefined = Array.isArray(worldsData)
+    ? (worldsData[0] as Record<string, unknown> | undefined)
+    : (worldsData ?? undefined);
+
   return {
     version: num(data.version, 1),
     PlayerData: playerData ? {
@@ -28,11 +33,11 @@ export function parseGameplayJson(raw: string): GameplayData {
         rawValues: { ...playerData.StaminaData as Record<string, string> },
       } : undefined,
     } : undefined,
-    WorldsData: worldsData ? {
-      environmentMinTemps: worldsData.environmentMinTemps ? (worldsData.environmentMinTemps as number[]) : undefined,
-      environmentMaxTemps: worldsData.environmentMaxTemps ? (worldsData.environmentMaxTemps as number[]) : undefined,
-      rawMinTemps: JSON.stringify(worldsData.environmentMinTemps),
-      rawMaxTemps: JSON.stringify(worldsData.environmentMaxTemps),
+    WorldsData: worldEntry ? {
+      environmentMinTemps: worldEntry.environmentMinTemps ? (worldEntry.environmentMinTemps as number[]) : undefined,
+      environmentMaxTemps: worldEntry.environmentMaxTemps ? (worldEntry.environmentMaxTemps as number[]) : undefined,
+      rawMinTemps: JSON.stringify(worldEntry.environmentMinTemps),
+      rawMaxTemps: JSON.stringify(worldEntry.environmentMaxTemps),
     } : undefined,
     rawData: data,
   };
@@ -87,13 +92,16 @@ export function serializeGameplayJson(gameplay: GameplayData): string {
     }
   }
 
-  if (gameplay.WorldsData) {
-    const existingWorldsData = (result.WorldsData as Record<string, unknown> | undefined) ?? {};
-    result.WorldsData = {
-      ...existingWorldsData,
-      ...(gameplay.WorldsData.environmentMinTemps ? { environmentMinTemps: gameplay.WorldsData.environmentMinTemps } : {}),
-      ...(gameplay.WorldsData.environmentMaxTemps ? { environmentMaxTemps: gameplay.WorldsData.environmentMaxTemps } : {}),
-    };
+  if (gameplay.WorldsData && (gameplay.WorldsData.environmentMinTemps !== undefined || gameplay.WorldsData.environmentMaxTemps !== undefined)) {
+    const tempPatch: Record<string, unknown> = {};
+    if (gameplay.WorldsData.environmentMinTemps !== undefined) tempPatch.environmentMinTemps = gameplay.WorldsData.environmentMinTemps;
+    if (gameplay.WorldsData.environmentMaxTemps !== undefined) tempPatch.environmentMaxTemps = gameplay.WorldsData.environmentMaxTemps;
+
+    if (Array.isArray(result.WorldsData)) {
+      result.WorldsData = (result.WorldsData as Record<string, unknown>[]).map(entry => ({ ...entry, ...tempPatch }));
+    } else {
+      result.WorldsData = { ...(result.WorldsData as Record<string, unknown> | undefined ?? {}), ...tempPatch };
+    }
   }
 
   return JSON.stringify(result, null, '\t');

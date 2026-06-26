@@ -367,6 +367,22 @@ export async function removeFile(path: string): Promise<void> {
   await removeNative(path);
 }
 
+export async function backupIfNeeded(path: string): Promise<void> {
+  const backupPath = `${path}.bak`;
+  try {
+    await readTextFile(backupPath);
+    // backup already exists — skip
+  } catch {
+    // no backup yet — copy the original
+    try {
+      const content = await readBinaryFileNative(path);
+      await writeBinaryFileNative(backupPath, content);
+    } catch {
+      // original doesn't exist yet (new file) — nothing to back up
+    }
+  }
+}
+
 export function clearCeToolCaches(): void {
   CETOOL_PROJECT_CACHE.clear();
   TIER_LAYER_CACHE.clear();

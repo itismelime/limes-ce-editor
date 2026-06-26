@@ -326,7 +326,7 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, [showCommunityMapsModal, setShowCommunityMapsModal]);
   const [mountedTabs, setMountedTabs] = useState<Partial<Record<ActiveTab, true>>>({ [activeTab]: true });
-  const [isStartupWarmup, setIsStartupWarmup] = useState(false);
+  const [isStartupWarmup, setIsStartupWarmup] = useState(true);
   const [startupMessage, setStartupMessage] = useState('Preparing editor...');
   const [showNoticeDetails, setShowNoticeDetails] = useState(false);
 
@@ -336,6 +336,19 @@ export function AppShell() {
 
   // Load community maps as early as possible.
   useEffect(() => { void loadCommunityMaps(); }, [loadCommunityMaps]);
+
+  // Always show a startup warmup on first mount so the loading screen is visible.
+  useEffect(() => {
+    let cancelled = false;
+    setStartupMessage('Preparing editor...');
+    prefetchTabOnce('map');
+    prefetchTabOnce('types');
+    Promise.allSettled([TAB_PREFETCHERS.map(), TAB_PREFETCHERS.types()]).then(() => {
+      if (!cancelled) setTimeout(() => { if (!cancelled) setIsStartupWarmup(false); }, 300);
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const parsedWarnings = loadWarnings.map(parseLoadWarning);
   const compatWarnings = parsedWarnings.filter(w => w.kind === 'compat');
@@ -406,7 +419,9 @@ export function AppShell() {
       prefetchTabOnce('map');
       prefetchTabOnce('types');
 
-      if ((KNOWN_MAPS.has(activeMap) || communityMapIds.has(activeMap)) && !mapImagePaths[activeMap]) {
+      const currentMapImagePaths = useUiStore.getState().mapImagePaths;
+      const currentCommunityMapIds = new Set(useCommunityMapsStore.getState().maps.map(m => m.id));
+      if ((KNOWN_MAPS.has(activeMap) || currentCommunityMapIds.has(activeMap)) && !currentMapImagePaths[activeMap]) {
         try {
           const result = await invoke<{ path: string; width: number; height: number }>('download_map_tiles', {
             mapId: activeMap,
@@ -438,7 +453,8 @@ export function AppShell() {
       cancelled = true;
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [missionPath, activeMap, mapImagePaths, setMapImagePath, setMapImageSize]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionPath, activeMap]);
 
   const showNoFilesError = loadError === 'no_files_found' || loadError === 'permission_denied' || loadError?.startsWith('error:');
   const prefetchTab = (tab: ActiveTab) => {
