@@ -358,10 +358,11 @@ function DayZTileLayer({
     return () => { map.removeLayer(layer); };
   }, [map, mapId, mapsDir, imageWidth]);
 
-  // Preload all tile levels into browser image cache so Leaflet finds them ready.
-  // Runs once per map change; 16 concurrent loads to saturate local disk without blocking UI.
+  // Preload the low-zoom tile levels into browser image cache so Leaflet finds
+  // them ready; deeper levels demand-load fine. pz<=3 is 85 tiles vs 1365 for
+  // the full pyramid, which flooded the asset protocol on every map switch.
   useEffect(() => {
-    const MAX_PZ = 5;
+    const MAX_PZ = 3;
     const CONCURRENCY = 16;
     let cancelled = false;
 

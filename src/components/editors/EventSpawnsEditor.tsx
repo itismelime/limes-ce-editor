@@ -50,7 +50,7 @@ function PosRow({ pos, onUpdate, onDelete }: {
 }
 
 export function EventSpawnsEditor() {
-  const mission = useServerStore(s => s.mission)!;
+  const eventSpawns = useServerStore(s => s.mission!.eventSpawns);
   const setEventSpawns = useServerStore(s => s.setEventSpawns);
   const saveEventSpawns = useServerStore(s => s.saveEventSpawns);
   const isDirty = useServerStore(s => s.dirty.eventSpawns);
@@ -65,13 +65,13 @@ export function EventSpawnsEditor() {
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
-    return mission.eventSpawns.filter(e =>
+    return eventSpawns.filter(e =>
       !q || e.eventName.toLowerCase().includes(q)
     );
-  }, [mission.eventSpawns, filter]);
+  }, [eventSpawns, filter]);
 
   const updatePos = (eventName: string, idx: number, pos: EventSpawnPos) => {
-    const next = mission.eventSpawns.map(e => {
+    const next = eventSpawns.map(e => {
       if (e.eventName !== eventName) return e;
       const positions = [...e.positions];
       positions[idx] = pos;
@@ -81,7 +81,7 @@ export function EventSpawnsEditor() {
   };
 
   const deletePos = (eventName: string, idx: number) => {
-    const next = mission.eventSpawns.map(e => {
+    const next = eventSpawns.map(e => {
       if (e.eventName !== eventName) return e;
       return { ...e, positions: e.positions.filter((_, i) => i !== idx) };
     });
@@ -89,7 +89,7 @@ export function EventSpawnsEditor() {
   };
 
   const addPos = (eventName: string) => {
-    const next = mission.eventSpawns.map(e => {
+    const next = eventSpawns.map(e => {
       if (e.eventName !== eventName) return e;
       return { ...e, positions: [...e.positions, { x: 0, z: 0, rawX: '0', rawZ: '0' }] };
     });

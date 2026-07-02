@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useServerStore } from '../../store/serverStore';
 import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
@@ -20,20 +21,29 @@ function ItemList({ items, label }: { items: { name: string; chance: number }[];
 }
 
 export function SpawnableTypesEditor() {
-  const mission = useServerStore(s => s.mission)!;
+  const spawnableTypes = useServerStore(s => s.mission!.spawnableTypes);
   const saveSpawnableTypes = useServerStore(s => s.saveSpawnableTypes);
   const isDirty = useServerStore(s => s.dirty.spawnableTypes);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
 
-  const allTypes = useMemo(() => Array.from(mission.spawnableTypes.values()), [mission.spawnableTypes]);
+  const allTypes = useMemo(() => Array.from(spawnableTypes.values()), [spawnableTypes]);
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
     return allTypes.filter(t => !q || t.name.toLowerCase().includes(q));
   }, [allTypes, filter]);
 
-  const selectedType: SpawnableType | null = selected ? (mission.spawnableTypes.get(selected) ?? null) : null;
+  const selectedType: SpawnableType | null = selected ? (spawnableTypes.get(selected) ?? null) : null;
+
+  // cfgspawnabletypes can hold thousands of entries — virtualize the list.
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 41,
+    overscan: 6,
+  });
 
   return (
     <div className="flex h-full">
@@ -53,26 +63,30 @@ export function SpawnableTypesEditor() {
           <span className="w-24 text-center">Total Items</span>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {filtered.map(st => {
-            const totalItems =
-              st.cargo.reduce((s, c) => s + c.items.length, 0) +
-              st.attachments.reduce((s, a) => s + a.items.length, 0);
-            return (
-              <div
-                key={st.name}
-                onClick={() => setSelected(selected === st.name ? null : st.name)}
-                className={`flex items-center gap-4 px-4 py-2.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors text-sm ${
-                  selected === st.name ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : ''
-                }`}
-              >
-                <span className="flex-1 font-mono text-xs text-slate-300 truncate">{st.name}</span>
-                <span className="w-24 text-center text-xs text-slate-500">{st.cargo.length}</span>
-                <span className="w-24 text-center text-xs text-slate-500">{st.attachments.length}</span>
-                <span className="w-24 text-center text-xs text-slate-500">{totalItems}</span>
-              </div>
-            );
-          })}
+        <div ref={parentRef} className="flex-1 overflow-y-auto">
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map(vi => {
+              const st = filtered[vi.index];
+              const totalItems =
+                st.cargo.reduce((s, c) => s + c.items.length, 0) +
+                st.attachments.reduce((s, a) => s + a.items.length, 0);
+              return (
+                <div
+                  key={st.name}
+                  style={{ position: 'absolute', top: vi.start, width: '100%' }}
+                  onClick={() => setSelected(selected === st.name ? null : st.name)}
+                  className={`flex items-center gap-4 px-4 py-2.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors text-sm ${
+                    selected === st.name ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : ''
+                  }`}
+                >
+                  <span className="flex-1 font-mono text-xs text-slate-300 truncate">{st.name}</span>
+                  <span className="w-24 text-center text-xs text-slate-500">{st.cargo.length}</span>
+                  <span className="w-24 text-center text-xs text-slate-500">{st.attachments.length}</span>
+                  <span className="w-24 text-center text-xs text-slate-500">{totalItems}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

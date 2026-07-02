@@ -59,7 +59,7 @@ function EventRow({
 }
 
 export function EventsEditor() {
-  const mission = useServerStore(s => s.mission)!;
+  const events = useServerStore(s => s.mission!.events);
   const updateEvent = useServerStore(s => s.updateEvent);
   const saveEvents = useServerStore(s => s.saveEvents);
   const isDirty = useServerStore(s => s.dirty.events);
@@ -68,7 +68,7 @@ export function EventsEditor() {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(true);
 
-  const allEvents = useMemo(() => Array.from(mission.events.values()), [mission.events]);
+  const allEvents = useMemo(() => Array.from(events.values()), [events]);
 
   const filtered = useMemo(() => {
     const q = eventFilter.toLowerCase();
@@ -79,7 +79,7 @@ export function EventsEditor() {
     });
   }, [allEvents, eventFilter, showInactive]);
 
-  const selectedEvent = selectedName ? mission.events.get(selectedName) : null;
+  const selectedEvent = selectedName ? events.get(selectedName) : null;
 
   return (
     <div className="flex h-full">

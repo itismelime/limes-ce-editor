@@ -412,7 +412,10 @@ function DetailPanel({
 }
 
 export function TypesEditor({ isActive }: { isActive: boolean }) {
-  const mission = useServerStore(s => s.mission)!;
+  // Subscribe to the slices this editor uses, not the whole mission, so
+  // edits in other tabs don't re-render this (always-mounted) component.
+  const types = useServerStore(s => s.mission!.types);
+  const spawnableTypes = useServerStore(s => s.mission!.spawnableTypes);
   const updateType = useServerStore(s => s.updateType);
   const undoType = useServerStore(s => s.undoType);
   const typeHistory = useServerStore(s => s.typeHistory);
@@ -492,8 +495,14 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
     const entries = typeHistory.slice(0, SHOW);
     const lines: string[] = [`Undo history (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''}):`];
 
-    // Build a running "current" state per item as we walk back through history
-    const snapshot = new Map(mission.types);
+    // Build a running "current" state per item as we walk back through history.
+    // Seed only the few names in the shown entries — cloning the whole types
+    // Map here ran on every keystroke just to build a hover tooltip.
+    const snapshot = new Map<string, DayZType>();
+    for (const { name } of entries) {
+      const t = types.get(name);
+      if (t) snapshot.set(name, t);
+    }
     for (const { name, prev } of entries) {
       const current = snapshot.get(name);
       if (current) lines.push(...diffEntry(name, prev, current));
@@ -505,7 +514,7 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
       lines.push(`  … and ${typeHistory.length - SHOW} older step${typeHistory.length - SHOW !== 1 ? 's' : ''}`);
 
     return lines.join('\n');
-  }, [typeHistory, mission.types]);
+  }, [typeHistory, types]);
 
   function handleSort(col: typeof sortCol) {
     if (col === sortCol) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -517,15 +526,15 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
     return <span>{sortDir === 'asc' ? '▲' : '▼'}</span>;
   }
 
-  const allTypes = useMemo(() => Array.from(mission.types.values()), [mission.types]);
-  const attachmentNames = useMemo(() => buildAttachmentNames(mission.spawnableTypes), [mission.spawnableTypes]);
+  const allTypes = useMemo(() => Array.from(types.values()), [types]);
+  const attachmentNames = useMemo(() => buildAttachmentNames(spawnableTypes), [spawnableTypes]);
 
   const allUsages = useMemo(() => {
     const s = new Set<string>();
     limitsDefinition?.usages.forEach(u => s.add(u));
-    for (const t of mission.types.values()) t.usages.forEach(u => s.add(u));
+    for (const t of types.values()) t.usages.forEach(u => s.add(u));
     return [...s].sort();
-  }, [mission.types, limitsDefinition]);
+  }, [types, limitsDefinition]);
 
   const allSources = useMemo(() => {
     const s = new Set(allTypes.map(t => t.source).filter(Boolean));
@@ -621,13 +630,25 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
     if (!isActive) return;
     if (lastSyncedRowsRef.current === workerRows) return;
 
-    lastSyncedRowsRef.current = workerRows;
-    resultCacheRef.current.clear();
-    requestKeyRef.current.clear();
-    pendingQueryKeyRef.current = null;
-    nextQueryRef.current = null;
-    inFlightRef.current = false;
-    workerRef.current.postMessage({ type: 'setData', rows: workerRows });
+    const sync = () => {
+      if (!workerRef.current) return;
+      lastSyncedRowsRef.current = workerRows;
+      resultCacheRef.current.clear();
+      requestKeyRef.current.clear();
+      pendingQueryKeyRef.current = null;
+      nextQueryRef.current = null;
+      inFlightRef.current = false;
+      workerRef.current.postMessage({ type: 'setData', rows: workerRows });
+    };
+
+    // First sync (fresh worker) posts immediately; edits debounce so rapid
+    // typing doesn't re-serialize the whole dataset per keystroke.
+    if (lastSyncedRowsRef.current === null) {
+      sync();
+      return;
+    }
+    const timer = setTimeout(sync, 250);
+    return () => clearTimeout(timer);
   }, [workerRows, isActive]);
 
   useEffect(() => {
@@ -700,8 +721,8 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
   }, [typeFilter, tierFilter, usageFilter, sourceFilter, categoryFilter, showInactive, sortCol, sortDir, workerRows, isActive]);
 
   const sorted = useMemo(
-    () => sortedNames.map(name => mission.types.get(name)).filter((t): t is DayZType => !!t),
-    [sortedNames, mission.types]
+    () => sortedNames.map(name => types.get(name)).filter((t): t is DayZType => !!t),
+    [sortedNames, types]
   );
 
   const virtualizer = useVirtualizer({
@@ -711,7 +732,7 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
     overscan: 4,
   });
 
-  const selectedType = selectedName ? mission.types.get(selectedName) : null;
+  const selectedType = selectedName ? types.get(selectedName) : null;
 
   const handleUpdate = useCallback((name: string, patch: Partial<DayZType>) => {
     updateType(name, patch);
