@@ -143,7 +143,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
     }
   }
 
-  async function handleRemove(id: string, _mapLabel: string) {
+  async function handleRemove(id: string) {
     await removeMap(id);
   }
 
@@ -178,7 +178,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
                       Edit
                     </button>
                     <button
-                      onClick={() => void handleRemove(cm.id, cm.label)}
+                      onClick={() => void handleRemove(cm.id)}
                       className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/60 transition-colors"
                     >
                       Remove
