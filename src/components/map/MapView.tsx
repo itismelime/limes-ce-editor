@@ -432,6 +432,7 @@ function playerSpawnIcon(type: string): L.DivIcon {
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  if (/^#[0-9a-f]{3}$/i.test(hex)) hex = '#' + [...hex.slice(1)].map(c => c + c).join('');
   const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
 }

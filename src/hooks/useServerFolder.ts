@@ -425,8 +425,12 @@ export function useServerFolder() {
   // Stable ref so the map-change effect always calls the latest selectMission
   // without needing it in the dependency array (which would cause double-firing).
   const selectMissionRef = useRef<(m: MissionFiles) => Promise<void>>(async () => {});
+  // Breaks the selectMission → setActiveMap → map-change effect → selectMission
+  // cycle that reloaded every mission twice.
+  const loadedMissionPathRef = useRef<string | null>(null);
 
   const selectMission = useCallback(async (m: MissionFiles) => {
+    loadedMissionPathRef.current = m.missionPath;
     setPendingMissions(null);
     setLoading(true);
     setLoadError(null);
@@ -569,12 +573,16 @@ export function useServerFolder() {
     if (allMissions.length === 0) return;
 
     if (allMissions.length === 1) {
-      selectMissionRef.current(allMissions[0]);
+      if (allMissions[0].missionPath !== loadedMissionPathRef.current) {
+        selectMissionRef.current(allMissions[0]);
+      }
       return;
     }
 
     const auto = autoSelectMission(allMissions, activeMap);
-    if (auto) selectMissionRef.current(auto);
+    if (auto && auto.missionPath !== loadedMissionPathRef.current) {
+      selectMissionRef.current(auto);
+    }
     // No match → keep current mission loaded, nothing to do
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap]);

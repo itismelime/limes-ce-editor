@@ -195,10 +195,17 @@ export const useUiStore = create<UiState>((set) => ({
   categoryFilter: '',
   eventFilter: '',
   mapImagePaths: (() => {
-    const raw: Record<string, string> = JSON.parse(localStorage.getItem('mapImagePaths') ?? '{}');
-    return Object.fromEntries(Object.entries(raw).filter(([, v]) => v.startsWith('asset://')));
+    try {
+      const raw: Record<string, string> = JSON.parse(localStorage.getItem('mapImagePaths') ?? '{}');
+      return Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'string' && v.startsWith('asset://')));
+    } catch {
+      return {};
+    }
   })(),
-  mapImageSizes: JSON.parse(localStorage.getItem('mapImageSizes') ?? '{}'),
+  mapImageSizes: (() => {
+    try { return JSON.parse(localStorage.getItem('mapImageSizes') ?? '{}'); }
+    catch { return {}; }
+  })(),
   customMapUrl: '',
   customMapWidth: 10000,
   customMapHeight: 10000,
