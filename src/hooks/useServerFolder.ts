@@ -19,7 +19,7 @@ import { getAllMapConfigs } from '../lib/mapConfig';
 import { parseCeToolProjectXml } from '../lib/ceToolParser';
 import type { MissionData, CeEntry, CeToolProject, DayZType, SpawnableType } from '../types/dayz';
 import type { CommunityMapDef } from '../types/map';
-import { useServerStore, type TerritoryBitmapOverride } from '../store/serverStore';
+import { useServerStore, toMessage, type TerritoryBitmapOverride } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
 import { useCommunityMapsStore } from '../store/communityMapsStore';
 
@@ -125,7 +125,7 @@ async function mergeEconomyCoreFiles(
           warnings.push(`ce file not found: ${entry.folder}/${file.name} (unknown type: "${file.type}")`);
         }
       } catch (err) {
-        warnings.push(`ce file not found: ${entry.folder}/${file.name} (${err instanceof Error ? err.message : String(err)})`);
+        warnings.push(`ce file not found: ${entry.folder}/${file.name} (${toMessage(err)})`);
       }
     }
   }
@@ -214,7 +214,7 @@ async function loadCeToolTierData(opts: {
 
       } catch (err) {
         console.error('[tiers] CE project parse error:', err);
-        warnings.push(`CETool project parse error (${err instanceof Error ? err.message : String(err)})`);
+        warnings.push(`CETool project parse error (${toMessage(err)})`);
       }
     } else {
       console.warn('[tiers] No CE project XML found');
@@ -295,13 +295,13 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
   const typeDups: string[] = [], eventDups: string[] = [], spawnableDups: string[] = [];
 
   try { if (typesRaw)     types          = parseTypesXml(typesRaw, m.typesPath ?? '', typeDups); }
-  catch (err) { warnings.push(`types.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
+  catch (err) { warnings.push(`types.xml (parse error: ${toMessage(err)})`); }
   try { if (spawnsRaw)    eventSpawns    = parseEventSpawnsXml(spawnsRaw); }
-  catch (err) { warnings.push(`cfgeventspawns.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
+  catch (err) { warnings.push(`cfgeventspawns.xml (parse error: ${toMessage(err)})`); }
   try { if (eventsRaw)    events         = parseEventsXml(eventsRaw, eventDups); }
-  catch (err) { warnings.push(`events.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
+  catch (err) { warnings.push(`events.xml (parse error: ${toMessage(err)})`); }
   try { if (spawnableRaw) spawnableTypes = parseSpawnableTypesXml(spawnableRaw, m.spawnableTypesPath ?? '', spawnableDups); }
-  catch (err) { warnings.push(`cfgspawnabletypes.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
+  catch (err) { warnings.push(`cfgspawnabletypes.xml (parse error: ${toMessage(err)})`); }
 
   dupWarn('types.xml', typeDups);
   dupWarn('events.xml', eventDups);
@@ -521,7 +521,7 @@ export function useServerFolder() {
       if (m.weatherPath) {
         try { setWeather(parseWeatherXml(await readFile(m.weatherPath))); }
         catch (err) {
-          allWarnings.push(`cfgweather.xml (parse error: ${err instanceof Error ? err.message : String(err)})`);
+          allWarnings.push(`cfgweather.xml (parse error: ${toMessage(err)})`);
           setLoadWarnings([...allWarnings]);
         }
       }
@@ -530,7 +530,7 @@ export function useServerFolder() {
       if (m.gameplayPath) {
         try { setGameplay(parseGameplayJson(await readFile(m.gameplayPath))); }
         catch (err) {
-          allWarnings.push(`cfggameplay.json (parse error: ${err instanceof Error ? err.message : String(err)})`);
+          allWarnings.push(`cfggameplay.json (parse error: ${toMessage(err)})`);
           setLoadWarnings([...allWarnings]);
         }
       }

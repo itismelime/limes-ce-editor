@@ -8,7 +8,7 @@ import {
   serializeWeatherXml, serializeGameplayJson,
   serializeLimitsDefinitionXml, serializeLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
-import { writeFile, readFile, createDir, readBinaryFile, writeBinaryFile, removeFile, backupIfNeeded } from '../lib/fileDiscovery';
+import { writeFile, readFile, createDir, readBinaryFile, writeBinaryFile, removeFile, backupIfNeeded, basename } from '../lib/fileDiscovery';
 import { setCeToolBitmapSource, clearCeToolBitmapSource } from '../lib/tierZoneResolver';
 import type { ContainerDef } from '../types/dayz';
 
@@ -359,7 +359,7 @@ function cloneMapGroupProto(proto: Map<string, MapGroupProtoEntry>): Map<string,
   return next;
 }
 
-function toMessage(err: unknown): string {
+export function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
@@ -1072,7 +1072,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     const sourceTypes = new Map(
       [...mission.types.entries()].filter(([, t]) => t.source === sourcePath)
     );
-    await trySave(sourcePath.split(/[\\/]/).pop()!, async () => {
+    await trySave(basename(sourcePath), async () => {
       await writeFile(sourcePath, serializeTypesXml(sourceTypes));
       set(s => {
         const originalTypes = new Map(s.originalTypes);

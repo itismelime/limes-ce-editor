@@ -5,13 +5,12 @@ import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import type { CommunityMapDef } from '../../types/map';
+import { SectionHeading } from '../shared/ui';
+import { toMessage } from '../../store/serverStore';
+import { basename } from '../../lib/fileDiscovery';
 
 function slugify(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{children}</h2>;
 }
 
 export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHeading?: boolean; defaultShowAdd?: boolean } = {}) {
@@ -138,7 +137,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
       }
       resetForm();
     } catch (err) {
-      setError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(`Save failed: ${toMessage(err)}`);
     } finally {
       setSaving(false);
     }
@@ -244,7 +243,7 @@ export function CommunityMapsSection({ hideHeading, defaultShowAdd }: { hideHead
                 </button>
                 {pboPath ? (
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs text-emerald-400 font-mono truncate">{pboPath.split(/[\\/]/).pop()}</span>
+                    <span className="text-xs text-emerald-400 font-mono truncate">{basename(pboPath)}</span>
                     <button onClick={() => setPboPath(undefined)} className="text-slate-500 hover:text-slate-300 flex-shrink-0">✕</button>
                   </div>
                 ) : (

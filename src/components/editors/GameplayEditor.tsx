@@ -1,6 +1,7 @@
 import { useServerStore } from '../../store/serverStore';
 import { useMemo, useState } from 'react';
 import { SaveButton } from '../shared/SaveButton';
+import { SELECTED_ROW_CLASS } from '../shared/ui';
 
 type GameplaySectionKey = 'shock' | 'staminaCore' | 'staminaModifiers' | 'worldTemps';
 
@@ -136,7 +137,7 @@ export function GameplayEditor() {
                 key={section.key}
                 onClick={() => setSelectedSection(section.key)}
                 className={`w-full text-left px-4 py-3 border-b border-slate-800/60 transition-colors ${
-                  isSelected ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : 'hover:bg-slate-800'
+                  isSelected ? SELECTED_ROW_CLASS : 'hover:bg-slate-800'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">

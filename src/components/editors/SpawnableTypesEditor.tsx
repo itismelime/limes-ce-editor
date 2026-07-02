@@ -4,6 +4,7 @@ import { useServerStore } from '../../store/serverStore';
 import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
 import type { SpawnableType } from '../../types/dayz';
+import { SELECTED_ROW_CLASS, CloseButton } from '../shared/ui';
 
 function ItemList({ items, label }: { items: { name: string; chance: number }[]; label: string }) {
   if (items.length === 0) return null;
@@ -76,7 +77,7 @@ export function SpawnableTypesEditor() {
                   style={{ position: 'absolute', top: vi.start, width: '100%' }}
                   onClick={() => setSelected(selected === st.name ? null : st.name)}
                   className={`flex items-center gap-4 px-4 py-2.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors text-sm ${
-                    selected === st.name ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : ''
+                    selected === st.name ? SELECTED_ROW_CLASS : ''
                   }`}
                 >
                   <span className="flex-1 font-mono text-xs text-slate-300 truncate">{st.name}</span>
@@ -94,11 +95,7 @@ export function SpawnableTypesEditor() {
         <div className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
             <span className="font-mono text-sm text-slate-200 truncate">{selectedType.name}</span>
-            <button onClick={() => setSelected(null)} className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <CloseButton onClick={() => setSelected(null)} />
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {selectedType.cargo.map((cargo, i) => (

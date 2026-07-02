@@ -1,5 +1,6 @@
 import { useServerStore } from '../../store/serverStore';
 import type { WeatherValue } from '../../types/dayz';
+import { SELECTED_ROW_CLASS } from '../shared/ui';
 import { useMemo, useState } from 'react';
 
 type WeatherSectionKey = 'overcast' | 'fog' | 'rain' | 'windMagnitude' | 'windDirection' | 'snowfall' | 'storm';
@@ -171,7 +172,7 @@ export function WeatherEditor() {
                 key={section.key}
                 onClick={() => setSelectedSection(section.key)}
                 className={`w-full text-left px-4 py-3 border-b border-slate-800/60 transition-colors ${
-                  isSelected ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : 'hover:bg-slate-800'
+                  isSelected ? SELECTED_ROW_CLASS : 'hover:bg-slate-800'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -188,7 +189,7 @@ export function WeatherEditor() {
           <button
             onClick={() => setSelectedSection('storm')}
             className={`w-full text-left px-4 py-3 border-b border-slate-800/60 transition-colors ${
-              selectedSection === 'storm' ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : 'hover:bg-slate-800'
+              selectedSection === 'storm' ? SELECTED_ROW_CLASS : 'hover:bg-slate-800'
             }`}
           >
             <div className="flex items-center justify-between gap-2">

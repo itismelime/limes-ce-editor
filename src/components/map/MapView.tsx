@@ -10,7 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import 'leaflet/dist/leaflet.css';
 import { useMapMarkers } from '../../hooks/useMapMarkers';
 import { useUiStore } from '../../store/uiStore';
-import { useServerStore } from '../../store/serverStore';
+import { useServerStore, toMessage } from '../../store/serverStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
 import { getUsageColor, TIER_COLORS } from '../../types/map';
@@ -1069,7 +1069,7 @@ export function MapView() {
           }
         }
       } catch (err) {
-        if (!cancelled) setDownloadError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setDownloadError(toMessage(err));
       } finally {
         unlisten();
         unlistenStatus();

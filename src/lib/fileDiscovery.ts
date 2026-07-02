@@ -343,6 +343,10 @@ export async function pickCeToolFolder(mapId?: string): Promise<string | null> {
   return scored[0]?.path ?? null;
 }
 
+export function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
 export async function readFile(path: string): Promise<string> {
   return readTextFile(path);
 }

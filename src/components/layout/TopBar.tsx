@@ -5,7 +5,7 @@ import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import type { ActiveTab } from '../../store/uiStore';
-import type { MissionFiles } from '../../lib/fileDiscovery';
+import { basename, type MissionFiles } from '../../lib/fileDiscovery';
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: 'Map' },
@@ -189,7 +189,7 @@ export function TopBar({
     ...dirty.typesSources.map(source => ({
       id: `types:${source}`,
       label: 'types.xml source',
-      detail: source.split(/[\\/]/).pop() ?? source,
+      detail: basename(source),
       onRevert: () => revertTypesSource(source),
     })),
     ...(dirty.eventSpawns

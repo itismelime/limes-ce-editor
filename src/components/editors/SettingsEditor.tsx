@@ -2,21 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { useUiStore } from '../../store/uiStore';
-import { useServerStore } from '../../store/serverStore';
+import { useServerStore, toMessage } from '../../store/serverStore';
 
 import { readFile, writeFile, clearCeToolCaches } from '../../lib/fileDiscovery';
 import { CATEGORY_OPTIONS } from '../../lib/itemClassifier';
 import { BUNDLED_CE_MAPS, deployBundledCeProject } from '../../lib/ceToolBundle';
 import { CommunityMapsSection } from './CommunityMapsSection';
+import { SectionHeading } from '../shared/ui';
 
 const THEME_OPTIONS: { id: 'dark' | 'light'; label: string; note: string }[] = [
   { id: 'dark', label: 'Dark (default)', note: 'Low-glare look for long sessions and night editing.' },
   { id: 'light', label: 'Light', note: 'High-contrast daytime look with brighter surfaces.' },
 ];
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{children}</h2>;
-}
 
 function SettingRow({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
@@ -84,7 +81,7 @@ export function SettingsEditor() {
       setTilesClearState('done');
       setTimeout(() => setTilesClearState('idle'), 3000);
     } catch (err) {
-      setTilesClearError(err instanceof Error ? err.message : String(err));
+      setTilesClearError(toMessage(err));
       setTilesClearState('error');
     } finally {
       setClearingTiles(false);
@@ -129,7 +126,7 @@ export function SettingsEditor() {
       importCategoryOverrides(normalized);
       useServerStore.setState({ saveError: null });
     } catch (err) {
-      useServerStore.setState({ saveError: `Failed to import category overrides: ${err instanceof Error ? err.message : String(err)}` });
+      useServerStore.setState({ saveError: `Failed to import category overrides: ${toMessage(err)}` });
     }
   }
 
@@ -145,7 +142,7 @@ export function SettingsEditor() {
       await writeFile(`${folder}/looteditor-category-overrides.json`, JSON.stringify(payload, null, 2));
       useServerStore.setState({ saveError: null });
     } catch (err) {
-      useServerStore.setState({ saveError: `Failed to export category overrides: ${err instanceof Error ? err.message : String(err)}` });
+      useServerStore.setState({ saveError: `Failed to export category overrides: ${toMessage(err)}` });
     }
   }
 
@@ -168,7 +165,7 @@ export function SettingsEditor() {
         await reloadTerritoryBitmaps?.();
       }
     } catch (err) {
-      useServerStore.setState({ saveError: `Failed to deploy CE project for ${entry.label}: ${err instanceof Error ? err.message : String(err)}` });
+      useServerStore.setState({ saveError: `Failed to deploy CE project for ${entry.label}: ${toMessage(err)}` });
     } finally {
       setDeployingMap(null);
     }

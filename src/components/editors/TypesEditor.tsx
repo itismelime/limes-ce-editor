@@ -8,6 +8,8 @@ import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
 import { TIER_COLORS, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
 import { CATEGORY_LABELS, CATEGORY_OPTIONS, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
+import { SELECTED_ROW_CLASS, CloseButton } from '../shared/ui';
+import { basename } from '../../lib/fileDiscovery';
 
 const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
 
@@ -72,7 +74,7 @@ function TypeRow({
   return (
     <div
       className={`flex items-center gap-3 px-4 py-2 text-sm border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors ${
-        isSelected ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : ''
+        isSelected ? SELECTED_ROW_CLASS : ''
       }`}
       onClick={onSelect}
     >
@@ -211,13 +213,9 @@ function DetailPanel({
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <div className="flex flex-col min-w-0 mr-2">
           <span className="font-mono text-sm text-slate-200 truncate">{type.name}</span>
-          <span className="text-xs text-slate-500 truncate font-mono">{type.source.split(/[\\/]/).pop()}</span>
+          <span className="text-xs text-slate-500 truncate font-mono">{basename(type.source)}</span>
         </div>
-        <button onClick={onClose} className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors flex-shrink-0">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <CloseButton onClick={onClose} />
       </div>
 
       <div ref={scrollContainerRef} className={`flex-1 overflow-y-auto p-4 space-y-5 ${addUsageOpen ? 'pb-16' : ''}`}>
@@ -837,7 +835,7 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
           >
             <option value="">All files</option>
             {allSources.map(src => (
-              <option key={src} value={src}>{src.split(/[\\/]/).pop()}</option>
+              <option key={src} value={src}>{basename(src)}</option>
             ))}
           </select>
 
