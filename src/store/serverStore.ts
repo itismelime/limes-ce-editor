@@ -199,7 +199,7 @@ async function decodeLayerImage(raw: Uint8Array): Promise<Uint8ClampedArray | nu
   // PNG magic: 89 50 4E 47
   if (raw[0] === 0x89 && raw[1] === 0x50 && raw[2] === 0x4E && raw[3] === 0x47) {
     try {
-      const blob = new Blob([raw], { type: 'image/png' });
+      const blob = new Blob([new Uint8Array(raw)], { type: 'image/png' });
       const bmp = await createImageBitmap(blob);
       const canvas = document.createElement('canvas');
       canvas.width = bmp.width;

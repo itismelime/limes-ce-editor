@@ -9,13 +9,6 @@ import { CATEGORY_OPTIONS } from '../../lib/itemClassifier';
 import { BUNDLED_CE_MAPS, deployBundledCeProject } from '../../lib/ceToolBundle';
 import { CommunityMapsSection } from './CommunityMapsSection';
 
-const KNOWN_MAPS: { id: string; label: string }[] = [
-  { id: 'namalsk',   label: 'Namalsk' },
-  { id: 'chernarus', label: 'Chernarus+' },
-  { id: 'livonia',   label: 'Livonia' },
-  { id: 'sakhal',    label: 'Sakhal' },
-];
-
 const THEME_OPTIONS: { id: 'dark' | 'light'; label: string; note: string }[] = [
   { id: 'dark', label: 'Dark (default)', note: 'Low-glare look for long sessions and night editing.' },
   { id: 'light', label: 'Light', note: 'High-contrast daytime look with brighter surfaces.' },

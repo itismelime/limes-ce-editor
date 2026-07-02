@@ -6,7 +6,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet } from '../../lib/coordinateTransform';
 import { TIER_ORDER, getUsageColor } from '../../types/map';
-import type { BuildingInstance, DayZType } from '../../types/dayz';
+import type { DayZType } from '../../types/dayz';
 import type { MapConfig } from '../../types/map';
 
 function sameStringArray(a: string[], b: string[]): boolean {

@@ -127,6 +127,14 @@ export function WeatherEditor() {
     return WEATHER_SECTIONS.find(section => section.key === selectedSection)?.label ?? 'Overcast';
   }, [selectedSection]);
 
+  if (!weather) {
+    return (
+      <div className="flex items-center justify-center h-full text-slate-500">
+        <p>Weather data not loaded. Check if cfgweather.xml exists.</p>
+      </div>
+    );
+  }
+
   const selectedWeather = selectedSection === 'storm' ? null : normalizeWeatherValue(weather[selectedSection]);
   const storm = {
     density: Number((weather as { storm?: { density?: number } }).storm?.density ?? 0),
@@ -135,7 +143,7 @@ export function WeatherEditor() {
   };
 
   const weatherSummary = WEATHER_SECTIONS.map(section => {
-    const value = normalizeWeatherValue(weather?.[section.key] ?? {});
+    const value = normalizeWeatherValue(weather[section.key] ?? {});
     return {
       key: section.key,
       label: section.label,
@@ -145,14 +153,6 @@ export function WeatherEditor() {
       unit: section.unit,
     };
   });
-
-  if (!weather) {
-    return (
-      <div className="flex items-center justify-center h-full text-slate-500">
-        <p>Weather data not loaded. Check if cfgweather.xml exists.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full overflow-hidden">

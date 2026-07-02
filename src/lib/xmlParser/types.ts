@@ -6,7 +6,7 @@ import {
   num, numAttr, strAttr, strAttrs, toObjectArray, collectUnknownKeys, parseTierValue,
 } from './shared';
 
-export function parseTypesXml(raw: string, source: string): Map<string, DayZType> {
+export function parseTypesXml(raw: string, source: string, duplicates?: string[]): Map<string, DayZType> {
   const parser = new XMLParser(PARSER_OPTIONS);
   const doc = parser.parse(stripBom(raw));
   const typesList: unknown[] = doc?.types?.type ?? [];
@@ -54,6 +54,7 @@ export function parseTypesXml(raw: string, source: string): Map<string, DayZType
       tags,
       source,
     };
+    if (map.has(type.name)) duplicates?.push(type.name);
     map.set(type.name, type);
   }
   return map;

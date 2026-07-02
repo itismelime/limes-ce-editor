@@ -884,15 +884,12 @@ export function MapView() {
   const playerSpawnData        = useServerStore(s => s.playerSpawnData);
   const ceToolProject          = useServerStore(s => s.ceToolProject);
   const ceToolLayers           = useServerStore(s => s.ceToolLayers);
-  const territoryBitmaps       = useServerStore(s => s.territoryBitmaps);
   const territoryBitmapSize    = useServerStore(s => s.territoryBitmapSize);
   const mission                = useServerStore(s => s.mission);
   const canPaint               = useServerStore(s => !!s.paths.ceToolLayersDir);
   const addCeToolLayer         = useServerStore(s => s.addCeToolLayer);
   const removeCeToolLayer      = useServerStore(s => s.removeCeToolLayer);
-  const limitsDefinition       = useServerStore(s => s.limitsDefinition);
   const missionPath            = useServerStore(s => s.paths.missionPath);
-  const limitsDefinitionUserPath = useServerStore(s => s.paths.limitsDefinitionUserPath);
   const showTerritoryOverlay   = useUiStore(s => s.showTerritoryOverlay);
   const setShowTerritoryOverlay = useUiStore(s => s.setShowTerritoryOverlay);
   const territoryPaintMode     = useUiStore(s => s.territoryPaintMode);

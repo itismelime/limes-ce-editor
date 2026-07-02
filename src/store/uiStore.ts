@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import type { MapId } from '../types/map';
 import { registerCustomUsageColor, unregisterCustomUsageColor } from '../types/map';
 
 export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay' | 'settings';
@@ -421,7 +420,7 @@ export const useUiStore = create<UiState>((set) => ({
   territoryPaintLayer: null,
   territoryPaintBrushRadius: 30,
   territoryPaintErase: false,
-  setShowTerritoryOverlay: (v) => set(s => ({
+  setShowTerritoryOverlay: (v) => set(() => ({
     showTerritoryOverlay: v,
     ...(v ? {} : { territoryPaintMode: false, territoryPaintLayer: null }),
   })),

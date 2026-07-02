@@ -285,14 +285,27 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
   let events = new Map();
   let spawnableTypes = new Map();
 
-  try { if (typesRaw)     types          = parseTypesXml(typesRaw, m.typesPath ?? ''); }
+  // Duplicate name= entries are last-wins in the parsers and the dropped ones
+  // would silently vanish on the next save — surface them as load notices.
+  const dupWarn = (file: string, dups: string[]) => {
+    if (dups.length === 0) return;
+    const shown = [...new Set(dups)].slice(0, 6).join(', ');
+    warnings.push(`compat: ${file} duplicate entries, keeping last (${shown}${dups.length > 6 ? ', ...' : ''})`);
+  };
+  const typeDups: string[] = [], eventDups: string[] = [], spawnableDups: string[] = [];
+
+  try { if (typesRaw)     types          = parseTypesXml(typesRaw, m.typesPath ?? '', typeDups); }
   catch (err) { warnings.push(`types.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
   try { if (spawnsRaw)    eventSpawns    = parseEventSpawnsXml(spawnsRaw); }
   catch (err) { warnings.push(`cfgeventspawns.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
-  try { if (eventsRaw)    events         = parseEventsXml(eventsRaw); }
+  try { if (eventsRaw)    events         = parseEventsXml(eventsRaw, eventDups); }
   catch (err) { warnings.push(`events.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
-  try { if (spawnableRaw) spawnableTypes = parseSpawnableTypesXml(spawnableRaw, m.spawnableTypesPath ?? ''); }
+  try { if (spawnableRaw) spawnableTypes = parseSpawnableTypesXml(spawnableRaw, m.spawnableTypesPath ?? '', spawnableDups); }
   catch (err) { warnings.push(`cfgspawnabletypes.xml (parse error: ${err instanceof Error ? err.message : String(err)})`); }
+
+  dupWarn('types.xml', typeDups);
+  dupWarn('events.xml', eventDups);
+  dupWarn('cfgspawnabletypes.xml', spawnableDups);
 
   try {
     if (typesRaw) {

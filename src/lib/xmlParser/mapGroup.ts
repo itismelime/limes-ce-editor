@@ -81,7 +81,10 @@ export function parseMapGroupProtoXml(raw: string): Map<string, MapGroupProtoXml
       .filter(Boolean);
     const tiers = [...new Set(valueUsers.flatMap(parseTierValue))];
 
-    map.set(name, { rawName, usages, tiers, valueUsers, lootmax: numAttr(group, 'lootmax'), containers, orderIndex });
+    // Case-differing duplicates would silently overwrite (and be dropped on
+    // save); keep the collider under its raw-cased key so both serialize.
+    const key = map.has(name) ? rawName : name;
+    map.set(key, { rawName, usages, tiers, valueUsers, lootmax: numAttr(group, 'lootmax'), containers, orderIndex });
   }
   return map;
 }

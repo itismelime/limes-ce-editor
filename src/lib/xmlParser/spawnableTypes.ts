@@ -19,7 +19,7 @@ function normalizeSpawnableRoot(raw: string): string {
   return `<spawnabletypes>${stripped}</spawnabletypes>`;
 }
 
-export function parseSpawnableTypesXml(raw: string, source: string): Map<string, SpawnableType> {
+export function parseSpawnableTypesXml(raw: string, source: string, duplicates?: string[]): Map<string, SpawnableType> {
   const parser = new XMLParser(SPAWNABLE_PARSER_OPTIONS);
   const doc = parser.parse(normalizeSpawnableRoot(raw));
   const typesList: unknown[] = doc?.spawnabletypes?.type ?? doc?.cfgspawnabletypes?.type ?? [];
@@ -72,6 +72,7 @@ export function parseSpawnableTypesXml(raw: string, source: string): Map<string,
       } : {}),
       source,
     };
+    if (map.has(spawnableType.name)) duplicates?.push(spawnableType.name);
     map.set(spawnableType.name, spawnableType);
   }
   return map;

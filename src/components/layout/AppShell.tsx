@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
@@ -309,7 +309,6 @@ export function AppShell() {
   const dirty = useServerStore(s => s.dirty);
   const activeTab = useUiStore(s => s.activeTab);
   const activeMap = useUiStore(s => s.activeMap);
-  const mapImagePaths = useUiStore(s => s.mapImagePaths);
   const setMapImagePath = useUiStore(s => s.setMapImagePath);
   const setMapImageSize = useUiStore(s => s.setMapImageSize);
   const loadError = useUiStore(s => s.loadError);
@@ -331,8 +330,6 @@ export function AppShell() {
   const [showNoticeDetails, setShowNoticeDetails] = useState(false);
 
   const loadCommunityMaps = useCommunityMapsStore(s => s.load);
-  const communityMapsRaw = useCommunityMapsStore(s => s.maps);
-  const communityMapIds = useMemo(() => new Set(communityMapsRaw.map(m => m.id)), [communityMapsRaw]);
 
   // Load community maps as early as possible.
   useEffect(() => { void loadCommunityMaps(); }, [loadCommunityMaps]);

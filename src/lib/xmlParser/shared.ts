@@ -19,7 +19,9 @@ export const BUILDER_OPTIONS = {
   format: true,
   indentBy: '    ',
   suppressBooleanAttributes: false,
-  processEntities: false,
+  // Parser decodes entities, so the builder must re-encode them or
+  // & < > in names produce malformed XML on save.
+  processEntities: true,
 };
 
 export function stripBom(text: string): string {
@@ -27,8 +29,10 @@ export function stripBom(text: string): string {
 }
 
 export function num(v: unknown, fallback = 0): number {
-  const n = Number(v);
-  return isNaN(n) ? fallback : n;
+  const s = String(v ?? '').trim();
+  if (s === '') return fallback; // Number('') === 0 would mask the fallback
+  const n = Number(s);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 export function numAttr(obj: Record<string, unknown>, key: string, fallback = 0): number {

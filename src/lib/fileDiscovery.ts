@@ -1,4 +1,4 @@
-import { readDir, readTextFile, readFile as readBinaryFileNative, writeFile as writeBinaryFileNative, writeTextFile, mkdir, remove as removeNative } from '@tauri-apps/plugin-fs';
+import { readDir, readTextFile, readFile as readBinaryFileNative, writeFile as writeBinaryFileNative, writeTextFile, mkdir, remove as removeNative, rename } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 
 const TARGET_FILES = new Set([
@@ -351,12 +351,18 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
   return readBinaryFileNative(path);
 }
 
+// Write to a temp file then rename over the target so a crash mid-write
+// can't leave a truncated loot file.
 export async function writeFile(path: string, text: string): Promise<void> {
-  return writeTextFile(path, text);
+  const tmp = `${path}.tmp`;
+  await writeTextFile(tmp, text);
+  await rename(tmp, path);
 }
 
 export async function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
-  return writeBinaryFileNative(path, data);
+  const tmp = `${path}.tmp`;
+  await writeBinaryFileNative(tmp, data);
+  await rename(tmp, path);
 }
 
 export async function createDir(path: string): Promise<void> {
@@ -367,19 +373,19 @@ export async function removeFile(path: string): Promise<void> {
   await removeNative(path);
 }
 
+// Tracks which files have been backed up this session. The first save of a
+// file refreshes its .bak from the current on-disk content (so the backup is
+// the pre-session state, not one from months ago); later saves skip.
+const sessionBackups = new Set<string>();
+
 export async function backupIfNeeded(path: string): Promise<void> {
-  const backupPath = `${path}.bak`;
+  if (sessionBackups.has(path)) return;
+  sessionBackups.add(path);
   try {
-    await readTextFile(backupPath);
-    // backup already exists — skip
+    const content = await readBinaryFileNative(path);
+    await writeBinaryFileNative(`${path}.bak`, content);
   } catch {
-    // no backup yet — copy the original
-    try {
-      const content = await readBinaryFileNative(path);
-      await writeBinaryFileNative(backupPath, content);
-    } catch {
-      // original doesn't exist yet (new file) — nothing to back up
-    }
+    // original doesn't exist yet (new file) — nothing to back up
   }
 }
 
