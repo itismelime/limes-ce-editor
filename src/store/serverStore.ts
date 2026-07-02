@@ -126,6 +126,7 @@ interface ServerState {
   setWeather: (data: WeatherData | null) => void;
   setGameplay: (data: GameplayData | null) => void;
   updateGameplay: (data: GameplayData) => void;
+  updateWeather: (data: WeatherData) => void;
   setLimitsDefinition: (data: LimitsDefinition | null) => void;
   setLimitsDefinitionUser: (data: LimitsDefinitionUser | null) => void;
   updateLimitsDefinition: (data: LimitsDefinition) => void;
@@ -449,6 +450,7 @@ export const useServerStore = create<ServerState>((set, get) => {
   setWeather: (data) => set({ weather: data, originalWeather: data }),
   setGameplay: (data) => set({ gameplay: data, originalGameplay: data }),
   updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),
+  updateWeather: (data) => set(s => ({ weather: data, dirty: { ...s.dirty, weather: true } })),
   setLimitsDefinition: (data) => set({ limitsDefinition: data, originalLimitsDefinition: data }),
   setLimitsDefinitionUser: (data) => set({ limitsDefinitionUser: data, originalLimitsDefinitionUser: data }),
   updateLimitsDefinition: (data) => set(s => ({ limitsDefinition: data, dirty: { ...s.dirty, limitsDefinition: true } })),

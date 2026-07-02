@@ -14,11 +14,30 @@ const WEATHER_SECTIONS: Array<{ key: Exclude<WeatherSectionKey, 'storm'>; label:
   { key: 'snowfall', label: 'Snowfall' },
 ];
 
-function StatRow({ label, value }: { label: string; value: string }) {
+function NumRow({ label, value, onChange, unit }: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  unit?: string;
+}) {
+  // Draft holds in-progress text so the field can be cleared mid-edit;
+  // blur snaps back to the committed value.
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-slate-700/70 bg-slate-800/40 px-3 py-2">
-      <span className="text-xs text-slate-400">{label}</span>
-      <span className="font-mono text-sm text-slate-200">{value}</span>
+      <span className="text-xs text-slate-400">{label}{unit ? ` (${unit})` : ''}</span>
+      <input
+        type="number"
+        step="any"
+        value={draft ?? String(value)}
+        onChange={e => {
+          setDraft(e.target.value);
+          const v = Number(e.target.value);
+          if (e.target.value.trim() !== '' && Number.isFinite(v)) onChange(v);
+        }}
+        onBlur={() => setDraft(null)}
+        className="w-28 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm font-mono text-slate-200 text-right focus:outline-none focus:border-lime-500"
+      />
     </div>
   );
 }
@@ -66,22 +85,32 @@ function normalizeWeatherValue(input: unknown): WeatherValue {
   };
 }
 
-function renderValueSection(value: WeatherValue, unit?: string) {
-  const suffix = unit ? ` ${unit}` : '';
+// Every edit clears the matching raw* precision string — the serializer
+// prefers raw strings, so a stale raw would silently swallow the edit.
+function ValueSection({ value, unit, onPatch }: {
+  value: WeatherValue;
+  unit?: string;
+  onPatch: (next: WeatherValue) => void;
+}) {
   return (
     <>
       <div className="space-y-2">
         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current</h3>
-        <StatRow label="Actual" value={`${formatValue(value.current.actual)}${suffix}`} />
-        <StatRow label="Blend Time" value={`${formatValue(value.current.time)} s`} />
-        <StatRow label="Duration" value={`${formatValue(value.current.duration)} s`} />
+        <NumRow label="Actual" unit={unit} value={value.current.actual}
+          onChange={n => onPatch({ ...value, current: { ...value.current, actual: n, rawActual: undefined } })} />
+        <NumRow label="Blend Time" unit="s" value={value.current.time}
+          onChange={n => onPatch({ ...value, current: { ...value.current, time: n } })} />
+        <NumRow label="Duration" unit="s" value={value.current.duration}
+          onChange={n => onPatch({ ...value, current: { ...value.current, duration: n } })} />
       </div>
 
       <div className="space-y-2">
         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Limits</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <StatRow label="Min" value={`${formatValue(value.limits.min)}${suffix}`} />
-          <StatRow label="Max" value={`${formatValue(value.limits.max)}${suffix}`} />
+          <NumRow label="Min" unit={unit} value={value.limits.min}
+            onChange={n => onPatch({ ...value, limits: { ...value.limits, min: n, rawMin: undefined } })} />
+          <NumRow label="Max" unit={unit} value={value.limits.max}
+            onChange={n => onPatch({ ...value, limits: { ...value.limits, max: n, rawMax: undefined } })} />
         </div>
       </div>
 
@@ -89,8 +118,10 @@ function renderValueSection(value: WeatherValue, unit?: string) {
         <div className="space-y-2">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Time Limits</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <StatRow label="Min" value={`${formatValue(value.timelimits.min)} s`} />
-            <StatRow label="Max" value={`${formatValue(value.timelimits.max)} s`} />
+            <NumRow label="Min" unit="s" value={value.timelimits.min}
+              onChange={n => onPatch({ ...value, timelimits: { ...value.timelimits!, min: n } })} />
+            <NumRow label="Max" unit="s" value={value.timelimits.max}
+              onChange={n => onPatch({ ...value, timelimits: { ...value.timelimits!, max: n } })} />
           </div>
         </div>
       )}
@@ -99,8 +130,10 @@ function renderValueSection(value: WeatherValue, unit?: string) {
         <div className="space-y-2">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Change Limits</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <StatRow label="Min" value={`${formatValue(value.changelimits.min)}${suffix}`} />
-            <StatRow label="Max" value={`${formatValue(value.changelimits.max)}${suffix}`} />
+            <NumRow label="Min" unit={unit} value={value.changelimits.min}
+              onChange={n => onPatch({ ...value, changelimits: { ...value.changelimits!, min: n, rawMin: undefined } })} />
+            <NumRow label="Max" unit={unit} value={value.changelimits.max}
+              onChange={n => onPatch({ ...value, changelimits: { ...value.changelimits!, max: n, rawMax: undefined } })} />
           </div>
         </div>
       )}
@@ -109,9 +142,12 @@ function renderValueSection(value: WeatherValue, unit?: string) {
         <div className="space-y-2">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Thresholds</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <StatRow label="Start Min" value={formatValue(value.thresholds.min)} />
-            <StatRow label="Start Max" value={formatValue(value.thresholds.max)} />
-            <StatRow label="End" value={formatValue(value.thresholds.end)} />
+            <NumRow label="Start Min" value={value.thresholds.min}
+              onChange={n => onPatch({ ...value, thresholds: { ...value.thresholds!, min: n } })} />
+            <NumRow label="Start Max" value={value.thresholds.max}
+              onChange={n => onPatch({ ...value, thresholds: { ...value.thresholds!, max: n } })} />
+            <NumRow label="End" value={value.thresholds.end}
+              onChange={n => onPatch({ ...value, thresholds: { ...value.thresholds!, end: n } })} />
           </div>
         </div>
       )}
@@ -121,6 +157,7 @@ function renderValueSection(value: WeatherValue, unit?: string) {
 
 export function WeatherEditor() {
   const weather = useServerStore(s => s.weather);
+  const updateWeather = useServerStore(s => s.updateWeather);
   const [selectedSection, setSelectedSection] = useState<WeatherSectionKey>('overcast');
 
   const selectedLabel = useMemo(() => {
@@ -137,10 +174,14 @@ export function WeatherEditor() {
   }
 
   const selectedWeather = selectedSection === 'storm' ? null : normalizeWeatherValue(weather[selectedSection]);
-  const storm = {
-    density: Number((weather as { storm?: { density?: number } }).storm?.density ?? 0),
-    threshold: Number((weather as { storm?: { threshold?: number } }).storm?.threshold ?? 0),
-    timeout: Number((weather as { storm?: { timeout?: number } }).storm?.timeout ?? 0),
+  const storm = weather.storm;
+
+  const patchSection = (next: WeatherValue) => {
+    if (selectedSection === 'storm') return;
+    updateWeather({ ...weather, [selectedSection]: next });
+  };
+  const patchStorm = (patch: Partial<typeof storm>) => {
+    updateWeather({ ...weather, storm: { ...storm, ...patch } });
   };
 
   const weatherSummary = WEATHER_SECTIONS.map(section => {
@@ -212,28 +253,34 @@ export function WeatherEditor() {
                 {selectedSection === 'storm' ? 'Storm envelope settings' : 'Current values and weather constraints'}
               </p>
             </div>
-            <span className="text-xs text-slate-500">Read only</span>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-4 space-y-4">
-            {selectedWeather ? renderValueSection(selectedWeather) : (
-              <>
-                <div className="space-y-2">
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Storm Profile</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <StatRow label="Density" value={formatValue(storm.density)} />
-                    <StatRow label="Threshold" value={formatValue(storm.threshold)} />
-                    <StatRow label="Timeout" value={`${storm.timeout}s`} />
-                  </div>
+            {selectedWeather ? (
+              <ValueSection
+                value={selectedWeather}
+                unit={WEATHER_SECTIONS.find(s => s.key === selectedSection)?.unit}
+                onPatch={patchSection}
+              />
+            ) : (
+              <div className="space-y-2">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Storm Profile</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <NumRow label="Density" value={storm.density}
+                    onChange={n => patchStorm({ density: n, rawDensity: undefined })} />
+                  <NumRow label="Threshold" value={storm.threshold}
+                    onChange={n => patchStorm({ threshold: n, rawThreshold: undefined })} />
+                  <NumRow label="Timeout" unit="s" value={storm.timeout}
+                    onChange={n => patchStorm({ timeout: n })} />
                 </div>
-              </>
+              </div>
             )}
           </div>
 
           <div className="rounded-lg border border-slate-700 bg-slate-900/30 p-3 text-xs text-slate-400">
-            Read-only view with parser precision preservation. Editing controls can be added without changing this layout.
+            Edits are staged as pending changes — save or revert them from the Save review in the top bar.
           </div>
         </div>
       </div>

@@ -1001,7 +1001,7 @@ export function MapView() {
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
-  const [showUsageZones] = useState(false);
+  const [showUsageZones, setShowUsageZones] = useState(false);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
@@ -1389,6 +1389,14 @@ export function MapView() {
             className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showCeZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
           >
             Spawn Territories
+          </button>
+        )}
+        {tierZonesLoaded && (
+          <button
+            onClick={() => setShowUsageZones(v => !v)}
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showUsageZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            Usage Zones
           </button>
         )}
         {paintableLayers.length > 0 && (
