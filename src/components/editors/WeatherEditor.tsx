@@ -122,14 +122,6 @@ export function WeatherEditor() {
   const weather = useServerStore(s => s.weather);
   const [selectedSection, setSelectedSection] = useState<WeatherSectionKey>('overcast');
 
-  if (!weather) {
-    return (
-      <div className="flex items-center justify-center h-full text-slate-500">
-        <p>Weather data not loaded. Check if cfgweather.xml exists.</p>
-      </div>
-    );
-  }
-
   const selectedLabel = useMemo(() => {
     if (selectedSection === 'storm') return 'Storm';
     return WEATHER_SECTIONS.find(section => section.key === selectedSection)?.label ?? 'Overcast';
@@ -143,7 +135,7 @@ export function WeatherEditor() {
   };
 
   const weatherSummary = WEATHER_SECTIONS.map(section => {
-    const value = normalizeWeatherValue(weather[section.key]);
+    const value = normalizeWeatherValue(weather?.[section.key] ?? {});
     return {
       key: section.key,
       label: section.label,
@@ -153,6 +145,14 @@ export function WeatherEditor() {
       unit: section.unit,
     };
   });
+
+  if (!weather) {
+    return (
+      <div className="flex items-center justify-center h-full text-slate-500">
+        <p>Weather data not loaded. Check if cfgweather.xml exists.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full overflow-hidden">
