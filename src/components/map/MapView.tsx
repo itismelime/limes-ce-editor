@@ -1003,6 +1003,10 @@ export function MapView() {
   const [showCeZones, setShowCeZones] = useState(false);
   const [showUsageZones, setShowUsageZones] = useState(false);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
+  // Usage masks only exist when the CE project ships usgFlg_* layers
+  // (Chernarus/Livonia/Sakhal do, Namalsk has tier layers only) — hide the
+  // toggle when there is nothing to draw.
+  const hasUsageMasks = useMemo(() => tierZonesLoaded && getUsageMasks() !== null, [tierZonesLoaded]);
 
   const bounds      = mapBounds(mapConfig);
   const isKnownMap  = tileMaps.has(activeMap);
@@ -1391,7 +1395,7 @@ export function MapView() {
             Spawn Territories
           </button>
         )}
-        {tierZonesLoaded && (
+        {hasUsageMasks && (
           <button
             onClick={() => setShowUsageZones(v => !v)}
             className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showUsageZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
