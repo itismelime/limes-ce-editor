@@ -523,17 +523,23 @@ export function BuildingPopup({
       seenU.add(k);
       return true;
     });
-    const activeTiers = zoneTiers.filter(t => t && t !== 'unknown');
+    // Tiers at this spot: value-flag zone at the position + tiers on the
+    // building proto itself.
+    const activeTiers = [...new Set([...zoneTiers, ...protoTiers])].filter(t => t && t !== 'unknown');
     const hasZone = activeUsages.length > 0 || activeTiers.length > 0;
     if (!hasZone || !zoneFilterActive) return allItems;
+    // Vanilla CE: an item spawns here only if its usage flags intersect the
+    // usages at this spot AND its value (tier) flags intersect the tiers.
+    // An item with no flags on an axis is unrestricted on that axis, but a
+    // flagged item can NOT spawn where the matching signal is absent.
     return allItems.filter(item => {
-      const usageOk = activeUsages.length === 0 || item.usages.length === 0 ||
+      const usageOk = item.usages.length === 0 ||
         item.usages.some(u => activeUsages.some(z => z.toLowerCase() === u.toLowerCase()));
-      const tierOk = activeTiers.length === 0 || item.tiers.length === 0 ||
+      const tierOk = item.tiers.length === 0 ||
         item.tiers.some(t => activeTiers.some(z => z.toLowerCase() === t.toLowerCase()));
       return usageOk && tierOk;
     });
-  }, [allItems, zoneFilterActive, zoneUsages, zoneTiers, building.usages]);
+  }, [allItems, zoneFilterActive, zoneUsages, zoneTiers, protoTiers, building.usages]);
 
   const tagSearchResults = useMemo(() => {
     if (!tagSearch.trim()) return [];
