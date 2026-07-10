@@ -171,6 +171,19 @@ fn scan_steam_for_dayz_pbos(libs: &[std::path::PathBuf]) -> Vec<(String, std::pa
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
+/// `map_id` is meant to be a single directory-name segment (e.g. "chernarus",
+/// "custom") that gets joined onto app_data_dir. The frontend already slugifies
+/// these to `[a-z0-9-]+`, but a buggy or compromised caller sending `../../etc`
+/// or an absolute path would have `PathBuf::join` honor it literally. Reject
+/// anything that isn't exactly one plain path component.
+fn validate_map_id(map_id: &str) -> Result<(), String> {
+    let mut components = std::path::Path::new(map_id).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(()),
+        _ => Err(format!("invalid map_id: {}", map_id)),
+    }
+}
+
 /// Returns the maps base dir where tiles exist for this map (bundled > user cache).
 /// Frontend uses this to construct tile URLs synchronously.
 #[tauri::command]
@@ -178,6 +191,7 @@ async fn get_tiles_base_dir(
     app:    tauri::AppHandle,
     map_id: String,
 ) -> Result<Option<String>, String> {
+    validate_map_id(&map_id)?;
     if let Ok(resource_dir) = app.path().resource_dir() {
         let maps_dir = resource_dir.join("maps");
         if tiles::tiles_ready(&maps_dir, &map_id) {
@@ -223,6 +237,7 @@ async fn get_tile_path(
     map_id: String,
     z: u32, x: u32, y: u32,
 ) -> Result<String, String> {
+    validate_map_id(&map_id)?;
     // Bundled tile (shipped inside installer).
     if let Ok(resource_dir) = app.path().resource_dir() {
         let p = tiles::tile_path(&resource_dir.join("maps"), &map_id, z, x, y);
@@ -250,6 +265,7 @@ async fn extract_map_tiles(
     registry: tauri::State<'_, CommunityMapRegistry>,
     map_id:   String,
 ) -> Result<(), String> {
+    validate_map_id(&map_id)?;
     let maps_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("maps");
@@ -367,6 +383,7 @@ async fn clear_all_map_tiles(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn clear_map_tiles(app: tauri::AppHandle, map_id: String) -> Result<(), String> {
+    validate_map_id(&map_id)?;
     let tiles_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("maps")
@@ -573,6 +590,7 @@ async fn download_mpmission(
 
 #[tauri::command]
 async fn copy_ce_project(app: tauri::AppHandle, source_dir: String, map_id: String) -> Result<String, String> {
+    validate_map_id(&map_id)?;
     let source = std::path::Path::new(&source_dir);
     if !source.is_dir() {
         return Err(format!("Not a directory: {}", source_dir));

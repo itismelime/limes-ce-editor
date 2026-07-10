@@ -399,7 +399,12 @@ fn parse_sffo(data: &[u8]) -> Result<Vec<u32>, String> {
         let sz = u32::from_le_bytes(data[pos..pos+4].try_into().unwrap()) as usize;
         pos += 4;
         if type_id == SFFO {
-            let n = sz / 4;
+            // `sz` is a declared length from the file, not a fact — a corrupt or
+            // malicious PAA could claim ~u32::MAX and blow up Vec::with_capacity
+            // before we ever read a byte. Clamp to what the remaining buffer could
+            // actually hold (4 bytes per offset) instead of trusting the field.
+            let max_n = (data.len().saturating_sub(pos)) / 4;
+            let n = (sz / 4).min(max_n);
             let mut offsets = Vec::with_capacity(n);
             for i in 0..n {
                 let start = pos + i * 4;
@@ -413,6 +418,12 @@ fn parse_sffo(data: &[u8]) -> Result<Vec<u32>, String> {
     Err("No SFFO block found".into())
 }
 
+// PAA mip0 width is stored in 15 bits (max 32767), but no real DayZ/Arma
+// satellite texture is anywhere near that large — the largest in-game tiles
+// are ~4096px. Cap well above real usage but far below the field's raw max
+// so a corrupt/malicious width can't drive a multi-GB pixel-buffer allocation.
+const MAX_PAA_DIM: u32 = 8192;
+
 fn paa_base_dim(data: &[u8]) -> Result<u32, String> {
     let offsets = parse_sffo(data)?;
     let non_zero: Vec<u32> = offsets.into_iter().filter(|&o| o != 0).collect();
@@ -422,6 +433,7 @@ fn paa_base_dim(data: &[u8]) -> Result<u32, String> {
     let raw_w = u16::from_le_bytes([data[start], data[start + 1]]);
     let w = (raw_w & 0x7FFF) as u32;
     if w == 0 { return Err("zero width".into()); }
+    if w > MAX_PAA_DIM { return Err(format!("width {} exceeds sane maximum", w)); }
     Ok(w)
 }
 
@@ -443,6 +455,7 @@ fn decode_paa(data: &[u8]) -> Result<RgbaImage, String> {
     let lzo_compressed = raw_w & 0x8000 != 0;
     let base_dim = (raw_w & 0x7FFF) as usize;
     if base_dim == 0 { return Err("zero width in mip header".into()); }
+    if base_dim as u32 > MAX_PAA_DIM { return Err(format!("width {} exceeds sane maximum", base_dim)); }
 
     let csize = (data[mip0_start + 4] as usize)
         | ((data[mip0_start + 5] as usize) << 8)
@@ -612,4 +625,44 @@ fn lzo1x_decompress(src: &[u8], expected_out: usize) -> Result<Vec<u8>, String> 
     let mut result = dst[DICT_SIZE..outp].to_vec();
     if result.len() < expected_out { result.resize(expected_out, 0); }
     Ok(result)
+}
+
+#[cfg(test)]
+mod paa_bounds_tests {
+    use super::*;
+
+    // A malicious/corrupt PAA can declare an SFFO block size near u32::MAX.
+    // Before the fix this drove Vec::with_capacity(~1 billion) straight from
+    // a tiny input. n must now be clamped to what the buffer could actually
+    // hold, so parsing a small crafted file stays cheap and just returns the
+    // offsets that actually fit.
+    #[test]
+    fn parse_sffo_clamps_declared_size_to_buffer_len() {
+        let mut buf = vec![0u8; 2]; // 2-byte PAA type field, skipped by parse_sffo
+        buf.extend_from_slice(b"GGAT");
+        buf.extend_from_slice(b"SFFO");
+        buf.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // declared size: absurd
+        buf.extend_from_slice(&100u32.to_le_bytes()); // only 2 offsets actually fit
+        buf.extend_from_slice(&200u32.to_le_bytes());
+
+        let offsets = parse_sffo(&buf).expect("should parse without attempting a huge allocation");
+        assert_eq!(offsets, vec![100, 200]);
+    }
+
+    // mip0 width is a 15-bit field (max 32767) but no real DayZ/Arma texture
+    // is anywhere near that large. decode_paa must reject an oversized width
+    // before computing pixel_count = base_dim * base_dim (up to ~4.3GB).
+    #[test]
+    fn decode_paa_rejects_oversized_width() {
+        let mut buf = vec![0u8; 30];
+        buf[0] = 0x01; buf[1] = 0xFF; // PAA magic: DXT1
+        buf[2..6].copy_from_slice(b"GGAT");
+        buf[6..10].copy_from_slice(b"SFFO");
+        buf[10..14].copy_from_slice(&4u32.to_le_bytes()); // one offset
+        buf[14..18].copy_from_slice(&18u32.to_le_bytes()); // -> mip0 header at byte 18
+        buf[18..20].copy_from_slice(&0x7FFFu16.to_le_bytes()); // width 32767 > MAX_PAA_DIM
+
+        let err = decode_paa(&buf).expect_err("oversized width must be rejected, not allocated");
+        assert!(err.contains("exceeds sane maximum"), "unexpected error: {err}");
+    }
 }
