@@ -172,16 +172,17 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const zoneUsages = zones?.usages ?? [];
       const zoneTiers  = zones?.tiers  ?? [];
 
-      // Subtractive filtering: hiding a type hides every building carrying it,
-      // even if the building has other visible tags. 'unknown' only applies to
-      // buildings with no tags at all.
+      // Types: a building stays visible while ANY of its tags is visible
+      // (hide it only when every tag it carries is hidden). Tiers below are
+      // subtractive instead: any hidden tier hides the building. 'unknown'
+      // only applies to buildings with no tags at all.
       if (useZoneData) {
         const merged = [...new Set([...zoneUsages, ...b.usages].map(u => u.trim().toLowerCase()))];
         const effectiveUsages = merged.length > 0 ? merged : ['unknown'];
-        if (effectiveUsages.some(u => hiddenUsageSet.has(u))) return [];
+        if (effectiveUsages.every(u => hiddenUsageSet.has(u))) return [];
       } else {
         const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
-        if (normalizedUsages.some(u => hiddenUsageSet.has(u.trim().toLowerCase()))) return [];
+        if (normalizedUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase()))) return [];
       }
 
       const primaryUsage = b.usages[0] ?? 'unknown';
