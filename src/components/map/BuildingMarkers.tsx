@@ -172,14 +172,16 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const zoneUsages = zones?.usages ?? [];
       const zoneTiers  = zones?.tiers  ?? [];
 
+      // Subtractive filtering: hiding a type hides every building carrying it,
+      // even if the building has other visible tags. 'unknown' only applies to
+      // buildings with no tags at all.
       if (useZoneData) {
-        const ceUsages = zoneUsages.length > 0 ? zoneUsages : ['unknown'];
-        const protoUsages = b.usages.length > 0 ? b.usages : ['unknown'];
-        const allUsages = [...new Set([...ceUsages, ...protoUsages].map(u => u.trim().toLowerCase()))];
-        if (allUsages.every(u => hiddenUsageSet.has(u))) return [];
+        const merged = [...new Set([...zoneUsages, ...b.usages].map(u => u.trim().toLowerCase()))];
+        const effectiveUsages = merged.length > 0 ? merged : ['unknown'];
+        if (effectiveUsages.some(u => hiddenUsageSet.has(u))) return [];
       } else {
         const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
-        if (normalizedUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase()))) return [];
+        if (normalizedUsages.some(u => hiddenUsageSet.has(u.trim().toLowerCase()))) return [];
       }
 
       const primaryUsage = b.usages[0] ?? 'unknown';
@@ -192,7 +194,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const mergedTiers = [...new Set([...allZoneTiers, ...protoTiers])];
       const displayTiers = mergedTiers.length > 0 ? mergedTiers : ['unknown'];
 
-      if (displayTiers.every(t => hiddenTiers.includes(t))) return [];
+      if (displayTiers.some(t => hiddenTiers.includes(t))) return [];
 
       const latlng = gameToLeaflet(b.x, b.z, mapConfig);
       const dirtyKey = b.typeName.trim().toLowerCase();
