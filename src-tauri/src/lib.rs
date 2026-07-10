@@ -505,6 +505,11 @@ fn extract_mpmission_from_zip(
 
         found = true;
         if relative.is_empty() { continue; }
+        // Zip Slip guard: reject entries whose relative path climbs out of
+        // `dest` via `..` segments before we ever join/write to disk.
+        if std::path::Path::new(relative).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("Archive entry escapes destination folder: {}", raw_name));
+        }
 
         let dest_path = dest.join(relative);
         if raw_name.ends_with('/') {
@@ -711,5 +716,35 @@ mod zip_extract_tests {
         assert_eq!(types, "<types/>");
 
         let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    // Zip Slip regression: an archive entry that climbs out of the mission
+    // subfolder with `..` must be rejected, not written outside `dest`.
+    #[test]
+    fn rejects_path_traversal_entries() {
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            let options: zip::write::FileOptions<()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test/../../../evil.txt", options).unwrap();
+            writer.write_all(b"pwned").unwrap();
+
+            writer.finish().unwrap();
+        }
+
+        let dest = std::env::temp_dir().join(format!("zip_slip_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+
+        let result = extract_mpmission_from_zip(&buf, "Mission Files/dayzOffline.Test", &dest);
+        assert!(result.is_err(), "path-traversal entry should be rejected");
+
+        let escaped = std::env::temp_dir().join("evil.txt");
+        assert!(!escaped.exists(), "traversal entry must not land outside dest");
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_file(&escaped);
     }
 }
