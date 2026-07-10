@@ -19,6 +19,7 @@ import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
 import { BuildingMarkers } from './BuildingMarkers';
 import { BuildingSidebar } from './BuildingSidebar';
+import { ConnectedTypeDetailPanel } from '../shared/TypeDetailPanel';
 import type { MapConfig } from '../../types/map';
 
 const PLAYER_MARKER_SIZE = 20;
@@ -942,6 +943,9 @@ export function MapView() {
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
+  // Item selected from the building editor — opens the shared type detail
+  // panel docked to the right edge of the map.
+  const [editingItemName, setEditingItemName] = useState<string | null>(null);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
@@ -1132,7 +1136,16 @@ export function MapView() {
   // ── Map ready ─────────────────────────────────────────────────────────────
   return (
     <div className="h-full relative bg-slate-950">
-      <BuildingSidebar onWidthChange={setSidebarWidth} />
+      <BuildingSidebar onWidthChange={setSidebarWidth} onSelectItem={setEditingItemName} />
+      {editingItemName && (
+        <div className="absolute right-0 top-0 h-full z-[1100] pointer-events-auto shadow-2xl">
+          <ConnectedTypeDetailPanel
+            typeName={editingItemName}
+            onClose={() => setEditingItemName(null)}
+            className="w-80 h-full border-l border-slate-700 bg-slate-900 flex flex-col"
+          />
+        </div>
+      )}
       <div className="absolute inset-0">
         <MapContainer
           crs={CRS.Simple}

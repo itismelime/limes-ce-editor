@@ -4,7 +4,10 @@ import { useServerStore } from '../../store/serverStore';
 import { sampleAllZonesAtPos, hasCeToolBitmaps } from '../../lib/tierZoneResolver';
 import { BuildingPopup } from './BuildingPopup';
 
-export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number) => void }) {
+export function BuildingSidebar({ onWidthChange, onSelectItem }: {
+  onWidthChange?: (w: number) => void;
+  onSelectItem?: (typeName: string) => void;
+}) {
   const selectedBuildingType = useUiStore(s => s.selectedBuildingType);
   const selectedBuildingSeq = useUiStore(s => s.selectedBuildingSeq);
   const buildingInstances = useServerStore(s => s.buildingInstances);
@@ -132,6 +135,7 @@ export function BuildingSidebar({ onWidthChange }: { onWidthChange?: (w: number)
             zoneTiers={zoneTiers}
             protoTiers={building.tiers}
             embedded
+            onSelectItem={onSelectItem}
           />
         )}
         {expanded && !building && (

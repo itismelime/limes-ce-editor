@@ -14,6 +14,7 @@ interface Props {
   protoTiers?: string[];
   inferredTier?: string | null;
   embedded?: boolean;
+  onSelectItem?: (typeName: string) => void;
 }
 
 const EMPTY_TYPES = new Map<string, DayZType>();
@@ -48,6 +49,7 @@ function CategorySection({
   onSetItemMin,
   onToggleItemTier,
   onOpenAddModal,
+  onSelectItem,
 }: {
   label: string;
   categoryKey: string;
@@ -59,6 +61,7 @@ function CategorySection({
   onSetItemMin: (itemName: string, min: number) => void;
   onToggleItemTier: (itemName: string, tier: string) => void;
   onOpenAddModal: (category: string) => void;
+  onSelectItem?: (typeName: string) => void;
 }) {
   const [open, setOpen]         = useState(autoExpand ?? false);
   const [search, setSearch]     = useState('');
@@ -188,7 +191,15 @@ function CategorySection({
                       key={item.name}
                       className={`flex items-center justify-between gap-2 px-3 py-1 hover:bg-slate-800/30 ${item.nominal === 0 ? 'opacity-40' : ''}`}
                     >
-                      <span className="text-slate-300 text-xs truncate" title={item.name}>{item.name}</span>
+                      {onSelectItem ? (
+                        <button
+                          onClick={() => onSelectItem(item.name)}
+                          className="text-slate-300 text-xs truncate text-left hover:text-lime-300 hover:underline"
+                          title={`${item.name} — open item editor`}
+                        >{item.name}</button>
+                      ) : (
+                        <span className="text-slate-300 text-xs truncate" title={item.name}>{item.name}</span>
+                      )}
                       <div className="text-right flex-shrink-0 text-xs flex items-center gap-1">
                         <div className="flex items-center gap-1" title="Nominal">
                           <span className="text-[10px] text-slate-500">N</span>
@@ -411,6 +422,7 @@ export function BuildingPopup({
   protoTiers = [],
   inferredTier,
   embedded = false,
+  onSelectItem,
 }: Props) {
   const types = useServerStore(s => s.mission?.types ?? EMPTY_TYPES);
   const spawnableTypes = useServerStore(s => s.mission?.spawnableTypes);
@@ -1049,6 +1061,7 @@ export function BuildingPopup({
               onSetItemMin={handleSetItemMin}
               onToggleItemTier={handleToggleItemTier}
               onOpenAddModal={(category) => openAddModal(category)}
+              onSelectItem={onSelectItem}
             />
           ))}
 
