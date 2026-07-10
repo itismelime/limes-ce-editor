@@ -42,40 +42,22 @@ function CategorySection({
   label,
   categoryKey,
   items,
-  tierOptions,
   autoExpand,
   onBlockCategory,
-  onSetItemNominal,
-  onSetItemMin,
-  onToggleItemTier,
   onOpenAddModal,
   onSelectItem,
 }: {
   label: string;
   categoryKey: string;
   items: DayZType[];
-  tierOptions: string[];
   autoExpand?: boolean;
   onBlockCategory: (category: string) => void;
-  onSetItemNominal: (itemName: string, nominal: number) => void;
-  onSetItemMin: (itemName: string, min: number) => void;
-  onToggleItemTier: (itemName: string, tier: string) => void;
   onOpenAddModal: (category: string) => void;
   onSelectItem?: (typeName: string) => void;
 }) {
   const [open, setOpen]         = useState(autoExpand ?? false);
   const [search, setSearch]     = useState('');
   const [sortMode, setSortMode] = useState<'az' | 'nominal' | 'min'>('az');
-  const [openTierDropdown, setOpenTierDropdown] = useState<string | null>(null);
-  const [nominalDraftByItem, setNominalDraftByItem] = useState<Record<string, string>>({});
-  const [minDraftByItem, setMinDraftByItem] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!openTierDropdown) return;
-    const close = () => setOpenTierDropdown(null);
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [openTierDropdown]);
 
   const activeCount = items.filter(t => t.nominal > 0).length;
   const filtered = useMemo(() => {
@@ -97,29 +79,6 @@ function CategorySection({
 
     return next;
   }, [items, search, sortMode]);
-
-  const getNominalDraft = (item: DayZType) => nominalDraftByItem[item.name] ?? String(item.nominal);
-  const getMinDraft = (item: DayZType) => minDraftByItem[item.name] ?? String(item.min);
-
-  const commitNominal = (item: DayZType) => {
-    const raw = (nominalDraftByItem[item.name] ?? String(item.nominal)).trim();
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) {
-      setNominalDraftByItem(prev => ({ ...prev, [item.name]: String(item.nominal) }));
-      return;
-    }
-    onSetItemNominal(item.name, Math.max(0, parsed));
-  };
-
-  const commitMin = (item: DayZType) => {
-    const raw = (minDraftByItem[item.name] ?? String(item.min)).trim();
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) {
-      setMinDraftByItem(prev => ({ ...prev, [item.name]: String(item.min) }));
-      return;
-    }
-    onSetItemMin(item.name, Math.max(0, parsed));
-  };
 
   return (
     <div className="mb-2 border border-slate-800 rounded-lg overflow-hidden">
@@ -191,83 +150,24 @@ function CategorySection({
                       key={item.name}
                       className={`flex items-center justify-between gap-2 px-3 py-1 hover:bg-slate-800/30 ${item.nominal === 0 ? 'opacity-40' : ''}`}
                     >
-                      {onSelectItem ? (
-                        <button
-                          onClick={() => onSelectItem(item.name)}
-                          className="text-slate-300 text-xs truncate text-left hover:text-lime-300 hover:underline"
-                          title={`${item.name} — open item editor`}
-                        >{item.name}</button>
-                      ) : (
-                        <span className="text-slate-300 text-xs truncate" title={item.name}>{item.name}</span>
-                      )}
-                      <div className="text-right flex-shrink-0 text-xs flex items-center gap-1">
-                        <div className="flex items-center gap-1" title="Nominal">
-                          <span className="text-[10px] text-slate-500">N</span>
-                          <input
-                            type="number"
-                            min={0}
-                            value={getNominalDraft(item)}
-                            onChange={e => setNominalDraftByItem(prev => ({ ...prev, [item.name]: e.target.value }))}
-                            onBlur={() => commitNominal(item)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') commitNominal(item);
-                            }}
-                            className="h-5 w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-slate-300"
-                          />
-                        </div>
-                        <div className="flex items-center gap-1" title="Minimum">
-                          <span className="text-[10px] text-slate-500">M</span>
-                          <input
-                            type="number"
-                            min={0}
-                            value={getMinDraft(item)}
-                            onChange={e => setMinDraftByItem(prev => ({ ...prev, [item.name]: e.target.value }))}
-                            onBlur={() => commitMin(item)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') commitMin(item);
-                            }}
-                            className="h-5 w-12 bg-slate-800 border border-slate-700 rounded px-1 text-[10px] text-slate-300"
-                          />
-                        </div>
-                        {tierOptions.length > 0 && (
-                          <div className="relative">
-                            <button
-                              onClick={() => setOpenTierDropdown(openTierDropdown === item.name ? null : item.name)}
-                              className="h-5 px-1.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300 hover:border-slate-500 whitespace-nowrap"
-                            >
-                              {item.tiers.length === 0
-                                ? 'Tiers ▾'
-                                : item.tiers.map(t => t.replace(/^Tier/i, 'T')).join(', ') + ' ▾'}
-                            </button>
-                            {openTierDropdown === item.name && (
-                              <div
-                                className="absolute right-0 top-6 z-50 bg-slate-900 border border-slate-700 rounded shadow-lg py-1 min-w-[80px]"
-                                onMouseDown={e => e.stopPropagation()}
-                              >
-                                {tierOptions.map(tier => {
-                                  const hasTier = item.tiers.some(t => t.toLowerCase() === tier.toLowerCase());
-                                  return (
-                                    <label
-                                      key={tier}
-                                      className="flex items-center gap-2 px-3 py-1 text-[11px] text-slate-300 hover:bg-slate-800 cursor-pointer"
-                                      onMouseDown={e => {
-                                        e.preventDefault();
-                                        onToggleItemTier(item.name, tier);
-                                      }}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        readOnly
-                                        checked={hasTier}
-                                        className="accent-slate-500"
-                                      />
-                                      {tier}
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
+                      <span className="text-slate-300 text-xs truncate flex-1" title={item.name}>{item.name}</span>
+                      <div className="text-right flex-shrink-0 flex items-center gap-2">
+                        <span className="text-[10px] text-slate-500 whitespace-nowrap" title="Nominal / Min">
+                          N {item.nominal} · M {item.min}
+                        </span>
+                        {item.tiers.length > 0 && (
+                          <span className="text-[10px] text-slate-500 whitespace-nowrap">
+                            {item.tiers.map(t => t.replace(/^Tier/i, 'T')).join(', ')}
+                          </span>
+                        )}
+                        {onSelectItem && (
+                          <button
+                            onClick={() => onSelectItem(item.name)}
+                            className="h-5 px-2 rounded-md border border-lime-700/70 bg-lime-900/40 text-lime-300 hover:text-lime-200 text-[10px]"
+                            title={`Edit ${item.name}`}
+                          >
+                            Edit
+                          </button>
                         )}
                       </div>
                     </div>
@@ -281,13 +181,6 @@ function CategorySection({
       )}
     </div>
   );
-}
-
-function tierNum(tier: string): number | null {
-  const m = /^Tier(\d+)$/i.exec(tier.trim());
-  if (!m) return null;
-  const n = Number.parseInt(m[1], 10);
-  return Number.isFinite(n) ? n : null;
 }
 
 function AddLootModal({
@@ -579,23 +472,6 @@ export function BuildingPopup({
     });
   }, [types]);
 
-  const availableTierOptions = useMemo(() => {
-    let maxTier = 4;
-    for (const tier of tiers) {
-      const n = tierNum(tier);
-      if (n !== null && n > maxTier) maxTier = n;
-    }
-    for (const type of types.values()) {
-      for (const tier of type.tiers) {
-        const n = tierNum(tier);
-        if (n !== null && n > maxTier) maxTier = n;
-      }
-    }
-    // Always show at least Tier1–Tier7 so users can assign any tier
-    if (maxTier < 7) maxTier = 7;
-    return Array.from({ length: maxTier }, (_, i) => `Tier${i + 1}`);
-  }, [types, tiers]);
-
   const cleanZoneTiers  = zoneTiers.filter(t => t && t !== 'unknown');
   const cleanZoneUsages = zoneUsages.filter(u => u && u !== 'unknown');
 
@@ -672,43 +548,6 @@ export function BuildingPopup({
     if (category === '__none__') return;
     removeBuildingCategory(building.typeName, category);
     setSaveStatus('Category change staged.');
-  };
-
-  const handleSetItemNominal = (itemName: string, nominal: number) => {
-    const type = types.get(itemName);
-    if (!type) return;
-    const nextNominal = Math.max(0, nominal);
-    if (type.nominal === nextNominal) {
-      setSaveStatus(`${itemName} nominal already ${nextNominal}.`);
-      return;
-    }
-    updateType(itemName, { nominal: nextNominal });
-    setSaveStatus(`${itemName} nominal set to ${nextNominal}.`);
-  };
-
-  const handleSetItemMin = (itemName: string, min: number) => {
-    const type = types.get(itemName);
-    if (!type) return;
-    const nextMin = Math.max(0, min);
-    if (type.min === nextMin) {
-      setSaveStatus(`${itemName} min already ${nextMin}.`);
-      return;
-    }
-    updateType(itemName, { min: nextMin });
-    setSaveStatus(`${itemName} min set to ${nextMin}.`);
-  };
-
-  const handleToggleItemTier = (itemName: string, tier: string) => {
-    const type = types.get(itemName);
-    if (!type || !tier) return;
-    const hasTier = type.tiers.some((t: string) => t.toLowerCase() === tier.toLowerCase());
-    if (hasTier) {
-      updateType(itemName, { tiers: type.tiers.filter((t: string) => t.toLowerCase() !== tier.toLowerCase()) });
-      setSaveStatus(`Removed ${tier} from ${itemName}.`);
-      return;
-    }
-    updateType(itemName, { tiers: [...type.tiers, tier] });
-    setSaveStatus(`Added ${tier} to ${itemName}.`);
   };
 
   return (
@@ -1054,12 +893,8 @@ export function BuildingPopup({
               categoryKey={rawCategoryByDisplay.get(cat) ?? cat}
               label={cat === '__none__' ? 'Uncategorized' : (CATEGORY_LABELS[cat] ?? cat)}
               items={byCategory.get(cat)!}
-              tierOptions={availableTierOptions}
               autoExpand={!!categoryFilter && cat === categoryFilter}
               onBlockCategory={(category) => { void handleRemoveCategory(category); }}
-              onSetItemNominal={handleSetItemNominal}
-              onSetItemMin={handleSetItemMin}
-              onToggleItemTier={handleToggleItemTier}
               onOpenAddModal={(category) => openAddModal(category)}
               onSelectItem={onSelectItem}
             />
