@@ -672,3 +672,44 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod zip_extract_tests {
+    use super::extract_mpmission_from_zip;
+    use std::io::Write;
+
+    // Regression check for the zip crate major bump (2 -> 8): builds a real
+    // deflate-compressed archive with the writer API and round-trips it
+    // through the same extraction path download_mpmission uses.
+    #[test]
+    fn extracts_nested_mission_folder_with_deflate() {
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            let options: zip::write::FileOptions<()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test/cfgeconomycore.xml", options).unwrap();
+            writer.write_all(b"<economycore/>").unwrap();
+
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test/db/types.xml", options).unwrap();
+            writer.write_all(b"<types/>").unwrap();
+
+            writer.finish().unwrap();
+        }
+
+        let dest = std::env::temp_dir().join(format!("zip_extract_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+
+        extract_mpmission_from_zip(&buf, "Mission Files/dayzOffline.Test", &dest)
+            .expect("extraction should succeed against the current zip crate version");
+
+        let economy = std::fs::read_to_string(dest.join("cfgeconomycore.xml")).unwrap();
+        assert_eq!(economy, "<economycore/>");
+        let types = std::fs::read_to_string(dest.join("db/types.xml")).unwrap();
+        assert_eq!(types, "<types/>");
+
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+}
