@@ -3,7 +3,6 @@ import { MapContainer, ImageOverlay, Circle, Marker, Popup, Tooltip, useMap, use
 import L from 'leaflet';
 import { CRS } from 'leaflet';
 import { open } from '@tauri-apps/plugin-dialog';
-import { getUsageMasks, getLayerGridInfo } from '../../lib/tierZoneResolver';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -436,64 +435,6 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   if (/^#[0-9a-f]{3}$/i.test(hex)) hex = '#' + [...hex.slice(1)].map(c => c + c).join('');
   const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
-}
-
-function UsageLayerOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpression; show: boolean }) {
-  const tierZonesLoaded = useUiStore(s => s.tierZonesLoaded);
-  const [overlayUrls, setOverlayUrls] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!tierZonesLoaded) { setOverlayUrls({}); return; }
-    const masks = getUsageMasks();
-    const grid = getLayerGridInfo();
-    if (!masks || !grid) return;
-
-    const { gridW, gridH } = grid;
-    // Downsample 4096→512 for fast canvas creation (8× reduction each axis = 64× fewer pixels)
-    const SCALE = 0.125;
-    const outW = Math.round(gridW * SCALE);
-    const outH = Math.round(gridH * SCALE);
-    const step = Math.round(1 / SCALE);
-
-    const urls: Record<string, string> = {};
-    for (const [usage, mask] of Object.entries(masks)) {
-      const color = hexToRgb(getUsageColor(usage));
-      if (!color) continue;
-      const canvas = document.createElement('canvas');
-      canvas.width = outW;
-      canvas.height = outH;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) continue;
-      const imageData = ctx.createImageData(outW, outH);
-      const data = imageData.data;
-      for (let y = 0; y < outH; y++) {
-        for (let x = 0; x < outW; x++) {
-          const srcX = Math.min(x * step, gridW - 1);
-          const srcY = Math.min(y * step, gridH - 1);
-          if (mask[srcY * gridW + srcX]) {
-            const i = (y * outW + x) * 4;
-            data[i]     = color.r;
-            data[i + 1] = color.g;
-            data[i + 2] = color.b;
-            data[i + 3] = 90;
-          }
-        }
-      }
-      ctx.putImageData(imageData, 0, 0);
-      urls[usage] = canvas.toDataURL();
-    }
-    setOverlayUrls(urls);
-  }, [tierZonesLoaded]);
-
-  if (!show || Object.keys(overlayUrls).length === 0) return null;
-
-  return (
-    <>
-      {Object.entries(overlayUrls).map(([usage, url]) => (
-        <ImageOverlay key={usage} url={url} bounds={bounds} opacity={1} zIndex={10} />
-      ))}
-    </>
-  );
 }
 
 function CeToolZoneOverlays({ mapConfig, show }: { mapConfig: MapConfig; show: boolean }) {
@@ -1001,12 +942,7 @@ export function MapView() {
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
-  const [showUsageZones, setShowUsageZones] = useState(false);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
-  // Usage masks only exist when the CE project ships usgFlg_* layers
-  // (Chernarus/Livonia/Sakhal do, Namalsk has tier layers only) — hide the
-  // toggle when there is nothing to draw.
-  const hasUsageMasks = useMemo(() => tierZonesLoaded && getUsageMasks() !== null, [tierZonesLoaded]);
 
   const bounds      = mapBounds(mapConfig);
   const isKnownMap  = tileMaps.has(activeMap);
@@ -1236,7 +1172,6 @@ export function MapView() {
           )}
           {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
           {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
-          {isMapActive && mapHeavyReady && overlaysReady && <UsageLayerOverlays bounds={bounds} show={showUsageZones} />}
           {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
           {isMapActive && mapHeavyReady && overlaysReady && <TerritoryBitmapOverlays bounds={bounds} show={showTerritoryOverlay} />}
           {isMapActive && mapHeavyReady && overlaysReady && territoryBitmapSize && territoryPaintMode && (
@@ -1393,14 +1328,6 @@ export function MapView() {
             className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showCeZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
           >
             Spawn Territories
-          </button>
-        )}
-        {hasUsageMasks && (
-          <button
-            onClick={() => setShowUsageZones(v => !v)}
-            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showUsageZones ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
-          >
-            Usage Zones
           </button>
         )}
         {paintableLayers.length > 0 && (
