@@ -1,0 +1,93 @@
+name: Release
+
+# Triggered by pushing a version tag (e.g. `git tag v0.3.0 && git push origin v0.3.0`).
+# Version numbers are NOT derived from the tag -- bump tauri.conf.json's and
+# package.json's "version" fields yourself before tagging, matching the tag.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # tauri-action needs this to create/update the GitHub Release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            # MSI installer only -- NSIS is skipped since we ship our own
+            # portable zip instead of an NSIS "portable" installer mode.
+            bundles: msi
+          - platform: ubuntu-latest
+            # .deb covers Debian/Ubuntu only. AppImage is the portable,
+            # distro-agnostic format -- it's what Fedora/Arch/RHEL/etc.
+            # users should grab, no packaging integration required.
+            bundles: deb,appimage
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Lime''s CE Editor ${{ github.ref_name }}'
+          releaseBody: |
+            ## Windows
+            - **Installer** (`.msi`): standard install, adds Start Menu entry.
+            - **Portable** (`.zip`): unzip anywhere and run, no install needed.
+
+            ## Linux
+            - **Debian / Ubuntu** (`.deb`): `sudo apt install ./*.deb`
+            - **Everything else** (`.AppImage`): Fedora, Arch, RHEL, etc. --
+              `chmod +x *.AppImage && ./*.AppImage`, no packaging integration required.
+          releaseDraft: true
+          prerelease: false
+          args: --bundles ${{ matrix.bundles }}
+
+      - name: Package portable build (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          DIST="limes-ce-editor-portable-${VERSION}-windows"
+          mkdir -p "$DIST"
+          cp src-tauri/target/release/limes-ce-editor.exe "$DIST/"
+          cp -r src-tauri/target/release/resources "$DIST/"
+          7z a -tzip "${DIST}.zip" "$DIST"
+
+      - name: Upload portable build to release
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" limes-ce-editor-portable-*.zip --clobber --repo "${{ github.repository }}"
