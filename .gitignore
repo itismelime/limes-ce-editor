@@ -56,8 +56,9 @@ coverage/
 *-overrides.json
 
 # Bundled map assets (generated via `npm run prepare-maps`, not committed due to large size)
-# Overview PNGs (~5-15 MB each)
-src-tauri/resources/maps/*.png
+# Overview PNGs (~5-15 MB each) -- these live nested per-map (maps/<id>/map.png),
+# a single '*' doesn't match across that directory level.
+src-tauri/resources/maps/**/*.png
 # Detail tile tree — all zoom levels per map (~1-4 GB total for all 4 maps)
 src-tauri/resources/maps/**/*.webp
 src-tauri/test*
