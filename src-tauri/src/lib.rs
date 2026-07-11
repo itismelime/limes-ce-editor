@@ -171,6 +171,19 @@ fn scan_steam_for_dayz_pbos(libs: &[std::path::PathBuf]) -> Vec<(String, std::pa
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
+/// `map_id` is meant to be a single directory-name segment (e.g. "chernarus",
+/// "custom") that gets joined onto app_data_dir. The frontend already slugifies
+/// these to `[a-z0-9-]+`, but a buggy or compromised caller sending `../../etc`
+/// or an absolute path would have `PathBuf::join` honor it literally. Reject
+/// anything that isn't exactly one plain path component.
+fn validate_map_id(map_id: &str) -> Result<(), String> {
+    let mut components = std::path::Path::new(map_id).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(()),
+        _ => Err(format!("invalid map_id: {}", map_id)),
+    }
+}
+
 /// Returns the maps base dir where tiles exist for this map (bundled > user cache).
 /// Frontend uses this to construct tile URLs synchronously.
 #[tauri::command]
@@ -178,6 +191,7 @@ async fn get_tiles_base_dir(
     app:    tauri::AppHandle,
     map_id: String,
 ) -> Result<Option<String>, String> {
+    validate_map_id(&map_id)?;
     if let Ok(resource_dir) = app.path().resource_dir() {
         let maps_dir = resource_dir.join("maps");
         if tiles::tiles_ready(&maps_dir, &map_id) {
@@ -223,6 +237,7 @@ async fn get_tile_path(
     map_id: String,
     z: u32, x: u32, y: u32,
 ) -> Result<String, String> {
+    validate_map_id(&map_id)?;
     // Bundled tile (shipped inside installer).
     if let Ok(resource_dir) = app.path().resource_dir() {
         let p = tiles::tile_path(&resource_dir.join("maps"), &map_id, z, x, y);
@@ -250,6 +265,7 @@ async fn extract_map_tiles(
     registry: tauri::State<'_, CommunityMapRegistry>,
     map_id:   String,
 ) -> Result<(), String> {
+    validate_map_id(&map_id)?;
     let maps_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("maps");
@@ -367,6 +383,7 @@ async fn clear_all_map_tiles(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn clear_map_tiles(app: tauri::AppHandle, map_id: String) -> Result<(), String> {
+    validate_map_id(&map_id)?;
     let tiles_dir = app.path().app_data_dir()
         .map_err(|e| e.to_string())?
         .join("maps")
@@ -505,6 +522,11 @@ fn extract_mpmission_from_zip(
 
         found = true;
         if relative.is_empty() { continue; }
+        // Zip Slip guard: reject entries whose relative path climbs out of
+        // `dest` via `..` segments before we ever join/write to disk.
+        if std::path::Path::new(relative).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("Archive entry escapes destination folder: {}", raw_name));
+        }
 
         let dest_path = dest.join(relative);
         if raw_name.ends_with('/') {
@@ -568,6 +590,7 @@ async fn download_mpmission(
 
 #[tauri::command]
 async fn copy_ce_project(app: tauri::AppHandle, source_dir: String, map_id: String) -> Result<String, String> {
+    validate_map_id(&map_id)?;
     let source = std::path::Path::new(&source_dir);
     if !source.is_dir() {
         return Err(format!("Not a directory: {}", source_dir));
@@ -671,4 +694,75 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod zip_extract_tests {
+    use super::extract_mpmission_from_zip;
+    use std::io::Write;
+
+    // Regression check for the zip crate major bump (2 -> 8): builds a real
+    // deflate-compressed archive with the writer API and round-trips it
+    // through the same extraction path download_mpmission uses.
+    #[test]
+    fn extracts_nested_mission_folder_with_deflate() {
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            let options: zip::write::FileOptions<()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test/cfgeconomycore.xml", options).unwrap();
+            writer.write_all(b"<economycore/>").unwrap();
+
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test/db/types.xml", options).unwrap();
+            writer.write_all(b"<types/>").unwrap();
+
+            writer.finish().unwrap();
+        }
+
+        let dest = std::env::temp_dir().join(format!("zip_extract_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+
+        extract_mpmission_from_zip(&buf, "Mission Files/dayzOffline.Test", &dest)
+            .expect("extraction should succeed against the current zip crate version");
+
+        let economy = std::fs::read_to_string(dest.join("cfgeconomycore.xml")).unwrap();
+        assert_eq!(economy, "<economycore/>");
+        let types = std::fs::read_to_string(dest.join("db/types.xml")).unwrap();
+        assert_eq!(types, "<types/>");
+
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    // Zip Slip regression: an archive entry that climbs out of the mission
+    // subfolder with `..` must be rejected, not written outside `dest`.
+    #[test]
+    fn rejects_path_traversal_entries() {
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            let options: zip::write::FileOptions<()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test/../../../evil.txt", options).unwrap();
+            writer.write_all(b"pwned").unwrap();
+
+            writer.finish().unwrap();
+        }
+
+        let dest = std::env::temp_dir().join(format!("zip_slip_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+
+        let result = extract_mpmission_from_zip(&buf, "Mission Files/dayzOffline.Test", &dest);
+        assert!(result.is_err(), "path-traversal entry should be rejected");
+
+        let escaped = std::env::temp_dir().join("evil.txt");
+        assert!(!escaped.exists(), "traversal entry must not land outside dest");
+
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_file(&escaped);
+    }
 }

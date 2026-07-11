@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# This project standardizes on npm (package-lock.json is the tracked lockfile) --
+# ignore other package managers' lockfiles so one never gets committed by accident.
+yarn.lock
+pnpm-lock.yaml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -27,8 +32,11 @@ skills-lock.json
 
 .claude/
 CLAUDE.md
-.vscode
-.github
+
+# Keep other .github/ content (Copilot instructions, local hooks) untracked,
+# but CI workflows must be tracked to actually run on GitHub Actions.
+.github/*
+!.github/workflows/
 
 src-tauri/target/*
 
@@ -42,12 +50,18 @@ src-tauri/target/release/bundle/
 
 # OS files
 Thumbs.db
+desktop.ini
 
 # Test coverage
 coverage/
 
-# TypeScript build cache
+# TypeScript / ESLint build caches
 *.tsbuildinfo
+.eslintcache
+
+# Leftovers from a conflicted `git apply` / patch
+*.orig
+*.rej
 
 # App runtime temp folder
 .tmp/

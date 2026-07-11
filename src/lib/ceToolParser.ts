@@ -1,6 +1,9 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { CeToolProject, CeToolLayer, CeToolTerritory, CeToolZone } from '../types/dayz';
+import { stripBom, strAttr, numAttr, toObjectArray } from './xmlParser/shared';
 
+// Unlike the mission parsers, CE Tool XML has no always-array elements —
+// keep local options without isArray.
 const PARSER_OPTIONS = {
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -9,30 +12,6 @@ const PARSER_OPTIONS = {
   parseTagValue: false,
   trimValues: true,
 };
-
-function stripBom(text: string): string {
-  return text.replace(/^﻿/, '');
-}
-
-function num(v: unknown, fallback = 0): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function strAttr(obj: Record<string, unknown>, key: string, fallback = ''): string {
-  return String(obj[`@_${key}`] ?? fallback);
-}
-
-function numAttr(obj: Record<string, unknown>, key: string, fallback = 0): number {
-  return num(obj[`@_${key}`], fallback);
-}
-
-function toObjectArray(value: unknown): Record<string, unknown>[] {
-  if (!value) return [];
-  if (Array.isArray(value)) return value as Record<string, unknown>[];
-  if (typeof value === 'object') return [value as Record<string, unknown>];
-  return [];
-}
 
 function basenameWithoutExt(path: string): string {
   const base = path.replace(/\\/g, '/').split('/').pop() ?? path;

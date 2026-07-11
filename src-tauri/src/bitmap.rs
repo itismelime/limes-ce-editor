@@ -42,6 +42,11 @@ pub async fn write_tga_layer(
         .map_err(|e| format!("Failed to write {path}: {e}"))
 }
 
+// No real DayZ terrain grid is anywhere near this size (largest maps top out
+// around a few thousand cells per side); this just bounds the worst case of
+// an unchecked width/height driving a multi-GB allocation.
+const MAX_GRID_DIM: u32 = 16384;
+
 #[tauri::command]
 pub async fn compile_areaflags(
     layers: Vec<LayerMeta>,
@@ -51,6 +56,9 @@ pub async fn compile_areaflags(
     world_height: u32,
     out_path: String,
 ) -> Result<(), String> {
+    if width > MAX_GRID_DIM || height > MAX_GRID_DIM {
+        return Err(format!("grid {}x{} exceeds sane maximum", width, height));
+    }
     let cell_count = (width as usize) * (height as usize);
 
     // 5 bytes per cell: u32 usage_flags + u8 value_flags

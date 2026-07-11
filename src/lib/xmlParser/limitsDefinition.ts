@@ -1,14 +1,9 @@
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import type { LimitsDefinition, LimitsDefinitionUser } from '../../types/dayz';
-import { BUILDER_OPTIONS, stripBom, strAttr, numAttr, toObjectArray } from './shared';
+import { PARSER_OPTIONS, BUILDER_OPTIONS, stripBom, strAttr, numAttr, toObjectArray } from './shared';
 
 const LIMITS_PARSER_OPTIONS = {
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  allowBooleanAttributes: true,
-  parseAttributeValue: false,
-  parseTagValue: false,
-  trimValues: true,
+  ...PARSER_OPTIONS,
   isArray: (name: string) => ['category', 'tag', 'usage', 'value', 'user'].includes(name),
 };
 

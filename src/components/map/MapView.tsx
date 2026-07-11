@@ -3,14 +3,13 @@ import { MapContainer, ImageOverlay, Circle, Marker, Popup, Tooltip, useMap, use
 import L from 'leaflet';
 import { CRS } from 'leaflet';
 import { open } from '@tauri-apps/plugin-dialog';
-import { getUsageMasks, getLayerGridInfo } from '../../lib/tierZoneResolver';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import 'leaflet/dist/leaflet.css';
 import { useMapMarkers } from '../../hooks/useMapMarkers';
 import { useUiStore } from '../../store/uiStore';
-import { useServerStore } from '../../store/serverStore';
+import { useServerStore, toMessage } from '../../store/serverStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
 import { getUsageColor, TIER_COLORS } from '../../types/map';
@@ -20,6 +19,7 @@ import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
 import { BuildingMarkers } from './BuildingMarkers';
 import { BuildingSidebar } from './BuildingSidebar';
+import { ConnectedTypeDetailPanel } from '../shared/TypeDetailPanel';
 import type { MapConfig } from '../../types/map';
 
 const PLAYER_MARKER_SIZE = 20;
@@ -358,10 +358,11 @@ function DayZTileLayer({
     return () => { map.removeLayer(layer); };
   }, [map, mapId, mapsDir, imageWidth]);
 
-  // Preload all tile levels into browser image cache so Leaflet finds them ready.
-  // Runs once per map change; 16 concurrent loads to saturate local disk without blocking UI.
+  // Preload the low-zoom tile levels into browser image cache so Leaflet finds
+  // them ready; deeper levels demand-load fine. pz<=3 is 85 tiles vs 1365 for
+  // the full pyramid, which flooded the asset protocol on every map switch.
   useEffect(() => {
-    const MAX_PZ = 5;
+    const MAX_PZ = 3;
     const CONCURRENCY = 16;
     let cancelled = false;
 
@@ -432,66 +433,9 @@ function playerSpawnIcon(type: string): L.DivIcon {
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  if (/^#[0-9a-f]{3}$/i.test(hex)) hex = '#' + [...hex.slice(1)].map(c => c + c).join('');
   const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
-}
-
-function UsageLayerOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpression; show: boolean }) {
-  const tierZonesLoaded = useUiStore(s => s.tierZonesLoaded);
-  const [overlayUrls, setOverlayUrls] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!tierZonesLoaded) { setOverlayUrls({}); return; }
-    const masks = getUsageMasks();
-    const grid = getLayerGridInfo();
-    if (!masks || !grid) return;
-
-    const { gridW, gridH } = grid;
-    // Downsample 4096→512 for fast canvas creation (8× reduction each axis = 64× fewer pixels)
-    const SCALE = 0.125;
-    const outW = Math.round(gridW * SCALE);
-    const outH = Math.round(gridH * SCALE);
-    const step = Math.round(1 / SCALE);
-
-    const urls: Record<string, string> = {};
-    for (const [usage, mask] of Object.entries(masks)) {
-      const color = hexToRgb(getUsageColor(usage));
-      if (!color) continue;
-      const canvas = document.createElement('canvas');
-      canvas.width = outW;
-      canvas.height = outH;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) continue;
-      const imageData = ctx.createImageData(outW, outH);
-      const data = imageData.data;
-      for (let y = 0; y < outH; y++) {
-        for (let x = 0; x < outW; x++) {
-          const srcX = Math.min(x * step, gridW - 1);
-          const srcY = Math.min(y * step, gridH - 1);
-          if (mask[srcY * gridW + srcX]) {
-            const i = (y * outW + x) * 4;
-            data[i]     = color.r;
-            data[i + 1] = color.g;
-            data[i + 2] = color.b;
-            data[i + 3] = 90;
-          }
-        }
-      }
-      ctx.putImageData(imageData, 0, 0);
-      urls[usage] = canvas.toDataURL();
-    }
-    setOverlayUrls(urls);
-  }, [tierZonesLoaded]);
-
-  if (!show || Object.keys(overlayUrls).length === 0) return null;
-
-  return (
-    <>
-      {Object.entries(overlayUrls).map(([usage, url]) => (
-        <ImageOverlay key={usage} url={url} bounds={bounds} opacity={1} zIndex={10} />
-      ))}
-    </>
-  );
 }
 
 function CeToolZoneOverlays({ mapConfig, show }: { mapConfig: MapConfig; show: boolean }) {
@@ -884,15 +828,12 @@ export function MapView() {
   const playerSpawnData        = useServerStore(s => s.playerSpawnData);
   const ceToolProject          = useServerStore(s => s.ceToolProject);
   const ceToolLayers           = useServerStore(s => s.ceToolLayers);
-  const territoryBitmaps       = useServerStore(s => s.territoryBitmaps);
   const territoryBitmapSize    = useServerStore(s => s.territoryBitmapSize);
   const mission                = useServerStore(s => s.mission);
   const canPaint               = useServerStore(s => !!s.paths.ceToolLayersDir);
   const addCeToolLayer         = useServerStore(s => s.addCeToolLayer);
   const removeCeToolLayer      = useServerStore(s => s.removeCeToolLayer);
-  const limitsDefinition       = useServerStore(s => s.limitsDefinition);
   const missionPath            = useServerStore(s => s.paths.missionPath);
-  const limitsDefinitionUserPath = useServerStore(s => s.paths.limitsDefinitionUserPath);
   const showTerritoryOverlay   = useUiStore(s => s.showTerritoryOverlay);
   const setShowTerritoryOverlay = useUiStore(s => s.setShowTerritoryOverlay);
   const territoryPaintMode     = useUiStore(s => s.territoryPaintMode);
@@ -1002,7 +943,9 @@ export function MapView() {
   const [showEventList, setShowEventList]   = useState(false);
   const [showBuildingPanel, setShowBuildingPanel] = useState(false);
   const [showCeZones, setShowCeZones] = useState(false);
-  const [showUsageZones] = useState(false);
+  // Item selected from the building editor — opens the shared type detail
+  // panel docked to the right edge of the map.
+  const [editingItemName, setEditingItemName] = useState<string | null>(null);
   const pickCeToolFolder = useServerStore(s => s.pickCeToolFolder);
 
   const bounds      = mapBounds(mapConfig);
@@ -1070,7 +1013,7 @@ export function MapView() {
           }
         }
       } catch (err) {
-        if (!cancelled) setDownloadError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setDownloadError(toMessage(err));
       } finally {
         unlisten();
         unlistenStatus();
@@ -1193,7 +1136,16 @@ export function MapView() {
   // ── Map ready ─────────────────────────────────────────────────────────────
   return (
     <div className="h-full relative bg-slate-950">
-      <BuildingSidebar onWidthChange={setSidebarWidth} />
+      <BuildingSidebar onWidthChange={setSidebarWidth} onSelectItem={setEditingItemName} />
+      {editingItemName && (
+        <div className="absolute right-0 top-0 h-full z-[1100] pointer-events-auto shadow-2xl">
+          <ConnectedTypeDetailPanel
+            typeName={editingItemName}
+            onClose={() => setEditingItemName(null)}
+            className="w-80 h-full border-l border-slate-700 bg-slate-900 flex flex-col"
+          />
+        </div>
+      )}
       <div className="absolute inset-0">
         <MapContainer
           crs={CRS.Simple}
@@ -1233,7 +1185,6 @@ export function MapView() {
           )}
           {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
           {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
-          {isMapActive && mapHeavyReady && overlaysReady && <UsageLayerOverlays bounds={bounds} show={showUsageZones} />}
           {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
           {isMapActive && mapHeavyReady && overlaysReady && <TerritoryBitmapOverlays bounds={bounds} show={showTerritoryOverlay} />}
           {isMapActive && mapHeavyReady && overlaysReady && territoryBitmapSize && territoryPaintMode && (

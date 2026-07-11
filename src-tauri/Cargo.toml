@@ -24,10 +24,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 image = { version = "0.25", default-features = false, features = ["png", "webp", "tga"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-zip   = { version = "2", default-features = false, features = ["deflate"] }
+zip   = { version = "8", default-features = false, features = ["deflate"] }
 
 hemtt-pbo        = "1"
 lzokay           = "2"

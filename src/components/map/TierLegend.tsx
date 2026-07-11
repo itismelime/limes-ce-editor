@@ -38,7 +38,11 @@ export function TierLegend() {
         b.usages.forEach(register);
       }
     } else {
-      for (const b of buildingInstances) b.usages.forEach(register);
+      for (const b of buildingInstances) {
+        // Untagged buildings fall under 'unknown' so "Hide all" covers them too.
+        if (b.usages.length === 0) register('unknown');
+        b.usages.forEach(register);
+      }
       if (mission) for (const t of mission.types.values()) t.usages.forEach(register);
     }
 

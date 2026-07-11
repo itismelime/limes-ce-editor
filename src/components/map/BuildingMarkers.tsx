@@ -6,7 +6,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet } from '../../lib/coordinateTransform';
 import { TIER_ORDER, getUsageColor } from '../../types/map';
-import type { BuildingInstance, DayZType } from '../../types/dayz';
+import type { DayZType } from '../../types/dayz';
 import type { MapConfig } from '../../types/map';
 
 function sameStringArray(a: string[], b: string[]): boolean {
@@ -172,11 +172,14 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const zoneUsages = zones?.usages ?? [];
       const zoneTiers  = zones?.tiers  ?? [];
 
+      // Types: a building stays visible while ANY of its tags is visible
+      // (hide it only when every tag it carries is hidden). Tiers below are
+      // subtractive instead: any hidden tier hides the building. 'unknown'
+      // only applies to buildings with no tags at all.
       if (useZoneData) {
-        const ceUsages = zoneUsages.length > 0 ? zoneUsages : ['unknown'];
-        const protoUsages = b.usages.length > 0 ? b.usages : ['unknown'];
-        const allUsages = [...new Set([...ceUsages, ...protoUsages].map(u => u.trim().toLowerCase()))];
-        if (allUsages.every(u => hiddenUsageSet.has(u))) return [];
+        const merged = [...new Set([...zoneUsages, ...b.usages].map(u => u.trim().toLowerCase()))];
+        const effectiveUsages = merged.length > 0 ? merged : ['unknown'];
+        if (effectiveUsages.every(u => hiddenUsageSet.has(u))) return [];
       } else {
         const normalizedUsages = b.usages.length > 0 ? b.usages : ['unknown'];
         if (normalizedUsages.every(u => hiddenUsageSet.has(u.trim().toLowerCase()))) return [];
@@ -192,7 +195,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       const mergedTiers = [...new Set([...allZoneTiers, ...protoTiers])];
       const displayTiers = mergedTiers.length > 0 ? mergedTiers : ['unknown'];
 
-      if (displayTiers.every(t => hiddenTiers.includes(t))) return [];
+      if (displayTiers.some(t => hiddenTiers.includes(t))) return [];
 
       const latlng = gameToLeaflet(b.x, b.z, mapConfig);
       const dirtyKey = b.typeName.trim().toLowerCase();

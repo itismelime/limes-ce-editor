@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import type { MapId } from '../types/map';
 import { registerCustomUsageColor, unregisterCustomUsageColor } from '../types/map';
 
 export type ActiveTab = 'map' | 'types' | 'events' | 'spawns' | 'playerSpawns' | 'spawnableTypes' | 'economy' | 'weather' | 'gameplay' | 'settings';
@@ -196,10 +195,17 @@ export const useUiStore = create<UiState>((set) => ({
   categoryFilter: '',
   eventFilter: '',
   mapImagePaths: (() => {
-    const raw: Record<string, string> = JSON.parse(localStorage.getItem('mapImagePaths') ?? '{}');
-    return Object.fromEntries(Object.entries(raw).filter(([, v]) => v.startsWith('asset://')));
+    try {
+      const raw: Record<string, string> = JSON.parse(localStorage.getItem('mapImagePaths') ?? '{}');
+      return Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'string' && v.startsWith('asset://')));
+    } catch {
+      return {};
+    }
   })(),
-  mapImageSizes: JSON.parse(localStorage.getItem('mapImageSizes') ?? '{}'),
+  mapImageSizes: (() => {
+    try { return JSON.parse(localStorage.getItem('mapImageSizes') ?? '{}'); }
+    catch { return {}; }
+  })(),
   customMapUrl: '',
   customMapWidth: 10000,
   customMapHeight: 10000,
@@ -421,7 +427,7 @@ export const useUiStore = create<UiState>((set) => ({
   territoryPaintLayer: null,
   territoryPaintBrushRadius: 30,
   territoryPaintErase: false,
-  setShowTerritoryOverlay: (v) => set(s => ({
+  setShowTerritoryOverlay: (v) => set(() => ({
     showTerritoryOverlay: v,
     ...(v ? {} : { territoryPaintMode: false, territoryPaintLayer: null }),
   })),

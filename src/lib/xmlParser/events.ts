@@ -5,7 +5,7 @@ import {
   num, numAttr, strAttr, collectUnknownKeys,
 } from './shared';
 
-export function parseEventsXml(raw: string): Map<string, DayZEvent> {
+export function parseEventsXml(raw: string, duplicates?: string[]): Map<string, DayZEvent> {
   const parser = new XMLParser(PARSER_OPTIONS);
   const doc = parser.parse(stripBom(raw));
   const eventsList: unknown[] = doc?.events?.event ?? [];
@@ -46,6 +46,7 @@ export function parseEventsXml(raw: string): Map<string, DayZEvent> {
         lootmax: numAttr(c, 'lootmax'),
       })),
     };
+    if (map.has(event.name)) duplicates?.push(event.name);
     map.set(event.name, event);
   }
   return map;

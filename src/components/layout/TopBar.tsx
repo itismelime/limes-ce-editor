@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import type { ActiveTab } from '../../store/uiStore';
-import type { MissionFiles } from '../../lib/fileDiscovery';
+import { basename, type MissionFiles } from '../../lib/fileDiscovery';
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: 'Map' },
@@ -66,6 +66,7 @@ export function TopBar({
   allMissions: MissionFiles[];
 }) {
   const serverRootPath = useServerStore(s => s.serverRootPath);
+  const missionPath = useServerStore(s => s.paths.missionPath);
   const mission = useServerStore(s => s.mission);
   const dirty = useServerStore(s => s.dirty);
   const saveError = useServerStore(s => s.saveError);
@@ -189,7 +190,7 @@ export function TopBar({
     ...dirty.typesSources.map(source => ({
       id: `types:${source}`,
       label: 'types.xml source',
-      detail: source.split(/[\\/]/).pop() ?? source,
+      detail: basename(source),
       onRevert: () => revertTypesSource(source),
     })),
     ...(dirty.eventSpawns
@@ -400,13 +401,25 @@ export function TopBar({
         </div>
 
         {mission && (
-          <span className="text-slate-400 text-sm">
+          <span className="flex items-center text-slate-400 text-sm">
             <span className="text-slate-500 mr-1">Mission:</span>
             {mission.missionName}
             <span className="ml-2 text-slate-500">
               · {mission.types.size} items
               · {mission.eventSpawns.length} events
             </span>
+            <button
+              onClick={() => {
+                const dir = missionPath ?? serverRootPath;
+                if (dir) openPath(dir).catch(err => console.error('Failed to open folder:', err));
+              }}
+              className="ml-2 flex items-center justify-center w-6 h-6 rounded border border-slate-700 text-slate-500 hover:text-slate-200 hover:border-slate-500 transition-colors"
+              title="Open mission folder in file manager"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+            </button>
           </span>
         )}
 

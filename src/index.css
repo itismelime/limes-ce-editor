@@ -1,5 +1,147 @@
 @import "tailwindcss";
 
+/*
+  Theme system. The palettes the app uses (slate for chrome, lime for accent,
+  amber/rose/emerald/green for status) are routed through --ui-* variables.
+  Because the @theme values are var() references, Tailwind can't statically
+  resolve them, so opacity variants (e.g. bg-slate-800/60) compile to
+  color-mix() and follow the active theme too — the old per-class !important
+  remap block only covered a hand-picked subset of solid classes.
+
+  Dark (default, :root below) uses a neutral grey ramp instead of Tailwind's
+  bluish slate; light inverts each ramp so bg/text/border pairs keep their
+  contrast relationships.
+*/
+@theme {
+  --color-slate-50: var(--ui-slate-50);
+  --color-slate-100: var(--ui-slate-100);
+  --color-slate-200: var(--ui-slate-200);
+  --color-slate-300: var(--ui-slate-300);
+  --color-slate-400: var(--ui-slate-400);
+  --color-slate-500: var(--ui-slate-500);
+  --color-slate-600: var(--ui-slate-600);
+  --color-slate-700: var(--ui-slate-700);
+  --color-slate-800: var(--ui-slate-800);
+  --color-slate-900: var(--ui-slate-900);
+  --color-slate-950: var(--ui-slate-950);
+
+  --color-lime-200: var(--ui-lime-200);
+  --color-lime-300: var(--ui-lime-300);
+  --color-lime-400: var(--ui-lime-400);
+  --color-lime-500: var(--ui-lime-500);
+  --color-lime-600: var(--ui-lime-600);
+  --color-lime-700: var(--ui-lime-700);
+  --color-lime-900: var(--ui-lime-900);
+  --color-lime-950: var(--ui-lime-950);
+
+  --color-amber-200: var(--ui-amber-200);
+  --color-amber-300: var(--ui-amber-300);
+  --color-amber-400: var(--ui-amber-400);
+  --color-amber-700: var(--ui-amber-700);
+  --color-amber-800: var(--ui-amber-800);
+  --color-amber-900: var(--ui-amber-900);
+  --color-amber-950: var(--ui-amber-950);
+
+  --color-rose-200: var(--ui-rose-200);
+  --color-rose-300: var(--ui-rose-300);
+  --color-rose-400: var(--ui-rose-400);
+  --color-rose-600: var(--ui-rose-600);
+  --color-rose-700: var(--ui-rose-700);
+  --color-rose-900: var(--ui-rose-900);
+
+  --color-emerald-400: var(--ui-emerald-400);
+  --color-emerald-500: var(--ui-emerald-500);
+  --color-green-400: var(--ui-green-400);
+  --color-green-500: var(--ui-green-500);
+}
+
+:root {
+  /* Dark theme (default): neutral grey chrome, Tailwind default accents */
+  --ui-slate-50: #fafafa;
+  --ui-slate-100: #f5f5f5;
+  --ui-slate-200: #e0e0e0;
+  --ui-slate-300: #d0d0d0;
+  --ui-slate-400: #b0b0b0;
+  --ui-slate-500: #8f8f8f;
+  --ui-slate-600: #5a5a5a;
+  --ui-slate-700: #333333;
+  --ui-slate-800: #262626;
+  --ui-slate-900: #171717;
+  --ui-slate-950: #0a0a0a;
+
+  --ui-lime-200: #d9f99d;
+  --ui-lime-300: #bef264;
+  --ui-lime-400: #a3e635;
+  --ui-lime-500: #84cc16;
+  --ui-lime-600: #65a30d;
+  --ui-lime-700: #4d7c0f;
+  --ui-lime-900: #365314;
+  --ui-lime-950: #1a2e05;
+
+  --ui-amber-200: #fde68a;
+  --ui-amber-300: #fcd34d;
+  --ui-amber-400: #fbbf24;
+  --ui-amber-700: #b45309;
+  --ui-amber-800: #92400e;
+  --ui-amber-900: #78350f;
+  --ui-amber-950: #451a03;
+
+  --ui-rose-200: #fecdd3;
+  --ui-rose-300: #fda4af;
+  --ui-rose-400: #fb7185;
+  --ui-rose-600: #e11d48;
+  --ui-rose-700: #be123c;
+  --ui-rose-900: #881337;
+
+  --ui-emerald-400: #34d399;
+  --ui-emerald-500: #10b981;
+  --ui-green-400: #4ade80;
+  --ui-green-500: #22c55e;
+}
+
+html[data-theme='light'] {
+  --ui-slate-50: #0f0f0f;
+  --ui-slate-100: #1a1a1a;
+  --ui-slate-200: #2a2a2a;
+  --ui-slate-300: #3a3a3a;
+  --ui-slate-400: #555555;
+  --ui-slate-500: #6f6f6f;
+  --ui-slate-600: #a8a8a8;
+  --ui-slate-700: #d0d0d0;
+  --ui-slate-800: #e8e8e8;
+  --ui-slate-900: #fafafa;
+  --ui-slate-950: #f5f5f5;
+
+  --ui-lime-200: #365314;
+  --ui-lime-300: #3f6212;
+  --ui-lime-400: #4d7c0f;
+  --ui-lime-500: #65a30d;
+  --ui-lime-600: #4d7c0f;
+  --ui-lime-700: #84cc16;
+  --ui-lime-900: #d9f99d;
+  --ui-lime-950: #ecfccb;
+
+  --ui-amber-200: #78350f;
+  --ui-amber-300: #92400e;
+  --ui-amber-400: #b45309;
+  --ui-amber-700: #fcd34d;
+  --ui-amber-800: #fde68a;
+  --ui-amber-900: #fef3c7;
+  --ui-amber-950: #fffbeb;
+
+  --ui-rose-200: #881337;
+  --ui-rose-300: #be123c;
+  --ui-rose-400: #e11d48;
+  --ui-rose-600: #be123c;
+  --ui-rose-700: #fda4af;
+  --ui-rose-900: #fecdd3;
+
+  --ui-emerald-400: #059669;
+  --ui-emerald-500: #047857;
+  --ui-green-400: #16a34a;
+  --ui-green-500: #16a34a;
+}
+
 :root {
   --app-bg: #020617;
   --app-fg: #f0f0f0;
@@ -162,54 +304,6 @@ body {
   will-change: opacity;
 }
 
-/* Grey/Black palette remaps for dark and light themes */
-html[data-theme='dark'] .bg-slate-950 { background-color: #0a0a0a !important; }
-html[data-theme='dark'] .bg-slate-900 { background-color: #171717 !important; }
-html[data-theme='dark'] .bg-slate-900\/20 { background-color: rgb(100 100 100 / 0.15) !important; }
-html[data-theme='dark'] .bg-slate-800 { background-color: #262626 !important; }
-html[data-theme='dark'] .bg-slate-800\/60 { background-color: rgb(38 38 38 / 0.72) !important; }
-html[data-theme='dark'] .bg-slate-700 { background-color: #333333 !important; }
-html[data-theme='dark'] .hover\:bg-slate-800:hover { background-color: #2a2a2a !important; }
-html[data-theme='dark'] .hover\:bg-slate-700:hover { background-color: #3a3a3a !important; }
-html[data-theme='dark'] .hover\:bg-slate-600:hover { background-color: #454545 !important; }
-
-html[data-theme='dark'] .text-slate-100 { color: #f5f5f5 !important; }
-html[data-theme='dark'] .text-slate-200 { color: #e0e0e0 !important; }
-html[data-theme='dark'] .text-slate-300 { color: #d0d0d0 !important; }
-html[data-theme='dark'] .text-slate-400 { color: #b0b0b0 !important; }
-html[data-theme='dark'] .text-slate-500 { color: #909090 !important; }
-html[data-theme='dark'] .text-slate-600 { color: #707070 !important; }
-
-html[data-theme='dark'] .border-slate-900 { border-color: #1a1a1a !important; }
-html[data-theme='dark'] .border-slate-800 { border-color: #262626 !important; }
-html[data-theme='dark'] .border-slate-700 { border-color: #333333 !important; }
-html[data-theme='dark'] .border-slate-600 { border-color: #4a4a4a !important; }
-html[data-theme='dark'] .hover\:border-slate-500:hover { border-color: #606060 !important; }
-
-html[data-theme='light'] .bg-slate-950 { background-color: #f5f5f5 !important; }
-html[data-theme='light'] .bg-slate-900 { background-color: #fafafa !important; }
-html[data-theme='light'] .bg-slate-900\/20 { background-color: rgb(100 100 100 / 0.12) !important; }
-html[data-theme='light'] .bg-slate-800 { background-color: #e8e8e8 !important; }
-html[data-theme='light'] .bg-slate-800\/60 { background-color: rgb(232 232 232 / 0.75) !important; }
-html[data-theme='light'] .bg-slate-700 { background-color: #d0d0d0 !important; }
-html[data-theme='light'] .hover\:bg-slate-800:hover { background-color: #ddd !important; }
-html[data-theme='light'] .hover\:bg-slate-700:hover { background-color: #c8c8c8 !important; }
-html[data-theme='light'] .hover\:bg-slate-600:hover { background-color: #b5b5b5 !important; }
-
-html[data-theme='light'] .text-slate-100 { color: #1a1a1a !important; }
-html[data-theme='light'] .text-slate-200 { color: #2a2a2a !important; }
-html[data-theme='light'] .text-slate-300 { color: #3a3a3a !important; }
-html[data-theme='light'] .text-slate-400 { color: #555 !important; }
-html[data-theme='light'] .text-slate-500 { color: #777 !important; }
-html[data-theme='light'] .text-slate-600 { color: #999 !important; }
-
-html[data-theme='light'] .border-slate-900 { border-color: #ddd !important; }
-html[data-theme='light'] .border-slate-800 { border-color: #d5d5d5 !important; }
-html[data-theme='light'] .border-slate-700 { border-color: #c5c5c5 !important; }
-html[data-theme='light'] .border-slate-600 { border-color: #b0b0b0 !important; }
-
-html[data-theme='light'] .hover\:border-slate-500:hover { border-color: #999 !important; }
-
-html[data-theme='light'] .shadow-2xl { box-shadow: 0 24px 60px rgb(0 0 0 / 0.1) !important; }
-html[data-theme='dark'] .shadow-2xl { box-shadow: 0 24px 60px rgb(0 0 0 / 0.5) !important; }
+/* Softer drop shadows in light theme */
+html[data-theme='light'] .shadow-2xl { box-shadow: 0 24px 60px rgb(0 0 0 / 0.1); }
 

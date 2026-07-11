@@ -5,6 +5,7 @@ import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZEvent } from '../../types/dayz';
+import { SELECTED_ROW_CLASS, CloseButton } from '../shared/ui';
 
 function EventRow({
   event,
@@ -20,7 +21,7 @@ function EventRow({
   return (
     <div
       className={`flex items-center gap-4 px-4 py-2.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors text-sm ${
-        isSelected ? 'bg-lime-950/40 border-l-2 border-l-lime-500' : ''
+        isSelected ? SELECTED_ROW_CLASS : ''
       }`}
       onClick={onSelect}
     >
@@ -59,7 +60,7 @@ function EventRow({
 }
 
 export function EventsEditor() {
-  const mission = useServerStore(s => s.mission)!;
+  const events = useServerStore(s => s.mission!.events);
   const updateEvent = useServerStore(s => s.updateEvent);
   const saveEvents = useServerStore(s => s.saveEvents);
   const isDirty = useServerStore(s => s.dirty.events);
@@ -68,7 +69,7 @@ export function EventsEditor() {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(true);
 
-  const allEvents = useMemo(() => Array.from(mission.events.values()), [mission.events]);
+  const allEvents = useMemo(() => Array.from(events.values()), [events]);
 
   const filtered = useMemo(() => {
     const q = eventFilter.toLowerCase();
@@ -79,7 +80,7 @@ export function EventsEditor() {
     });
   }, [allEvents, eventFilter, showInactive]);
 
-  const selectedEvent = selectedName ? mission.events.get(selectedName) : null;
+  const selectedEvent = selectedName ? events.get(selectedName) : null;
 
   return (
     <div className="flex h-full">
@@ -119,11 +120,7 @@ export function EventsEditor() {
         <div className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
             <span className="font-mono text-sm text-slate-200 truncate">{selectedEvent.name}</span>
-            <button onClick={() => setSelectedName(null)} className="flex items-center justify-center w-7 h-7 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <CloseButton onClick={() => setSelectedName(null)} />
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <div>

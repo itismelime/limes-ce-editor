@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile, writeFile } from '../../lib/fileDiscovery';
-import { useServerStore } from '../../store/serverStore';
+import { useServerStore, toMessage } from '../../store/serverStore';
+import { SaveButton } from '../shared/SaveButton';
 
 interface EditingFile {
   path: string;
@@ -23,7 +24,6 @@ export function EconomyCoreEditor() {
   const [saving, setSaving]     = useState(false);
   const [success, setSuccess]   = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
-  const fileInputRef            = useRef<HTMLInputElement>(null);
 
   const trimmedName = name.trim();
   const canSave = trimmedName.length > 0 && xml.trim().length > 0 && !!paths.economyCorePath;
@@ -36,7 +36,7 @@ export function EconomyCoreEditor() {
       const content = await readFile(filePath);
       setEditingFile({ path: filePath, name: fileName, content, dirty: false });
     } catch (err) {
-      useServerStore.setState({ saveError: `Failed to read ${fileName}: ${err instanceof Error ? err.message : String(err)}` });
+      useServerStore.setState({ saveError: `Failed to read ${fileName}: ${toMessage(err)}` });
     }
   }
 
@@ -47,7 +47,7 @@ export function EconomyCoreEditor() {
       await writeFile(editingFile.path, editingFile.content);
       setEditingFile({ ...editingFile, dirty: false });
     } catch (err) {
-      useServerStore.setState({ saveError: `Failed to save ${editingFile.name}: ${err instanceof Error ? err.message : String(err)}` });
+      useServerStore.setState({ saveError: `Failed to save ${editingFile.name}: ${toMessage(err)}` });
     }
     setSaving(false);
   }
@@ -63,7 +63,7 @@ export function EconomyCoreEditor() {
         const content = await readFile(selected);
         setXml(content);
       } catch (err) {
-        useServerStore.setState({ saveError: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` });
+        useServerStore.setState({ saveError: `Failed to read file: ${toMessage(err)}` });
       }
     }
   }
@@ -159,23 +159,7 @@ export function EconomyCoreEditor() {
                 ← Back
               </button>
               <h2 className="text-sm font-semibold text-slate-200 flex-1">{editingFile.name}</h2>
-              {editingFile.dirty && (
-                <span className="flex items-center gap-1.5 text-amber-400 text-xs">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  Unsaved
-                </span>
-              )}
-              <button
-                onClick={handleSaveFile}
-                disabled={!editingFile.dirty || saving}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  editingFile.dirty && !saving
-                    ? 'bg-lime-500 hover:bg-lime-600 text-white'
-                    : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                }`}
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+              <SaveButton isDirty={editingFile.dirty && !saving} onSave={handleSaveFile} label={saving ? 'Saving…' : 'Save'} />
             </div>
             <div className="flex-1 overflow-hidden px-6 py-4">
               <textarea
@@ -297,7 +281,6 @@ export function EconomyCoreEditor() {
             </div>
           </>
         )}
-        <input ref={fileInputRef} type="file" accept=".xml" className="hidden" />
       </div>
     </div>
   );
