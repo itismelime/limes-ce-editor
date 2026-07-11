@@ -28,7 +28,11 @@ skills-lock.json
 .claude/
 CLAUDE.md
 .vscode
-.github
+
+# Keep other .github/ content (Copilot instructions, local hooks) untracked,
+# but CI workflows must be tracked to actually run on GitHub Actions.
+.github/*
+!.github/workflows/
 
 src-tauri/target/*
 
