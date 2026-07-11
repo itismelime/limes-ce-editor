@@ -17,6 +17,7 @@ interface UiState {
   theme: ThemeId;
   showSaveReview: boolean;
   selectedEventName: string | null;
+  selectedFFSpawnPointName: string | null;
   selectedBuildingType: string | null;
   selectedBuildingSeq: number;
   selectedBuildingPos: { x: number; z: number } | null;
@@ -60,6 +61,7 @@ interface UiState {
   setShowSaveReview: (v: boolean) => void;
   setSelectedBuilding: (type: string | null, pos?: { x: number; z: number }) => void;
   setSelectedEvent: (name: string | null) => void;
+  setSelectedFFSpawnPoint: (name: string | null) => void;
   setTypeFilter: (v: string) => void;
   setCategoryFilter: (v: string) => void;
   setEventFilter: (v: string) => void;
@@ -188,6 +190,7 @@ export const useUiStore = create<UiState>((set) => ({
   })(),
   showSaveReview: false,
   selectedEventName: null,
+  selectedFFSpawnPointName: null,
   selectedBuildingType: null,
   selectedBuildingSeq: 0,
   selectedBuildingPos: null,
@@ -230,6 +233,7 @@ export const useUiStore = create<UiState>((set) => ({
   }),
   setShowSaveReview: (v) => set({ showSaveReview: v }),
   setSelectedEvent: (name) => set({ selectedEventName: name }),
+  setSelectedFFSpawnPoint: (name) => set({ selectedFFSpawnPointName: name }),
   setSelectedBuilding: (type, pos) => set(s => ({ selectedBuildingType: type, selectedBuildingSeq: s.selectedBuildingSeq + 1, selectedBuildingPos: pos ?? null })),
   setTypeFilter: (v) => set({ typeFilter: v }),
   setCategoryFilter: (v) => set({ categoryFilter: v }),
