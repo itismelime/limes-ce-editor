@@ -193,7 +193,6 @@ async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height
     const { width, height, rgba } = parseTgaRgba(raw);
     const bpp = raw[16]; // bits per pixel from TGA header
     const mask = new Uint8Array(width * height);
-    let activeCount = 0;
     for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
       const r = rgba[i];
       const g = rgba[i + 1];
@@ -209,7 +208,7 @@ async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height
         // RGB or grayscale: brightness only
         active = brightness > 128;
       }
-      if (active) { mask[p] = 1; activeCount++; }
+      if (active) { mask[p] = 1; }
     }
     return { width, height, mask };
   }
@@ -228,7 +227,6 @@ async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height
     ctx.drawImage(bitmap, 0, 0);
     const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
     const mask = new Uint8Array(bitmap.width * bitmap.height);
-    let activeCount = 0;
     for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
       const r = rgba[i];
       const g = rgba[i + 1];
@@ -237,7 +235,7 @@ async function decodeImageMask(raw: Uint8Array): Promise<{ width: number; height
       // For black & white PNG: white = high brightness (avg RGB > 128)
       const brightness = (r + g + b) / 3;
       const active = a > 64 && brightness > 128;
-      if (active) { mask[p] = 1; activeCount++; }
+      if (active) { mask[p] = 1; }
     }
     return { width: bitmap.width, height: bitmap.height, mask };
   } finally {

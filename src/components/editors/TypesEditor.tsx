@@ -438,6 +438,8 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
     [sortedNames, types]
   );
 
+  // TanStack Virtual's returned functions are inherently non-memoizable; expected, not a bug.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: listReady ? sorted.length : 0,
     getScrollElement: () => parentRef.current,

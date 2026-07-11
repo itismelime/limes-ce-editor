@@ -47,17 +47,9 @@ export function GameplayEditor() {
   const isDirty = useServerStore(s => s.dirty.gameplay);
   const [selectedSection, setSelectedSection] = useState<GameplaySectionKey>('staminaCore');
 
-  if (!gameplay) {
-    return (
-      <div className="flex items-center justify-center h-full text-slate-500">
-        <p>Gameplay data not loaded. Check if cfggameplay.json exists.</p>
-      </div>
-    );
-  }
-
-  const staminaData = gameplay.PlayerData?.StaminaData;
-  const shockData = gameplay.PlayerData?.ShockHandlingData;
-  const worldsData = gameplay.WorldsData;
+  const staminaData = gameplay?.PlayerData?.StaminaData;
+  const shockData = gameplay?.PlayerData?.ShockHandlingData;
+  const worldsData = gameplay?.WorldsData;
 
   const sectionAvailability = useMemo(() => ({
     shock: !!shockData,
@@ -65,6 +57,14 @@ export function GameplayEditor() {
     staminaModifiers: !!staminaData,
     worldTemps: !!(worldsData?.environmentMinTemps?.length || worldsData?.environmentMaxTemps?.length),
   }), [shockData, staminaData, worldsData?.environmentMaxTemps?.length, worldsData?.environmentMinTemps?.length]);
+
+  if (!gameplay) {
+    return (
+      <div className="flex items-center justify-center h-full text-slate-500">
+        <p>Gameplay data not loaded. Check if cfggameplay.json exists.</p>
+      </div>
+    );
+  }
 
   const sectionMeta: Array<{ key: GameplaySectionKey; label: string; summary: string }> = [
     { key: 'shock', label: 'Shock Handling', summary: shockData ? `${shockData.shockRefillSpeedUnconscious} unconscious refill` : 'Not configured' },

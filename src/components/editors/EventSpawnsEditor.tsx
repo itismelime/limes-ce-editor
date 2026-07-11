@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { SearchBar } from '../shared/SearchBar';
@@ -12,11 +12,13 @@ function PosRow({ pos, onUpdate, onDelete }: {
 }) {
   const [x, setX] = useState(pos.rawX ?? String(pos.x));
   const [z, setZ] = useState(pos.rawZ ?? String(pos.z));
+  const [syncedPos, setSyncedPos] = useState(pos);
 
-  useEffect(() => {
+  if (pos.rawX !== syncedPos.rawX || pos.rawZ !== syncedPos.rawZ || pos.x !== syncedPos.x || pos.z !== syncedPos.z) {
+    setSyncedPos(pos);
     setX(pos.rawX ?? String(pos.x));
     setZ(pos.rawZ ?? String(pos.z));
-  }, [pos.rawX, pos.rawZ, pos.x, pos.z]);
+  }
 
   const commit = () => {
     const nx = parseFloat(x);
@@ -59,9 +61,11 @@ export function EventSpawnsEditor() {
   const [filter, setFilter] = useState('');
 
   // Sync with map selection
-  useEffect(() => {
+  const [prevSelectedEventName, setPrevSelectedEventName] = useState(selectedEventName);
+  if (selectedEventName !== prevSelectedEventName) {
+    setPrevSelectedEventName(selectedEventName);
     if (selectedEventName) setFilter('');
-  }, [selectedEventName]);
+  }
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();

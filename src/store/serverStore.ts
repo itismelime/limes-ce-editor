@@ -498,7 +498,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     const nextTypes = new Map(nextMission.types);
     const nextOriginalTypes = new Map(s.originalTypes);
     let nextTypeHistory = s.typeHistory;
-    let nextDirtyTypes = [...s.dirty.typesSources];
+    const nextDirtyTypes = [...s.dirty.typesSources];
 
     for (const [source, snapshot] of checkpoint.typesBySource) {
       for (const [name, current] of nextTypes) {
@@ -534,7 +534,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     }
 
     let nextMapGroupProto = s.mapGroupProto;
-    let nextOriginalMapGroupProto = s.originalMapGroupProto;
+    const nextOriginalMapGroupProto = s.originalMapGroupProto;
     let nextBuildingInstances = s.buildingInstances;
     const nextDirty: DirtyFlags = {
       ...s.dirty,

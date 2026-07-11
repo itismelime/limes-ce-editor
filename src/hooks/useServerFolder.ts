@@ -469,7 +469,7 @@ export function useServerFolder() {
         try {
           economyCoreEntries = parseEconomyCoreXml(await readFile(m.economyCorePath));
           setEconomyCore(economyCoreEntries);
-        } catch { }
+        } catch { /* optional — silently skip */ }
       }
       if (economyCoreEntries.length > 0) {
         const { types, spawnableTypes, warnings: ceWarnings } = await mergeEconomyCoreFiles(
@@ -561,10 +561,10 @@ export function useServerFolder() {
     } finally {
       setLoading(false);
     }
-  }, [activeMap, ceToolFolderOverride, communityMaps, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps, clearTerritoryState]);
+  }, [activeMap, ceToolFolderOverride, communityMaps, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps, clearTerritoryState, setActiveMap, setBuildingInstances, setEconomyCore, setGameplay, setMapGroupProto, setPlayerSpawnData, setTierZonesLoaded, setWeather]);
 
   // Keep ref current every render so the effect below always has the latest version.
-  selectMissionRef.current = selectMission;
+  useEffect(() => { selectMissionRef.current = selectMission; });
 
   // When the active map changes (after initial mount), try to auto-switch missions.
   const isMounted = useRef(false);
@@ -718,7 +718,6 @@ export function useServerFolder() {
       }
     }
     await loadTerritoryBitmapsFallback(activeMap, communityMaps, loadTerritoryBitmaps, getAllMapConfigs).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMap, communityMaps, loadTerritoryBitmaps]);
 
   // Expose callbacks through store so other components can access them without calling hook twice

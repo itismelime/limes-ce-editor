@@ -73,10 +73,12 @@ export function TypeDetailPanel({
     return () => document.removeEventListener('mousedown', handler);
   }, [addUsageOpen]);
 
-  useEffect(() => {
+  const [prevAddUsageSearch, setPrevAddUsageSearch] = useState(addUsageSearch);
+  if (addUsageSearch !== prevAddUsageSearch) {
+    setPrevAddUsageSearch(addUsageSearch);
     const trimmed = addUsageSearch.trim();
     if (trimmed) setPendingUsageColor(getUsageColor(trimmed));
-  }, [addUsageSearch]);
+  }
 
   const toggleTier = (tier: string) => {
     const tiers = type.tiers.includes(tier)
