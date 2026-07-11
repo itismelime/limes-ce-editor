@@ -17,6 +17,7 @@ import { clearAreaFlags, loadTierLayers } from '../lib/tierZoneResolver';
 import { readBinaryFile } from '../lib/fileDiscovery';
 import { getAllMapConfigs } from '../lib/mapConfig';
 import { parseCeToolProjectXml } from '../lib/ceToolParser';
+import { findFFSpawnSelectorConfig, parseFFSettings, parseFFSpawnPoints } from '../lib/ffSpawnSelector';
 import type { MissionData, CeEntry, CeToolProject, DayZType, SpawnableType } from '../types/dayz';
 import type { CommunityMapDef } from '../types/map';
 import { useServerStore, toMessage, type TerritoryBitmapOverride } from '../store/serverStore';
@@ -346,6 +347,38 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
   };
 }
 
+// FF_SpawnSelector plugin config -- not mission-scoped (profiles/ is a
+// server-root sibling of mpmissions/), loaded once per server root and
+// independent of which mission is currently selected. Fire-and-forget from
+// callers: never awaited, so a slow profiles/ scan can't block mission load.
+async function loadFFSpawnSelector(rootPath: string): Promise<void> {
+  const store = useServerStore.getState();
+  store.setFfSettings(null);
+  store.setFfSpawnPoints(null);
+  store.setFfProfileName(null);
+  store.setPaths({ ffSettingsPath: null, ffSpawnPointsPath: null });
+
+  const found = await findFFSpawnSelectorConfig(rootPath);
+  if (!found) return;
+
+  store.setFfProfileName(found.profileName);
+  store.setPaths({ ffSettingsPath: found.settingsPath, ffSpawnPointsPath: found.spawnPointsPath });
+
+  const warnings: string[] = [];
+  if (found.settingsPath) {
+    try { store.setFfSettings(parseFFSettings(await readFile(found.settingsPath))); }
+    catch (err) { warnings.push(`FFSpawnSelector/Settings.json (parse error: ${toMessage(err)})`); }
+  }
+  if (found.spawnPointsPath) {
+    try { store.setFfSpawnPoints(parseFFSpawnPoints(await readFile(found.spawnPointsPath))); }
+    catch (err) { warnings.push(`FFSpawnSelector/SpawnPoints.json (parse error: ${toMessage(err)})`); }
+  }
+  if (warnings.length > 0) {
+    const uiStore = useUiStore.getState();
+    uiStore.setLoadWarnings([...uiStore.loadWarnings, ...warnings]);
+  }
+}
+
 async function loadTerritoryBitmapsFallback(
   activeMap: string,
   communityMaps: CommunityMapDef[],
@@ -622,6 +655,7 @@ export function useServerFolder() {
       serverRootRef.current = result.path;
       setServerRootPath(result.path);
       useUiStore.getState().addRecentFolder(result.path);
+      void loadFFSpawnSelector(result.path);
       await loadFromMissions(result.missions);
     } catch (err) {
       if (err instanceof Error) {
@@ -644,6 +678,7 @@ export function useServerFolder() {
     try {
       serverRootRef.current = saved;
       setServerRootPath(saved);
+      void loadFFSpawnSelector(saved);
       const missions = await scanFolder(saved);
       if (missions.length > 0) await loadFromMissions(missions);
     } catch {
@@ -662,6 +697,7 @@ export function useServerFolder() {
       serverRootRef.current = path;
       setServerRootPath(path);
       useUiStore.getState().addRecentFolder(path);
+      void loadFFSpawnSelector(path);
       const missions = await scanFolder(path);
       await loadFromMissions(missions);
     } catch (err) {

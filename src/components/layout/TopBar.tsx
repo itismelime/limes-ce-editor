@@ -81,6 +81,8 @@ export function TopBar({
   const saveGameplay = useServerStore(s => s.saveGameplay);
   const saveLimitsDefinition = useServerStore(s => s.saveLimitsDefinition);
   const saveLimitsDefinitionUser = useServerStore(s => s.saveLimitsDefinitionUser);
+  const saveFfSettings = useServerStore(s => s.saveFfSettings);
+  const saveFfSpawnPoints = useServerStore(s => s.saveFfSpawnPoints);
   const saveCheckpoints = useServerStore(s => s.saveCheckpoints);
   const createSaveCheckpointFromDirty = useServerStore(s => s.createSaveCheckpointFromDirty);
   const revertSaveCheckpoint = useServerStore(s => s.revertSaveCheckpoint);
@@ -93,6 +95,8 @@ export function TopBar({
   const revertGameplay = useServerStore(s => s.revertGameplay);
   const revertLimitsDefinition = useServerStore(s => s.revertLimitsDefinition);
   const revertLimitsDefinitionUser = useServerStore(s => s.revertLimitsDefinitionUser);
+  const revertFfSettings = useServerStore(s => s.revertFfSettings);
+  const revertFfSpawnPoints = useServerStore(s => s.revertFfSpawnPoints);
   const saveTerritoryBitmaps = useServerStore(s => s.saveTerritoryBitmaps);
   const revertTerritoryBitmaps = useServerStore(s => s.revertTerritoryBitmaps);
   const undoTerritoryPaint = useServerStore(s => s.undoTerritoryPaint);
@@ -185,7 +189,7 @@ export function TopBar({
     setActiveTab(targetTab);
   };
 
-  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay || dirty.limitsDefinition || dirty.limitsDefinitionUser || dirty.territoryBitmaps;
+  const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay || dirty.limitsDefinition || dirty.limitsDefinitionUser || dirty.territoryBitmaps || dirty.ffSettings || dirty.ffSpawnPoints;
   const pendingItems: Array<{ id: string; label: string; detail: string; onRevert: () => void }> = [
     ...dirty.typesSources.map(source => ({
       id: `types:${source}`,
@@ -219,6 +223,12 @@ export function TopBar({
       : []),
     ...(dirty.territoryBitmaps
       ? [{ id: 'territoryBitmaps', label: 'territory zones', detail: 'areaflags.map will be recompiled', onRevert: () => revertTerritoryBitmaps() }]
+      : []),
+    ...(dirty.ffSettings
+      ? [{ id: 'ffSettings', label: 'FFSpawnSelector/Settings.json', detail: 'FF Spawn Selector settings', onRevert: () => revertFfSettings() }]
+      : []),
+    ...(dirty.ffSpawnPoints
+      ? [{ id: 'ffSpawnPoints', label: 'FFSpawnSelector/SpawnPoints.json', detail: 'FF spawn point positions', onRevert: () => revertFfSpawnPoints() }]
       : []),
   ];
 
@@ -306,6 +316,8 @@ export function TopBar({
       if (dirty.limitsDefinition) await saveLimitsDefinition();
       if (dirty.limitsDefinitionUser) await saveLimitsDefinitionUser();
       if (dirty.territoryBitmaps) await saveTerritoryBitmaps();
+      if (dirty.ffSettings) await saveFfSettings();
+      if (dirty.ffSpawnPoints) await saveFfSpawnPoints();
     } finally {
       setSavingPending(false);
     }
@@ -329,6 +341,8 @@ export function TopBar({
     if (dirty.limitsDefinition) revertLimitsDefinition();
     if (dirty.limitsDefinitionUser) revertLimitsDefinitionUser();
     if (dirty.territoryBitmaps) revertTerritoryBitmaps();
+    if (dirty.ffSettings) revertFfSettings();
+    if (dirty.ffSpawnPoints) revertFfSpawnPoints();
   };
 
   return (

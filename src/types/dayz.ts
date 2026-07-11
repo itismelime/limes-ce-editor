@@ -149,6 +149,8 @@ export type DirtyFlags = {
   limitsDefinition: boolean;
   limitsDefinitionUser: boolean;
   territoryBitmaps: boolean;
+  ffSettings: boolean;
+  ffSpawnPoints: boolean;
 };
 
 export interface CeFile {

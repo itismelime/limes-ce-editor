@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData, WeatherData, GameplayData, CeToolProject, LimitsDefinition, LimitsDefinitionUser } from '../types/dayz';
+import type { FFSpawnSelectorSettings, FFSpawnPointsData } from '../types/ffSpawnSelector';
 import {
   serializeTypesXml, serializeEventSpawnsXml,
   serializeEventsXml, serializeSpawnableTypesXml,
@@ -8,6 +9,7 @@ import {
   serializeWeatherXml, serializeGameplayJson,
   serializeLimitsDefinitionXml, serializeLimitsDefinitionUserXml,
 } from '../lib/xmlParser';
+import { serializeFFSettings, serializeFFSpawnPoints } from '../lib/ffSpawnSelector';
 import { writeFile, readFile, createDir, readBinaryFile, writeBinaryFile, removeFile, backupIfNeeded, basename } from '../lib/fileDiscovery';
 import { setCeToolBitmapSource, clearCeToolBitmapSource } from '../lib/tierZoneResolver';
 import type { ContainerDef } from '../types/dayz';
@@ -45,6 +47,11 @@ interface FilePaths {
   limitsDefinitionUserPath: string | null;
   ceToolXmlPath: string | null;
   ceToolLayersDir: string | null;
+  // FF_SpawnSelector plugin config -- not mission-scoped (lives under the
+  // server root's profiles/ folder), set once by the discovery hook and
+  // preserved across mission switches by setPaths' merge semantics.
+  ffSettingsPath: string | null;
+  ffSpawnPointsPath: string | null;
 }
 
 type MapGroupProtoEntry = {
@@ -96,6 +103,9 @@ interface ServerState {
   gameplay: GameplayData | null;
   limitsDefinition: LimitsDefinition | null;
   limitsDefinitionUser: LimitsDefinitionUser | null;
+  ffProfileName: string | null;
+  ffSettings: FFSpawnSelectorSettings | null;
+  ffSpawnPoints: FFSpawnPointsData | null;
   originalTypes: Map<string, DayZType>;
   originalEvents: Map<string, DayZEvent>;
   originalEventSpawns: EventSpawnDef[];
@@ -105,6 +115,8 @@ interface ServerState {
   originalGameplay: GameplayData | null;
   originalLimitsDefinition: LimitsDefinition | null;
   originalLimitsDefinitionUser: LimitsDefinitionUser | null;
+  originalFfSettings: FFSpawnSelectorSettings | null;
+  originalFfSpawnPoints: FFSpawnPointsData | null;
   saveCheckpoints: SaveCheckpoint[];
   typeHistory: { name: string; prev: DayZType }[];
   mapGroupProtoHistory: { key: string; prev: MapGroupProtoEntry }[];
@@ -127,6 +139,11 @@ interface ServerState {
   setGameplay: (data: GameplayData | null) => void;
   updateGameplay: (data: GameplayData) => void;
   updateWeather: (data: WeatherData) => void;
+  setFfProfileName: (name: string | null) => void;
+  setFfSettings: (data: FFSpawnSelectorSettings | null) => void;
+  updateFfSettings: (data: FFSpawnSelectorSettings) => void;
+  setFfSpawnPoints: (data: FFSpawnPointsData | null) => void;
+  updateFfSpawnPoints: (data: FFSpawnPointsData) => void;
   setLimitsDefinition: (data: LimitsDefinition | null) => void;
   setLimitsDefinitionUser: (data: LimitsDefinitionUser | null) => void;
   updateLimitsDefinition: (data: LimitsDefinition) => void;
@@ -149,6 +166,8 @@ interface ServerState {
   revertGameplay: () => void;
   revertLimitsDefinition: () => void;
   revertLimitsDefinitionUser: () => void;
+  revertFfSettings: () => void;
+  revertFfSpawnPoints: () => void;
   updateEvent: (name: string, patch: Partial<DayZEvent>) => void;
   setEventSpawns: (spawns: EventSpawnDef[]) => void;
   updateSpawnableType: (name: string, patch: Partial<SpawnableType>) => void;
@@ -194,6 +213,8 @@ interface ServerState {
   saveGameplay: () => Promise<void>;
   saveLimitsDefinition: () => Promise<void>;
   saveLimitsDefinitionUser: () => Promise<void>;
+  saveFfSettings: () => Promise<void>;
+  saveFfSpawnPoints: () => Promise<void>;
 }
 
 async function decodeLayerImage(raw: Uint8Array): Promise<Uint8ClampedArray | null> {
@@ -319,7 +340,7 @@ function encodeTgaLayer(pixels: Uint8ClampedArray, width: number, height: number
   return out;
 }
 
-const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false, limitsDefinition: false, limitsDefinitionUser: false, territoryBitmaps: false };
+const emptyDirty: DirtyFlags = { typesSources: [], eventSpawns: false, events: false, spawnableTypes: false, mapGroupProto: false, weather: false, gameplay: false, limitsDefinition: false, limitsDefinitionUser: false, territoryBitmaps: false, ffSettings: false, ffSpawnPoints: false };
 
 function cloneMapGroupProtoEntry(entry: MapGroupProtoEntry): MapGroupProtoEntry {
   return {
@@ -383,7 +404,7 @@ export const useServerStore = create<ServerState>((set, get) => {
 
   return {
   mission: null,
-  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null, limitsDefinitionPath: null, limitsDefinitionUserPath: null, ceToolXmlPath: null, ceToolLayersDir: null },
+  paths: { missionPath: null, typesPath: null, eventSpawnsPath: null, eventsPath: null, spawnableTypesPath: null, economyCorePath: null, mapGroupProtoPath: null, weatherPath: null, gameplayPath: null, limitsDefinitionPath: null, limitsDefinitionUserPath: null, ceToolXmlPath: null, ceToolLayersDir: null, ffSettingsPath: null, ffSpawnPointsPath: null },
   dirty: emptyDirty,
   saveError: null,
   saveStatus: 'idle' as const,
@@ -403,6 +424,9 @@ export const useServerStore = create<ServerState>((set, get) => {
   gameplay: null,
   limitsDefinition: null,
   limitsDefinitionUser: null,
+  ffProfileName: null,
+  ffSettings: null,
+  ffSpawnPoints: null,
   originalTypes: new Map(),
   originalEvents: new Map(),
   originalEventSpawns: [],
@@ -412,6 +436,8 @@ export const useServerStore = create<ServerState>((set, get) => {
   originalGameplay: null,
   originalLimitsDefinition: null,
   originalLimitsDefinitionUser: null,
+  originalFfSettings: null,
+  originalFfSpawnPoints: null,
   saveCheckpoints: [],
   typeHistory: [],
   mapGroupProtoHistory: [],
@@ -425,15 +451,19 @@ export const useServerStore = create<ServerState>((set, get) => {
   territoryBitmapSize: null,
   ceToolWorldSize: null,
 
-  setMission: (mission) => set({
+  setMission: (mission) => set(s => ({
     mission,
-    dirty: emptyDirty,
+    // FF_SpawnSelector config isn't mission-scoped (profiles/ is a server-root
+    // sibling of mpmissions/), so its dirty state must survive a mission
+    // switch -- otherwise switching missions would silently hide unsaved FF
+    // edits from the save-review panel.
+    dirty: { ...emptyDirty, ffSettings: s.dirty.ffSettings, ffSpawnPoints: s.dirty.ffSpawnPoints },
     originalTypes: new Map(mission.types),
     originalEvents: new Map(mission.events),
     originalEventSpawns: [...mission.eventSpawns],
     originalSpawnableTypes: new Map(mission.spawnableTypes),
     typeHistory: [],
-  }),
+  })),
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
   setBuildingInstances: (instances) => set({ buildingInstances: instances }),
@@ -451,6 +481,11 @@ export const useServerStore = create<ServerState>((set, get) => {
   setGameplay: (data) => set({ gameplay: data, originalGameplay: data }),
   updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),
   updateWeather: (data) => set(s => ({ weather: data, dirty: { ...s.dirty, weather: true } })),
+  setFfProfileName: (name) => set({ ffProfileName: name }),
+  setFfSettings: (data) => set({ ffSettings: data, originalFfSettings: data }),
+  updateFfSettings: (data) => set(s => ({ ffSettings: data, dirty: { ...s.dirty, ffSettings: true } })),
+  setFfSpawnPoints: (data) => set({ ffSpawnPoints: data, originalFfSpawnPoints: data }),
+  updateFfSpawnPoints: (data) => set(s => ({ ffSpawnPoints: data, dirty: { ...s.dirty, ffSpawnPoints: true } })),
   setLimitsDefinition: (data) => set({ limitsDefinition: data, originalLimitsDefinition: data }),
   setLimitsDefinitionUser: (data) => set({ limitsDefinitionUser: data, originalLimitsDefinitionUser: data }),
   updateLimitsDefinition: (data) => set(s => ({ limitsDefinition: data, dirty: { ...s.dirty, limitsDefinition: true } })),
@@ -679,6 +714,16 @@ export const useServerStore = create<ServerState>((set, get) => {
   revertLimitsDefinitionUser: () => set(s => ({
     limitsDefinitionUser: s.originalLimitsDefinitionUser,
     dirty: { ...s.dirty, limitsDefinitionUser: false },
+  })),
+
+  revertFfSettings: () => set(s => ({
+    ffSettings: s.originalFfSettings,
+    dirty: { ...s.dirty, ffSettings: false },
+  })),
+
+  revertFfSpawnPoints: () => set(s => ({
+    ffSpawnPoints: s.originalFfSpawnPoints,
+    dirty: { ...s.dirty, ffSpawnPoints: false },
   })),
 
   updateEvent: (name, patch) => set(s => {
@@ -1155,6 +1200,24 @@ export const useServerStore = create<ServerState>((set, get) => {
       await writeFile(paths.gameplayPath!, serializeGameplayJson(gameplay));
       set(s => ({ dirty: { ...s.dirty, gameplay: false }, originalGameplay: s.gameplay }));
     }, [paths.gameplayPath]);
+  },
+
+  saveFfSettings: async () => {
+    const { ffSettings, paths } = get();
+    if (!paths.ffSettingsPath || !ffSettings) return;
+    await trySave('FFSpawnSelector/Settings.json', async () => {
+      await writeFile(paths.ffSettingsPath!, serializeFFSettings(ffSettings));
+      set(s => ({ dirty: { ...s.dirty, ffSettings: false }, originalFfSettings: s.ffSettings }));
+    }, [paths.ffSettingsPath]);
+  },
+
+  saveFfSpawnPoints: async () => {
+    const { ffSpawnPoints, paths } = get();
+    if (!paths.ffSpawnPointsPath || !ffSpawnPoints) return;
+    await trySave('FFSpawnSelector/SpawnPoints.json', async () => {
+      await writeFile(paths.ffSpawnPointsPath!, serializeFFSpawnPoints(ffSpawnPoints));
+      set(s => ({ dirty: { ...s.dirty, ffSpawnPoints: false }, originalFfSpawnPoints: s.ffSpawnPoints }));
+    }, [paths.ffSpawnPointsPath]);
   },
 
   saveLimitsDefinition: async () => {
