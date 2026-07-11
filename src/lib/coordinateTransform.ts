@@ -12,6 +12,17 @@ export function gameToLeaflet(
   return [lat, lng];
 }
 
+// Inverse of gameToLeaflet, for click-to-place and drag-to-reposition.
+export function leafletToGame(
+  lat: number,
+  lng: number,
+  map: MapConfig,
+): [number, number] {
+  const gameX = (lng / map.imageWidth) * map.worldWidth;
+  const gameZ = (lat / map.imageHeight + 1) * map.worldHeight;
+  return [gameX, gameZ];
+}
+
 export function mapBounds(map: MapConfig): LatLngBoundsExpression {
   return [[0, 0], [-map.imageHeight, map.imageWidth]];
 }

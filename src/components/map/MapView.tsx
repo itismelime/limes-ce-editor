@@ -18,6 +18,7 @@ import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
 import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
 import { BuildingMarkers } from './BuildingMarkers';
+import { FFSpawnPointMarkers, FFSpawnPointAddClickHandler } from './FFSpawnPointMarkers';
 import { BuildingSidebar } from './BuildingSidebar';
 import { ConnectedTypeDetailPanel } from '../shared/TypeDetailPanel';
 import type { MapConfig } from '../../types/map';
@@ -742,8 +743,11 @@ function TerritoryPainter({ mapConfig, bitmapSize }: { mapConfig: MapConfig; bit
 function PlayerSpawnMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const playerSpawnData  = useServerStore(s => s.playerSpawnData);
   const showPlayerSpawns = useUiStore(s => s.showPlayerSpawns);
+  // FF_SpawnSelector overrides actual spawn behavior when present -- showing
+  // vanilla markers alongside it would be misleading, not just redundant.
+  const hasFF = useServerStore(s => s.ffSpawnPoints !== null);
 
-  if (!showPlayerSpawns || !playerSpawnData) return null;
+  if (hasFF || !showPlayerSpawns || !playerSpawnData) return null;
 
   return (
     <>
@@ -824,8 +828,11 @@ export function MapView() {
   const tierZonesLoaded         = useUiStore(s => s.tierZonesLoaded);
   const showPlayerSpawns       = useUiStore(s => s.showPlayerSpawns);
   const togglePlayerSpawns     = useUiStore(s => s.togglePlayerSpawns);
+  const ffSpawnPointAddMode    = useUiStore(s => s.ffSpawnPointAddMode);
+  const setFfSpawnPointAddMode = useUiStore(s => s.setFfSpawnPointAddMode);
   const buildingInstances      = useServerStore(s => s.buildingInstances);
   const playerSpawnData        = useServerStore(s => s.playerSpawnData);
+  const ffSpawnPoints          = useServerStore(s => s.ffSpawnPoints);
   const ceToolProject          = useServerStore(s => s.ceToolProject);
   const ceToolLayers           = useServerStore(s => s.ceToolLayers);
   const territoryBitmapSize    = useServerStore(s => s.territoryBitmapSize);
@@ -1158,6 +1165,7 @@ export function MapView() {
           zoomSnap={0.25}
           zoomDelta={0.25}
           wheelPxPerZoomLevel={120}
+          className={ffSpawnPointAddMode ? 'cursor-crosshair' : ''}
           style={{ height: '100%', width: '100%', background: '#141414' }}
         >
           <MapFitBounds mapConfig={mapConfig} />
@@ -1185,6 +1193,8 @@ export function MapView() {
           )}
           {isMapActive && mapHeavyReady && overlaysReady && <BuildingMarkers mapConfig={mapConfig} />}
           {isMapActive && mapHeavyReady && overlaysReady && <PlayerSpawnMarkers mapConfig={mapConfig} />}
+          {isMapActive && mapHeavyReady && overlaysReady && ffSpawnPoints && <FFSpawnPointMarkers mapConfig={mapConfig} />}
+          {isMapActive && mapHeavyReady && overlaysReady && ffSpawnPoints && <FFSpawnPointAddClickHandler mapConfig={mapConfig} />}
           {isMapActive && mapHeavyReady && overlaysReady && <CeToolZoneOverlays mapConfig={mapConfig} show={showCeZones} />}
           {isMapActive && mapHeavyReady && overlaysReady && <TerritoryBitmapOverlays bounds={bounds} show={showTerritoryOverlay} />}
           {isMapActive && mapHeavyReady && overlaysReady && territoryBitmapSize && territoryPaintMode && (
@@ -1327,13 +1337,23 @@ export function MapView() {
         >
           Events {hiddenEvents.length > 0 ? `(${hiddenEvents.length} hidden)` : ''}
         </button>
-        {playerSpawnData && playerSpawnData.sections.length > 0 && (
+        {ffSpawnPoints ? (
           <button
-            onClick={togglePlayerSpawns}
-            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showPlayerSpawns ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+            onClick={() => setFfSpawnPointAddMode(!ffSpawnPointAddMode)}
+            title="Click once to place a new FF spawn point on the map"
+            className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${ffSpawnPointAddMode ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
           >
-            Player Spawns
+            {ffSpawnPointAddMode ? 'Click map to place…' : '+ Add FF Spawn Point'}
           </button>
+        ) : (
+          playerSpawnData && playerSpawnData.sections.length > 0 && (
+            <button
+              onClick={togglePlayerSpawns}
+              className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors ${showPlayerSpawns ? 'bg-lime-500 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+            >
+              Player Spawns
+            </button>
+          )
         )}
         {ceToolProject && ceToolProject.territories.length > 0 && (
           <button
