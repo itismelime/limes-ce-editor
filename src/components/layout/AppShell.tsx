@@ -337,14 +337,12 @@ export function AppShell() {
   // Always show a startup warmup on first mount so the loading screen is visible.
   useEffect(() => {
     let cancelled = false;
-    setStartupMessage('Preparing editor...');
     prefetchTabOnce('map');
     prefetchTabOnce('types');
     Promise.allSettled([TAB_PREFETCHERS.map(), TAB_PREFETCHERS.types()]).then(() => {
       if (!cancelled) setTimeout(() => { if (!cancelled) setIsStartupWarmup(false); }, 300);
     });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const parsedWarnings = loadWarnings.map(parseLoadWarning);
@@ -368,12 +366,9 @@ export function AppShell() {
     prefetchedTabs.add(activeTab);
   }, [activeTab]);
 
-  useEffect(() => {
-    setMountedTabs(prev => {
-      if (prev[activeTab]) return prev;
-      return { ...prev, [activeTab]: true };
-    });
-  }, [activeTab]);
+  if (!mountedTabs[activeTab]) {
+    setMountedTabs(prev => ({ ...prev, [activeTab]: true }));
+  }
 
   useEffect(() => {
     const targets = IDLE_PREFETCH_TABS.filter(tab => tab !== activeTab);
@@ -395,19 +390,20 @@ export function AppShell() {
     return () => clearTimeout(timeoutId);
   }, [activeTab]);
 
+  if (!missionPath && isStartupWarmup) {
+    setIsStartupWarmup(false);
+  }
+
   useEffect(() => {
-    if (!missionPath) {
-      setIsStartupWarmup(false);
-      return;
-    }
+    if (!missionPath) return;
 
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    setIsStartupWarmup(true);
-    setStartupMessage('Preparing map cache...');
-
     const warmup = async () => {
+      setIsStartupWarmup(true);
+      setStartupMessage('Preparing map cache...');
+
       // Keep startup focused on map readiness; avoid mounting hidden heavy tabs.
       setMountedTabs(prev => ({
         ...prev,

@@ -200,14 +200,16 @@ function AddLootModal({
 }) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [prevOpen, setPrevOpen] = useState(open);
 
-  useEffect(() => {
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       const matchedDefault = categories.find(cat => cat.toLowerCase() === defaultCategory.toLowerCase()) ?? defaultCategory;
       setCategoryFilter(matchedDefault);
       setSearch('');
     }
-  }, [open, defaultCategory, categories]);
+  }
 
   const filteredItems = useMemo(() => {
     const rows: DayZType[] = [];
@@ -361,9 +363,11 @@ export function BuildingPopup({
   const [addModalCategory, setAddModalCategory] = useState('');
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [prevUsageSearch, setPrevUsageSearch] = useState(usageSearch);
+  if (usageSearch !== prevUsageSearch) {
+    setPrevUsageSearch(usageSearch);
     if (usageSearch.trim()) setPendingUsageColor(getUsageColor(usageSearch.trim()));
-  }, [usageSearch]);
+  }
 
   useEffect(() => {
     if (!usageDropdownOpen) return;

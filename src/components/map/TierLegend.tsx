@@ -4,6 +4,8 @@ import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
 import { sampleUsageAtPos, getUsageMasks, getLoadedTierNames } from '../../lib/tierZoneResolver';
 
+const SURFACE_KEYS = new Set(['floor', 'shelves', 'ground']);
+
 export function TierLegend() {
   const hiddenTiers       = useUiStore(s => s.hiddenTiers);
   const hiddenUsages      = useUiStore(s => s.hiddenUsages);
@@ -69,8 +71,6 @@ export function TierLegend() {
       });
   }, [buildingInstances, mission, tierZonesLoaded, ceToolLayers]);
 
-  const SURFACE_KEYS = new Set(['floor', 'shelves', 'ground']);
-
   const zoneGroups    = useMemo(() => usageGroups.filter(g => !SURFACE_KEYS.has(g.label.toLowerCase())), [usageGroups]);
   const surfaceGroups = useMemo(() => usageGroups.filter(g =>  SURFACE_KEYS.has(g.label.toLowerCase())), [usageGroups]);
 
@@ -93,7 +93,7 @@ export function TierLegend() {
       }
     }
     return found;
-  }, [buildingInstances, mission, tierZonesLoaded, ceToolLayers]);
+  }, [buildingInstances, mission, ceToolLayers]);
 
   const extraTiers = [...activeTierSet].filter(t => t !== 'unknown' && !TIER_ORDER.includes(t)).sort();
   const allTiers = [...TIER_ORDER.filter(t => activeTierSet.has(t)), ...extraTiers, 'unknown'];

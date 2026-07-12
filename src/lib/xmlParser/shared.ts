@@ -25,7 +25,7 @@ export const BUILDER_OPTIONS = {
 };
 
 export function stripBom(text: string): string {
-  return text.replace(/^﻿/, '');
+  return text.replace(/^\uFEFF/, '');
 }
 
 export function num(v: unknown, fallback = 0): number {

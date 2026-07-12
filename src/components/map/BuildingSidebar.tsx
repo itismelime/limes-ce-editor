@@ -23,7 +23,7 @@ export function BuildingSidebar({ onWidthChange, onSelectItem }: {
 
   useEffect(() => {
     onWidthChange?.(expanded ? sidebarWidth : collapsedWidth);
-  }, [expanded, sidebarWidth]);
+  }, [expanded, sidebarWidth, onWidthChange]);
 
   const tierZonesLoaded = useUiStore(s => s.tierZonesLoaded);
   const selectedBuildingPos = useUiStore(s => s.selectedBuildingPos);
@@ -35,24 +35,24 @@ export function BuildingSidebar({ onWidthChange, onSelectItem }: {
     return buildingInstances.find(b => b.typeName.trim().toLowerCase() === selectedBuildingType.toLowerCase()) || null;
   }, [selectedBuildingType, buildingInstances]);
 
-  const samplePos = selectedBuildingPos ?? (building ? { x: building.x, z: building.z } : null);
+  const samplePos = useMemo(
+    () => selectedBuildingPos ?? (building ? { x: building.x, z: building.z } : null),
+    [selectedBuildingPos, building],
+  );
 
   const allZones = useMemo(() => {
     if (!samplePos || !useZoneData) return null;
     return sampleAllZonesAtPos(samplePos.x, samplePos.z);
-  }, [samplePos, useZoneData, territoryBitmaps]);
+  }, [samplePos, useZoneData]);
 
   const zoneTiers  = allZones?.tiers.filter(t => t !== 'unknown') ?? [];
   const zoneUsages = allZones?.usages ?? [];
 
-
-  useEffect(() => {
-    if (selectedBuildingType) {
-      setExpanded(true);
-    } else {
-      setExpanded(false);
-    }
-  }, [selectedBuildingSeq, selectedBuildingType]);
+  const [prevSelectionTrigger, setPrevSelectionTrigger] = useState({ seq: selectedBuildingSeq, type: selectedBuildingType });
+  if (selectedBuildingSeq !== prevSelectionTrigger.seq || selectedBuildingType !== prevSelectionTrigger.type) {
+    setPrevSelectionTrigger({ seq: selectedBuildingSeq, type: selectedBuildingType });
+    setExpanded(!!selectedBuildingType);
+  }
 
   useEffect(() => {
     const onMouseMove = (event: MouseEvent) => {

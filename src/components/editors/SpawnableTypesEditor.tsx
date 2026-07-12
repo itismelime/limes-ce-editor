@@ -39,6 +39,8 @@ export function SpawnableTypesEditor() {
 
   // cfgspawnabletypes can hold thousands of entries — virtualize the list.
   const parentRef = useRef<HTMLDivElement>(null);
+  // TanStack Virtual's returned functions are inherently non-memoizable; expected, not a bug.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => parentRef.current,

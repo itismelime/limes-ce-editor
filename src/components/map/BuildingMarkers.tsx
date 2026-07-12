@@ -134,7 +134,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       cache.set(`${b.typeName}-${b.x}-${b.z}`, sampleAllZonesAtPos(b.x, b.z));
     }
     return cache;
-  }, [buildingInstances, useZoneData, territoryBitmaps]);
+  }, [buildingInstances, useZoneData]);
 
   // Filter logic — stable across pans, no viewport check.
   const filteredBuildings = useMemo(() => {

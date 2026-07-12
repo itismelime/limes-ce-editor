@@ -198,8 +198,11 @@ function MapClickDeselect() {
 
 function MapFitBounds({ mapConfig }: { mapConfig: MapConfig }) {
   const map = useMap();
+  const mapConfigRef = useRef(mapConfig);
+  useEffect(() => { mapConfigRef.current = mapConfig; });
+
   useEffect(() => {
-    const boundsExpr = mapBounds(mapConfig) as L.LatLngBoundsLiteral;
+    const boundsExpr = mapBounds(mapConfigRef.current) as L.LatLngBoundsLiteral;
     const bounds = L.latLngBounds(boundsExpr);
 
     const padded = bounds.pad(0.10);
@@ -263,6 +266,9 @@ function DayZTileLayer({
   onLayerReady: (layer: L.TileLayer) => void;
 }) {
   const map = useMap();
+  const onLayerReadyRef = useRef(onLayerReady);
+  useEffect(() => { onLayerReadyRef.current = onLayerReady; });
+
   useEffect(() => {
     const zo = Math.round(Math.log2(imageWidth / 256));
     const maxNative = 5 - zo;
@@ -355,9 +361,9 @@ function DayZTileLayer({
       keepBuffer: 6,
     }) as L.TileLayer;
     map.addLayer(layer);
-    onLayerReady(layer);
+    onLayerReadyRef.current(layer);
     return () => { map.removeLayer(layer); };
-  }, [map, mapId, mapsDir, imageWidth]);
+  }, [map, mapId, mapsDir, imageWidth, maxReadyLevelRef]);
 
   // Preload the low-zoom tile levels into browser image cache so Leaflet finds
   // them ready; deeper levels demand-load fine. pz<=3 is 85 tiles vs 1365 for
@@ -552,7 +558,6 @@ function TerritoryBitmapOverlays({ bounds, show }: { bounds: L.LatLngBoundsExpre
       results.push({ key: layerName, url: canvas.toDataURL() });
     }
     return results;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, territoryBitmaps, territoryBitmapSize, ceToolLayers, hiddenUsages, hiddenTiers]);
 
   if (!show) return null;
@@ -867,7 +872,14 @@ export function MapView() {
   const [mapHeavyReady, setMapHeavyReady] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(44);
 
+  if (!isMapActive) {
+    if (mapHeavyReady) setMapHeavyReady(false);
+    if (overlaysReady) setOverlaysReady(false);
+  }
+
   useEffect(() => {
+    if (!isMapActive) return;
+
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (id: number) => void;
@@ -878,12 +890,6 @@ export function MapView() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let delayId: ReturnType<typeof setTimeout> | null = null;
     const activatedAt = performance.now();
-
-    if (!isMapActive) {
-      setMapHeavyReady(false);
-      setOverlaysReady(false);
-      return;
-    }
 
     const ready = () => {
       if (cancelled) return;
@@ -917,22 +923,23 @@ export function MapView() {
   );
   const eventSignature = useMemo(() => eventNames.join('\n'), [eventNames]);
   const [initializedEventSignature, setInitializedEventSignature] = useState('');
-  const eventSetSignature = useRef('');
+  // Global uiStore writes belong in an effect, not render — keeps them from firing
+  // while another component (e.g. TopBar) is mid-render off this same store.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (markers.length === 0) {
-      eventSetSignature.current = '';
-      setInitializedEventSignature('');
-      setHiddenEvents([]);
+      if (initializedEventSignature !== '') {
+        setInitializedEventSignature('');
+        setHiddenEvents([]);
+      }
       return;
     }
-
-    const signature = eventSignature;
-    if (signature !== eventSetSignature.current) {
-      eventSetSignature.current = signature;
+    if (eventSignature !== initializedEventSignature) {
       setHiddenEvents(eventNames);
-      setInitializedEventSignature(signature);
+      setInitializedEventSignature(eventSignature);
     }
-  }, [markers.length, eventNames, eventSignature, setHiddenEvents]);
+  }, [markers.length, eventNames, eventSignature, initializedEventSignature, setHiddenEvents]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const [tilesBaseDir, setTilesBaseDir]     = useState<string | null>(null);
   const [tilesNotBuilt, setTilesNotBuilt]   = useState(false);
@@ -969,11 +976,11 @@ export function MapView() {
     if (!isMapActive || !isKnownMap) return;
 
     let cancelled = false;
-    setTilesBaseDir(null);
-    setTilesNotBuilt(false);
-    setDownloadError(null);
-    maxReadyLevelRef.current = -1;
     (async () => {
+      setTilesBaseDir(null);
+      setTilesNotBuilt(false);
+      setDownloadError(null);
+      maxReadyLevelRef.current = -1;
       const dir = await invoke<string | null>('get_tiles_base_dir', { mapId: activeMap });
       if (cancelled) return;
       if (dir) {

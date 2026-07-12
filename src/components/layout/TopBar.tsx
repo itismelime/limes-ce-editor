@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 import { useServerStore } from '../../store/serverStore';
@@ -173,7 +173,7 @@ export function TopBar({
   const pendingTabRef = useRef<ActiveTab | null>(null);
   const tabSwitchInFlightRef = useRef(false);
 
-  const commitPendingTab = () => {
+  const commitPendingTab = useCallback(() => {
     if (tabSwitchInFlightRef.current) return;
     const targetTab = pendingTabRef.current;
     if (!targetTab) return;
@@ -187,7 +187,7 @@ export function TopBar({
     pendingTabRef.current = null;
     tabSwitchInFlightRef.current = true;
     setActiveTab(targetTab);
-  };
+  }, [setActiveTab]);
 
   const hasDirty = dirty.typesSources.length > 0 || dirty.eventSpawns || dirty.events || dirty.spawnableTypes || dirty.mapGroupProto || dirty.weather || dirty.gameplay || dirty.limitsDefinition || dirty.limitsDefinitionUser || dirty.territoryBitmaps || dirty.ffSettings || dirty.ffSpawnPoints;
   const pendingItems: Array<{ id: string; label: string; detail: string; onRevert: () => void }> = [
@@ -266,13 +266,13 @@ export function TopBar({
         commitPendingTab();
       }
     });
-  }, [activeTab]);
+  }, [activeTab, commitPendingTab]);
 
   useEffect(() => {
     if (showSaveReview && !hasDirty) {
       setShowSaveReview(false);
     }
-  }, [showSaveReview, hasDirty]);
+  }, [showSaveReview, hasDirty, setShowSaveReview]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
