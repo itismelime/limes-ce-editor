@@ -479,7 +479,7 @@ fn lzo1x_decompress(src: &[u8], expected_out: usize) -> Result<Vec<u8>, String> 
     let mut outp = DICT_SIZE; // start after zeroed dictionary
     let mut state = 0usize;
     let mut nstate: usize;
-    let mut lblen: usize = 0;
+    let mut lblen: usize;
     let mut lbcur: usize;
 
     macro_rules! rb {
