@@ -28,7 +28,7 @@ jobs:
             bundles: deb,appimage
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Tauri Linux dependencies
         if: matrix.platform == 'ubuntu-latest'
@@ -47,7 +47,7 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
