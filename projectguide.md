@@ -160,24 +160,26 @@ cd src-tauri && cargo test
 ├── src-tauri/                   # Rust backend
 │   ├── src/
 │   │   ├── main.rs               Binary entry point
-│   │   ├── lib.rs                Library entry point + run()
-│   │   ├── tiling.rs             Tile pyramid generation
+│   │   ├── lib.rs                Library entry point + run(); also holds Steam
+│   │   │                         discovery (find_steam_path, steam_library_paths),
+│   │   │                         community map registry (load/save_community_maps,
+│   │   │                         discover_installed_maps), and known map
+│   │   │                         definitions (KNOWN_MAPS)
+│   │   ├── tiles.rs              Tile pyramid generation/extraction
 │   │   ├── pbo.rs                PBO file reading
 │   │   ├── bitmap.rs             TGA/area flags bitmap ops
-│   │   ├── steam.rs              Steam library discovery
-│   │   ├── map_registry.rs       Community map registry
-│   │   ├── map_config.rs         Known map definitions
 │   │   ├── bin/                  Utility binaries
 │   │   │   ├── prepare_maps.rs   Download + stitch map PNGs
 │   │   │   ├── test_pbo.rs       PBO testing
 │   │   │   ├── dump_coords.rs    Coordinate dumping
 │   │   │   ├── inspect_pbo.rs    PBO inspection
 │   │   │   └── dump_cfg.rs       Config dumping
+│   │   └── ...
+│   ├── resources/                Bundled resources (map PNGs)
 │   ├── tauri.conf.json           Tauri app config
 │   ├── Cargo.toml                Rust dependencies
 │   └── build.rs                  Build script
 ├── public/                       Static assets
-├── resources/                    Bundled resources (map PNGs)
 ├── docs/                         Documentation
 ├── package.json
 ├── vite.config.ts
@@ -290,7 +292,7 @@ npm run tauri:build
 
 ### Adding a New Community Map
 
-1. Add the map definition to `KNOWN_MAPS` in `src-tauri/src/map_config.rs` with `id`, `label`, `world_size`, and tile URLs.
+1. Add the map definition to `KNOWN_MAPS` in `src-tauri/src/lib.rs` with `id`, `label`, `world_size`, and tile URLs.
 2. Users can then discover it via Steam auto-discovery or manually add it in Settings → Community Maps.
 
 ### Adding a New mpmission Download Source
