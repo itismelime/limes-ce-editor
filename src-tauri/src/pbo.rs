@@ -249,19 +249,21 @@ pub fn world_size_from_pbo(pbo_path: &std::path::Path) -> Result<u32, String> {
 }
 
 /// Recursively search `dir` (up to `depth` levels) for any `*_data.pbo` file.
-pub fn find_data_pbo(dir: &std::path::Path, depth: usize) -> Option<std::path::PathBuf> {
+/// `patterns` empty = any `*_data.pbo`; otherwise the lowercase name must contain one.
+pub fn find_data_pbo(dir: &std::path::Path, patterns: &[&str], depth: usize) -> Option<std::path::PathBuf> {
     if depth == 0 { return None; }
     let Ok(entries) = std::fs::read_dir(dir) else { return None };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.to_ascii_lowercase().ends_with("_data.pbo") {
+                let lower = name.to_ascii_lowercase();
+                if lower.ends_with("_data.pbo") && (patterns.is_empty() || patterns.iter().any(|p| lower.contains(p))) {
                     return Some(path);
                 }
             }
         } else if path.is_dir() {
-            if let Some(found) = find_data_pbo(&path, depth - 1) {
+            if let Some(found) = find_data_pbo(&path, patterns, depth - 1) {
                 return Some(found);
             }
         }
@@ -377,7 +379,9 @@ fn parse_tile_coords(name: &str) -> Option<(u32, u32)> {
     if parts.len() < 2 { return None; }
     let col = parts[0].parse::<u32>().ok()?;
     let row = parts[1].parse::<u32>().ok()?;
-    Some((col, row))
+    // Real grids are a few dozen tiles per side; bounding this keeps a malformed
+    // PBO from overflowing grid math or driving a huge canvas allocation.
+    (col < 256 && row < 256).then_some((col, row))
 }
 
 // ── PAA format ────────────────────────────────────────────────────────────────

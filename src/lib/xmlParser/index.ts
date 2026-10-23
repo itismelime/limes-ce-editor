@@ -8,3 +8,4 @@ export * from './economyCore';
 export * from './weather';
 export * from './gameplay';
 export * from './limitsDefinition';
+export { mergeIntoOriginal } from './shared';

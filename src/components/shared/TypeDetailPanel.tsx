@@ -5,10 +5,9 @@ import { NumberInput } from './NumberInput';
 import { CloseButton } from './ui';
 import { basename } from '../../lib/fileDiscovery';
 import type { DayZType } from '../../types/dayz';
-import { TIER_COLORS, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
+import { TIER_COLORS, tierOptions, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
 import { CATEGORY_LABELS, CATEGORY_OPTIONS, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
 
-const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
 
 const FLAG_TOOLTIPS: Record<string, string> = {
   count_in_map: 'Count this item toward the map\'s total loot count',
@@ -98,6 +97,9 @@ export function TypeDetailPanel({
   const filteredAvailableUsages = availableUsages.filter(u => u.toLowerCase().includes(addUsageSearch.toLowerCase()));
   const manualOverride = categoryOverrides[type.name.toLowerCase()] ?? '';
   const effectiveCategory = displayCategory(type, attachmentNames, categoryOverrides);
+  const deleteType = useServerStore(s => s.deleteType);
+  const limitsValues = useServerStore(s => s.limitsDefinition?.values);
+  const TIER_OPTIONS = useMemo(() => tierOptions(limitsValues), [limitsValues]);
 
   return (
     <div className={className}>
@@ -295,6 +297,17 @@ export function TypeDetailPanel({
           </div>
         </div>
 
+        <button
+          onClick={() => {
+            if (window.confirm(`Delete ${type.name} from ${basename(type.source)}? It is removed from the file when you save.`)) {
+              deleteType(type.name);
+              onClose();
+            }
+          }}
+          className="w-full px-3 py-1.5 rounded text-xs text-rose-400 border border-rose-900/60 hover:bg-rose-950/40 hover:border-rose-700 transition-colors"
+        >
+          Delete item
+        </button>
       </div>
     </div>
   );

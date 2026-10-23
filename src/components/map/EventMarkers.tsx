@@ -34,11 +34,11 @@ export function EventMarkers({ markers, mapConfig }: { markers: ResolvedMarker[]
 
   const filterLower = mapEventFilter.toLowerCase();
   const hiddenTierSet = useMemo(() => new Set(hiddenTiers), [hiddenTiers]);
-  const hiddenUsageSet = useMemo(() => new Set(hiddenUsages), [hiddenUsages]);
+  const hiddenUsageSet = useMemo(() => new Set(hiddenUsages.map(u => u.trim().toLowerCase())), [hiddenUsages]);
   const hiddenEventSet = useMemo(() => new Set(hiddenEvents), [hiddenEvents]);
   const visible = useMemo(() => markers.filter(m => {
     if (hiddenTierSet.has(m.dominantTier)) return false;
-    if (hiddenUsageSet.has(m.dominantUsage)) return false;
+    if (hiddenUsageSet.has(m.dominantUsage.trim().toLowerCase())) return false;
     if (hiddenEventSet.has(m.eventName)) return false;
     if (filterLower !== '' && !m.eventName.toLowerCase().includes(filterLower)) return false;
     return m.positions.some(pos => viewportBounds.contains(gameToLeaflet(pos.x, pos.z, mapConfig)));

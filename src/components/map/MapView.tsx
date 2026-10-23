@@ -13,7 +13,7 @@ import { useServerStore, toMessage } from '../../store/serverStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import { gameToLeaflet, mapBounds } from '../../lib/coordinateTransform';
 import { getUsageColor, TIER_COLORS } from '../../types/map';
-import { BUILTIN_TILE_MAP_IDS } from '../../types/map';
+import { BUILTIN_MAPS } from '../../lib/mapConfig';
 // MAX_PYRAMID_Z = 5 (matching tiles.rs MAX_ZOOM)
 import { TierLegend } from './TierLegend';
 import { EventMarkers } from './EventMarkers';
@@ -815,7 +815,7 @@ export function MapView() {
   }, [communityMaps]);
 
   const tileMaps = useMemo(() => {
-    const s = new Set<string>(BUILTIN_TILE_MAP_IDS);
+    const s = new Set<string>(BUILTIN_MAPS.map(m => m.id));
     for (const cm of communityMaps) s.add(cm.id);
     return s;
   }, [communityMaps]);
@@ -1081,7 +1081,9 @@ export function MapView() {
   }
 
   // ── Known map: tiles not ready yet ───────────────────────────────────────
-  if (isKnownMap && !tilesBaseDir) {
+  // With an overview image (bundled CE Tool background) the map stays usable
+  // while tiles are missing; only block for the build progress / error.
+  if (isKnownMap && !tilesBaseDir && (!hasImage || downloading || downloadError)) {
     return (
       <div className="h-full flex flex-col">
         {tilesNotBuilt && (
@@ -1561,6 +1563,15 @@ export function MapView() {
               +
             </button>
           </div>
+          {isKnownMap && tilesNotBuilt && !tilesBaseDir && (
+            <button
+              onClick={() => setBuildRequested(s => new Set([...s, activeMap]))}
+              className="h-8 bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 text-xs px-3 rounded-lg transition-colors"
+              title="Extract high-resolution satellite tiles from your local DayZ PBO"
+            >
+              Build satellite tiles
+            </button>
+          )}
           {isCustomMap && (
             <button
               onClick={() => pickMapImage(activeMap, setMapImagePath, setMapImageSize)}

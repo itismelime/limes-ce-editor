@@ -1,5 +1,5 @@
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
-import type { SpawnableType, SpawnableCargo, SpawnableAttachments } from '../../types/dayz';
+import type { SpawnableType, SpawnableCargo, SpawnableAttachments, SpawnableItem } from '../../types/dayz';
 import {
   PARSER_OPTIONS, BUILDER_OPTIONS, stripBom,
   num, numAttr, strAttr, collectUnknownKeys,
@@ -19,6 +19,37 @@ function normalizeSpawnableRoot(raw: string): string {
   return `<spawnabletypes>${stripped}</spawnabletypes>`;
 }
 
+type Raw = Record<string, unknown>;
+
+function parseDamage(d: Raw | undefined) {
+  if (!d) return undefined;
+  return { min: num(d['@_min']), max: num(d['@_max']), rawMin: String(d['@_min'] ?? ''), rawMax: String(d['@_max'] ?? '') };
+}
+
+function parseItem(i: Raw): SpawnableItem {
+  const damage = parseDamage(i.damage as Raw | undefined);
+  const cargo = ((i.cargo as Raw[]) ?? []).map(parseBlock);
+  const attachments = ((i.attachments as Raw[]) ?? []).map(parseBlock);
+  return {
+    name:      strAttr(i, 'name'),
+    // DayZ treats a missing item chance as 1 (always spawns)
+    chance:    numAttr(i, 'chance', 1),
+    rawChance: String(i['@_chance'] ?? ''),
+    ...(damage ? { damage } : {}),
+    ...(cargo.length ? { cargo } : {}),
+    ...(attachments.length ? { attachments } : {}),
+  };
+}
+
+function parseBlock(c: Raw): SpawnableCargo {
+  return {
+    chance: num(c['@_chance'], 1),
+    rawChance: String(c['@_chance'] ?? ''),
+    ...(typeof c['@_preset'] === 'string' && String(c['@_preset']).trim() ? { preset: String(c['@_preset']) } : {}),
+    items: ((c.item as Raw[]) ?? []).map(parseItem),
+  };
+}
+
 export function parseSpawnableTypesXml(raw: string, source: string, duplicates?: string[]): Map<string, SpawnableType> {
   const parser = new XMLParser(SPAWNABLE_PARSER_OPTIONS);
   const doc = parser.parse(normalizeSpawnableRoot(raw));
@@ -30,29 +61,9 @@ export function parseSpawnableTypesXml(raw: string, source: string, duplicates?:
     const cargoArr  = (st.cargo       as Record<string, unknown>[]) ?? [];
     const attArr    = (st.attachments as Record<string, unknown>[]) ?? [];
     const damageRaw  = st.damage  as Record<string, unknown> | undefined;
-    const hoarderRaw = st.hoarder as Record<string, unknown> | undefined;
 
-    const cargo: SpawnableCargo[] = cargoArr.map(c => ({
-      chance: num(c['@_chance'], 1),
-      rawChance: String(c['@_chance'] ?? ''),
-      ...(typeof c['@_preset'] === 'string' && String(c['@_preset']).trim() ? { preset: String(c['@_preset']) } : {}),
-      items: ((c.item as Record<string, unknown>[]) ?? []).map(i => ({
-        name:      strAttr(i, 'name'),
-        chance:    numAttr(i as Record<string, unknown>, 'chance'),
-        rawChance: String((i as Record<string, unknown>)['@_chance'] ?? ''),
-      })),
-    }));
-
-    const attachments: SpawnableAttachments[] = attArr.map(a => ({
-      chance: num(a['@_chance'], 1),
-      rawChance: String(a['@_chance'] ?? ''),
-      ...(typeof a['@_preset'] === 'string' && String(a['@_preset']).trim() ? { preset: String(a['@_preset']) } : {}),
-      items: ((a.item as Record<string, unknown>[]) ?? []).map(i => ({
-        name:      strAttr(i, 'name'),
-        chance:    numAttr(i as Record<string, unknown>, 'chance'),
-        rawChance: String((i as Record<string, unknown>)['@_chance'] ?? ''),
-      })),
-    }));
+    const cargo: SpawnableCargo[] = cargoArr.map(parseBlock);
+    const attachments: SpawnableAttachments[] = attArr.map(parseBlock);
 
     const spawnableType: SpawnableType = {
       name:       strAttr(st, 'name'),
@@ -61,21 +72,40 @@ export function parseSpawnableTypesXml(raw: string, source: string, duplicates?:
       tags:       ((st.tag      as Record<string, unknown>[]) ?? []).map(tg => strAttr(tg, 'name')),
       cargo,
       attachments,
-      ...(hoarderRaw ? { hoarder: true } : {}),
-      ...(damageRaw ? {
-        damage: {
-          min:    num(damageRaw['@_min']),
-          max:    num(damageRaw['@_max']),
-          rawMin: String(damageRaw['@_min'] ?? ''),
-          rawMax: String(damageRaw['@_max'] ?? ''),
-        },
-      } : {}),
+      // <hoarder/> parses to '' (falsy), so test presence, not value
+      ...('hoarder' in st ? { hoarder: true } : {}),
+      ...(damageRaw ? { damage: parseDamage(damageRaw)! } : {}),
       source,
     };
     if (map.has(spawnableType.name)) duplicates?.push(spawnableType.name);
     map.set(spawnableType.name, spawnableType);
   }
   return map;
+}
+
+// Keep chance as written; a preset block only carries chance if the file had one.
+function blockAttrs(b: SpawnableCargo | SpawnableAttachments): Record<string, string> {
+  const chance = b.rawChance?.trim() || (b.preset ? '' : b.chance.toFixed(2));
+  return { ...(b.preset ? { '@_preset': b.preset } : {}), ...(chance ? { '@_chance': chance } : {}) };
+}
+
+function itemAttrs(i: SpawnableItem): Record<string, unknown> {
+  const chance = i.rawChance?.trim() || (i.chance === 1 ? '' : i.chance.toFixed(2));
+  return {
+    '@_name': i.name,
+    ...(chance ? { '@_chance': chance } : {}),
+    ...(i.damage ? { damage: damageAttrs(i.damage) } : {}),
+    ...(i.cargo?.length ? { cargo: i.cargo.map(blockNode) } : {}),
+    ...(i.attachments?.length ? { attachments: i.attachments.map(blockNode) } : {}),
+  };
+}
+
+function damageAttrs(d: NonNullable<SpawnableItem['damage']>) {
+  return { '@_min': d.rawMin?.trim() || String(d.min), '@_max': d.rawMax?.trim() || String(d.max) };
+}
+
+function blockNode(b: SpawnableCargo | SpawnableAttachments) {
+  return { ...blockAttrs(b), ...(b.items.length ? { item: b.items.map(itemAttrs) } : {}) };
 }
 
 export function serializeSpawnableTypesXml(spawnableTypes: Map<string, SpawnableType>): string {
@@ -85,24 +115,13 @@ export function serializeSpawnableTypesXml(spawnableTypes: Map<string, Spawnable
     ...(st.categories.length ? { category: st.categories.map(c => ({ '@_name': c })) } : {}),
     ...(st.tags.length       ? { tag:      st.tags.map(tag   => ({ '@_name': tag })) } : {}),
     ...(st.cargo.length ? {
-      cargo: st.cargo.map(c => ({
-        ...(c.preset ? { '@_preset': c.preset } : { '@_chance': c.rawChance?.trim() || c.chance.toFixed(2) }),
-        ...(c.items.length ? { item: c.items.map(i => ({ '@_name': i.name, '@_chance': i.rawChance?.trim() || i.chance.toFixed(2) })) } : {}),
-      })),
+      cargo: st.cargo.map(blockNode),
     } : {}),
     ...(st.attachments.length ? {
-      attachments: st.attachments.map(a => ({
-        ...(a.preset ? { '@_preset': a.preset } : { '@_chance': a.rawChance?.trim() || a.chance.toFixed(2) }),
-        ...(a.items.length ? { item: a.items.map(i => ({ '@_name': i.name, '@_chance': i.rawChance?.trim() || i.chance.toFixed(2) })) } : {}),
-      })),
+      attachments: st.attachments.map(blockNode),
     } : {}),
     ...(st.hoarder ? { hoarder: {} } : {}),
-    ...(st.damage ? {
-      damage: {
-        '@_min': st.damage.rawMin?.trim() || String(st.damage.min),
-        '@_max': st.damage.rawMax?.trim() || String(st.damage.max),
-      },
-    } : {}),
+    ...(st.damage ? { damage: damageAttrs(st.damage) } : {}),
   }));
   const builder = new XMLBuilder(BUILDER_OPTIONS);
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
@@ -116,7 +135,7 @@ export function inspectSpawnableTypesCompatibility(raw: string): string[] {
   const unknown = new Set<string>();
   const knownTypeKeys  = new Set(['@_name', 'usage', 'category', 'tag', 'cargo', 'attachments', 'hoarder', 'damage']);
   const knownBlockKeys = new Set(['@_chance', '@_preset', 'item']);
-  const knownItemAttrs = new Set(['@_name', '@_chance']);
+  const knownItemAttrs = new Set(['@_name', '@_chance', 'damage', 'cargo', 'attachments']);
   const knownDamageAttrs = new Set(['@_min', '@_max']);
 
   for (const t of typesList) {

@@ -26,7 +26,7 @@ Supports **vanilla loot tables** and fully merges **mod economy core entries** (
 ## Features
 
 ### Interactive Map
-- Live map overlay for **Namalsk, Chernarus+, Livonia,** and **Sakhal**
+- Live map overlay for **Namalsk, Chernarus+, Livonia, Sakhal,** and **Nasdara** (DayZ Badlands)
 - Buildings rendered as coloured markers by their dominant **tier zone**
 - Click any building to see a **loot breakdown by category** — Rifles, Pistols, Weapons, Weapon Parts, Ammunition, Magazines, Ammo Boxes, Clothes, and more
 - Smart attachment detection: scopes, suppressors, magazines, and mod-specific items are automatically separated from base weapons

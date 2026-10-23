@@ -15,32 +15,18 @@ import {
 } from '../lib/xmlParser';
 import { clearAreaFlags, loadTierLayers } from '../lib/tierZoneResolver';
 import { readBinaryFile } from '../lib/fileDiscovery';
-import { getAllMapConfigs } from '../lib/mapConfig';
+import { getAllMapConfigs, BUILTIN_MAP_BY_ID, bundledCeToolPath, detectBuiltinMap } from '../lib/mapConfig';
 import { parseCeToolProjectXml } from '../lib/ceToolParser';
 import { findFFSpawnSelectorConfig, parseFFSettings, parseFFSpawnPoints } from '../lib/ffSpawnSelector';
-import type { MissionData, CeEntry, CeToolProject, DayZType, SpawnableType } from '../types/dayz';
+import type { MissionData, CeEntry, CeToolProject, DayZType, DayZEvent, SpawnableType } from '../types/dayz';
 import type { CommunityMapDef } from '../types/map';
-import { useServerStore, toMessage, type TerritoryBitmapOverride } from '../store/serverStore';
+import { useServerStore, toMessage, confirmDiscardUnsaved, type TerritoryBitmapOverride } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
 import { useCommunityMapsStore } from '../store/communityMapsStore';
-
-const MAP_KEYWORDS: Record<string, string[]> = {
-  namalsk:   ['namalsk'],
-  chernarus: ['chernarus'],
-  livonia:   ['livonia', 'enoch'],
-  sakhal:    ['sakhal'],
-};
 
 const FILE_KEYS = ['typesPath', 'eventSpawnsPath', 'eventsPath', 'spawnableTypesPath'] as const;
 const LAYER_EXTS = ['.tga', '.png', '.bmp'];
 const ASSET_BASE = import.meta.env.BASE_URL || '/';
-
-const BUNDLED_CETOOL_PROJECTS: Record<string, { xmlPath: string }> = {
-  namalsk: { xmlPath: 'cetool/namalsk/namalsk.xml' },
-  chernarus: { xmlPath: 'cetool/chernarusplus/chernarusplus.xml' },
-  livonia: { xmlPath: 'cetool/enoch/enoch.xml' },
-  sakhal: { xmlPath: 'cetool/sakhal/sakhal.xml' },
-};
 
 function joinPath(...parts: string[]): string {
   return parts.join('/').replace(/\\/g, '/').replace(/\/+/g, '/');
@@ -102,9 +88,11 @@ async function mergeEconomyCoreFiles(
   entries: CeEntry[],
   baseTypes: Map<string, DayZType>,
   baseSpawnables: Map<string, SpawnableType>,
-): Promise<{ types: Map<string, DayZType>; spawnableTypes: Map<string, SpawnableType>; warnings: string[] }> {
+  baseEvents: Map<string, DayZEvent>,
+): Promise<{ types: Map<string, DayZType>; spawnableTypes: Map<string, SpawnableType>; events: Map<string, DayZEvent>; warnings: string[] }> {
   const types = new Map(baseTypes);
   const spawnableTypes = new Map(baseSpawnables);
+  const events = new Map(baseEvents);
   const warnings: string[] = [];
 
   for (const entry of entries) {
@@ -122,6 +110,8 @@ async function mergeEconomyCoreFiles(
           } else {
             for (const [name, st] of parsed) spawnableTypes.set(name, st);
           }
+        } else if (file.type === 'events') {
+          for (const [name, ev] of parseEventsXml(await readFile(filePath))) events.set(name, { ...ev, source: filePath });
         } else {
           warnings.push(`ce file not found: ${entry.folder}/${file.name} (unknown type: "${file.type}")`);
         }
@@ -131,7 +121,7 @@ async function mergeEconomyCoreFiles(
     }
   }
 
-  return { types, spawnableTypes, warnings };
+  return { types, spawnableTypes, events, warnings };
 }
 
 async function loadCeToolTierData(opts: {
@@ -169,9 +159,9 @@ async function loadCeToolTierData(opts: {
     let usingBundledCeTool = false;
 
     if (!resolvedProjectPath) {
-      const bundled = BUNDLED_CETOOL_PROJECTS[activeMap];
+      const bundled = bundledCeToolPath(activeMap, 'xml');
       if (bundled) {
-        resolvedProjectPath = bundled.xmlPath;
+        resolvedProjectPath = bundled;
         usingBundledCeTool = true;
         console.info('[tiers] Using bundled CE project XML:', resolvedProjectPath);
       }
@@ -254,7 +244,7 @@ async function loadCeToolTierData(opts: {
 }
 
 function autoSelectMission(missions: MissionFiles[], activeMap: string): MissionFiles | null {
-  const keywords = MAP_KEYWORDS[activeMap];
+  const keywords = BUILTIN_MAP_BY_ID[activeMap]?.keywords;
   if (!keywords) return null;
   const matches = missions.filter(m =>
     keywords.some(kw => m.missionName.toLowerCase().includes(kw))
@@ -291,7 +281,7 @@ async function loadMission(m: MissionFiles): Promise<{ mission: MissionData; war
   const dupWarn = (file: string, dups: string[]) => {
     if (dups.length === 0) return;
     const shown = [...new Set(dups)].slice(0, 6).join(', ');
-    warnings.push(`compat: ${file} duplicate entries, keeping last (${shown}${dups.length > 6 ? ', ...' : ''})`);
+    warnings.push(`compat: ${file} defines ${shown}${dups.length > 6 ? ', ...' : ''} more than once; the last definition is the one shown and used`);
   };
   const typeDups: string[] = [], eventDups: string[] = [], spawnableDups: string[] = [];
 
@@ -402,19 +392,19 @@ async function loadTerritoryBitmapsFallback(
   }
 
   // 2. Bundled data for built-in maps
-  const bundledEntry = BUNDLED_CETOOL_PROJECTS[activeMap];
-  if (!bundledEntry) return;
+  const bundledXmlPath = bundledCeToolPath(activeMap, 'xml');
+  if (!bundledXmlPath) return;
 
   let xmlText: string;
   try {
-    xmlText = await readBundledText(bundledEntry.xmlPath);
+    xmlText = await readBundledText(bundledXmlPath);
   } catch {
     return;
   }
 
   const mapCfg = getAllConfigs(communityMaps)[activeMap];
   const worldSize = mapCfg?.worldWidth ?? 15360;
-  const projectDir = bundledEntry.xmlPath.slice(0, bundledEntry.xmlPath.lastIndexOf('/'));
+  const projectDir = bundledXmlPath.slice(0, bundledXmlPath.lastIndexOf('/'));
 
   const layerLoader = (name: string) => loadBundledLayerByName(projectDir, name);
   await loadTerritoryBitmaps({ xmlContent: xmlText, layerLoader, worldSize, layersDir: null });
@@ -435,7 +425,6 @@ export function useServerFolder() {
   const setCeSource          = useServerStore(s => s.setCeSource);
   const setReloadCeToolData  = useServerStore(s => s.setReloadCeToolData);
   const setReloadTerritoryBitmaps = useServerStore(s => s.setReloadTerritoryBitmaps);
-  const ceToolFolderOverride  = useServerStore(s => s.ceToolFolderOverride);
   const setWeather           = useServerStore(s => s.setWeather);
   const setGameplay          = useServerStore(s => s.setGameplay);
   const setLimitsDefinition  = useServerStore(s => s.setLimitsDefinition);
@@ -457,13 +446,23 @@ export function useServerFolder() {
 
   // Stable ref so the map-change effect always calls the latest selectMission
   // without needing it in the dependency array (which would cause double-firing).
-  const selectMissionRef = useRef<(m: MissionFiles) => Promise<void>>(async () => {});
+  const selectMissionRef = useRef<(m: MissionFiles, confirmed?: boolean) => Promise<void>>(async () => {});
   // Breaks the selectMission → setActiveMap → map-change effect → selectMission
   // cycle that reloaded every mission twice.
   const loadedMissionPathRef = useRef<string | null>(null);
 
-  const selectMission = useCallback(async (m: MissionFiles) => {
+  // `confirmed`: the caller already asked about unsaved changes (folder open).
+  const selectMission = useCallback(async (m: MissionFiles, confirmed = false) => {
+    if (!confirmed && m.missionPath !== loadedMissionPathRef.current && !confirmDiscardUnsaved('Load another mission')) {
+      // The map dropdown triggers this after switching maps; put it back to the loaded mission's map.
+      const loaded = useServerStore.getState().mission;
+      const loadedMap = loaded ? detectBuiltinMap(loaded.missionName) : null;
+      if (loadedMap) setActiveMap(loadedMap);
+      return;
+    }
     loadedMissionPathRef.current = m.missionPath;
+    // Selections point into the previous mission's data.
+    useUiStore.setState({ selectedBuildingType: null, selectedBuildingPos: null, selectedEventName: null, selectedFFSpawnPointName: null });
     setPendingMissions(null);
     setLoading(true);
     setLoadError(null);
@@ -490,14 +489,13 @@ export function useServerFolder() {
       setMission(mission);
 
       const lowerName = mission.missionName.toLowerCase();
-      const detectedMap = Object.entries(MAP_KEYWORDS).find(([, kws]) =>
-        kws.some(kw => lowerName.includes(kw))
-      )?.[0] ?? null;
+      const detectedMap = detectBuiltinMap(lowerName);
       if (detectedMap) setActiveMap(detectedMap);
       const resolvedMap = detectedMap ?? activeMap;
 
       // Economy core
       let economyCoreEntries: CeEntry[] = [];
+      setEconomyCore([]);
       if (m.economyCorePath) {
         try {
           economyCoreEntries = parseEconomyCoreXml(await readFile(m.economyCorePath));
@@ -505,11 +503,11 @@ export function useServerFolder() {
         } catch { /* optional — silently skip */ }
       }
       if (economyCoreEntries.length > 0) {
-        const { types, spawnableTypes, warnings: ceWarnings } = await mergeEconomyCoreFiles(
-          m.missionPath, economyCoreEntries, mission.types, mission.spawnableTypes,
+        const { types, spawnableTypes, events, warnings: ceWarnings } = await mergeEconomyCoreFiles(
+          m.missionPath, economyCoreEntries, mission.types, mission.spawnableTypes, mission.events,
         );
         if (ceWarnings.length > 0) { allWarnings.push(...ceWarnings); setLoadWarnings([...allWarnings]); }
-        setMission({ ...mission, types, spawnableTypes });
+        setMission({ ...mission, types, spawnableTypes, events });
       }
 
       // Map group proto (building spawn layer)
@@ -519,7 +517,12 @@ export function useServerFolder() {
           const proto = parseMapGroupProtoXml(protoRaw);
           setMapGroupProto(proto);
           setBuildingInstances(joinMapGroups(proto, parseMapGroupPosXml(posRaw)));
-        } catch { /* optional layer — silently skip */ }
+        } catch (err) {
+          setMapGroupProto(new Map());
+          setBuildingInstances([]);
+          allWarnings.push(`mapgroupproto/mapgrouppos (read error: ${toMessage(err)})`);
+          setLoadWarnings([...allWarnings]);
+        }
       } else {
         setMapGroupProto(new Map());
         setBuildingInstances([]);
@@ -532,7 +535,7 @@ export function useServerFolder() {
       const { ceProject, loaded: tiersLoaded, ceSource, warnings: tierWarnings } = await loadCeToolTierData({
         missionPath: m.missionPath,
         activeMap: resolvedMap,
-        ceToolFolderOverride,
+        ceToolFolderOverride: useServerStore.getState().ceToolFolderOverride,
         serverRootPath: serverRootRef.current,
         communityMaps,
       });
@@ -594,7 +597,7 @@ export function useServerFolder() {
     } finally {
       setLoading(false);
     }
-  }, [activeMap, ceToolFolderOverride, communityMaps, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps, clearTerritoryState, setActiveMap, setBuildingInstances, setEconomyCore, setGameplay, setMapGroupProto, setPlayerSpawnData, setTierZonesLoaded, setWeather]);
+  }, [activeMap, communityMaps, setMission, setPaths, setLoading, setLoadError, setLoadWarnings, setMapImagePath, setCeToolProject, setCeSource, setLimitsDefinition, setLimitsDefinitionUser, loadTerritoryBitmaps, clearTerritoryState, setActiveMap, setBuildingInstances, setEconomyCore, setGameplay, setMapGroupProto, setPlayerSpawnData, setTierZonesLoaded, setWeather]);
 
   // Keep ref current every render so the effect below always has the latest version.
   useEffect(() => { selectMissionRef.current = selectMission; });
@@ -631,11 +634,11 @@ export function useServerFolder() {
     }
     setAllMissions(missions);
     if (missions.length === 1) {
-      await selectMission(missions[0]);
+      await selectMission(missions[0], true);
     } else {
       const auto = autoSelectMission(missions, activeMap);
       if (auto) {
-        await selectMission(auto);
+        await selectMission(auto, true);
       } else {
         setLoading(false);
         setPendingMissions(missions);
@@ -644,6 +647,7 @@ export function useServerFolder() {
   }
 
   const openFolder = useCallback(async () => {
+    if (!confirmDiscardUnsaved('Open another server folder')) return;
     setLoading(true);
     setLoadError(null);
     setLoadWarnings([]);
@@ -654,6 +658,7 @@ export function useServerFolder() {
 
       serverRootRef.current = result.path;
       setServerRootPath(result.path);
+      setCeToolFolderOverride(null); // belongs to the previous server
       useUiStore.getState().addRecentFolder(result.path);
       void loadFFSpawnSelector(result.path);
       await loadFromMissions(result.missions);
@@ -690,12 +695,14 @@ export function useServerFolder() {
   }, [activeMap, selectMission]);
 
   const openFromPath = useCallback(async (path: string) => {
+    if (!confirmDiscardUnsaved('Open another server folder')) return;
     setLoading(true);
     setLoadError(null);
     setLoadWarnings([]);
     try {
       serverRootRef.current = path;
       setServerRootPath(path);
+      setCeToolFolderOverride(null); // belongs to the previous server
       useUiStore.getState().addRecentFolder(path);
       void loadFFSpawnSelector(path);
       const missions = await scanFolder(path);
@@ -717,9 +724,9 @@ export function useServerFolder() {
     if (!projectPath) return;
     // Store the project XML path directly (not the folder)
     setCeToolFolderOverride(projectPath);
-    // Re-trigger selectMission for active mission to reload tiers
-    const current = allMissions.find(m => serverRootRef.current && m.missionPath.startsWith(serverRootRef.current ?? ''));
-    if (current) await selectMission(current);
+    // Reload the loaded mission so tiers come from the picked project
+    const current = allMissions.find(m => m.missionPath === loadedMissionPathRef.current);
+    if (current) await selectMission(current, true);
   }, [activeMap, setCeToolFolderOverride, allMissions, selectMission]);
 
   const reloadCeToolData = useCallback(async () => {
@@ -731,7 +738,7 @@ export function useServerFolder() {
     const { ceProject, loaded, ceSource, warnings } = await loadCeToolTierData({
       missionPath,
       activeMap,
-      ceToolFolderOverride,
+      ceToolFolderOverride: useServerStore.getState().ceToolFolderOverride,
       serverRootPath: serverRootRef.current,
       communityMaps,
     });
@@ -740,7 +747,7 @@ export function useServerFolder() {
     if (loaded) setTierZonesLoaded(true);
     if (warnings.length > 0) setLoadWarnings([...useUiStore.getState().loadWarnings, ...warnings]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMap, ceToolFolderOverride, setCeToolProject, setTierZonesLoaded, setCeSource, setLoadWarnings]);
+  }, [activeMap, setCeToolProject, setTierZonesLoaded, setCeSource, setLoadWarnings]);
 
   const reloadTerritoryBitmaps = useCallback(async () => {
     const { missionPath } = useServerStore.getState().paths;

@@ -1,6 +1,6 @@
-import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import { XMLParser } from 'fast-xml-parser';
 import type { CeEntry } from '../../types/dayz';
-import { PARSER_OPTIONS, BUILDER_OPTIONS, stripBom, strAttr } from './shared';
+import { PARSER_OPTIONS, stripBom, strAttr, parseOrdered, buildOrdered, tagOf, childrenOf, attrsOf, elementsOf, elem, type ONode } from './shared';
 
 const CE_PARSER_OPTIONS = {
   ...PARSER_OPTIONS,
@@ -21,12 +21,20 @@ export function parseEconomyCoreXml(raw: string): CeEntry[] {
   });
 }
 
-export function serializeEconomyCoreXml(entries: CeEntry[]): string {
-  const ceList = entries.map(e => ({
-    '@_folder': e.folder,
-    file: e.files.map(f => ({ '@_name': f.name, '@_type': f.type })),
-  }));
-  const builder = new XMLBuilder(BUILDER_OPTIONS);
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    builder.build({ economycore: { ce: ceList } });
+/** Rewrites only the <ce> list in the file's current text; <classes>, <defaults> and comments are kept. */
+export function serializeEconomyCoreXml(entries: CeEntry[], original: string): string {
+  const doc = parseOrdered(original);
+  const root = doc.find(n => tagOf(n) === 'economycore');
+  if (!root) throw new Error('cfgeconomycore.xml on disk has no <economycore> root; refusing to overwrite it');
+  const kids = childrenOf(root);
+  const folderOf = (n: ONode) => attrsOf(n)['@_folder'] ?? '';
+  const wanted = new Set(entries.map(e => e.folder));
+  const kept = kids.filter(n => tagOf(n) !== 'ce' || wanted.has(folderOf(n)));
+  const have = new Set(elementsOf(kept, 'ce').map(folderOf));
+  for (const e of entries) {
+    if (have.has(e.folder)) continue;
+    kept.push({ ce: e.files.map(f => elem('file', { name: f.name, type: f.type })), ':@': { '@_folder': e.folder } });
+  }
+  root.economycore = kept;
+  return buildOrdered(doc);
 }

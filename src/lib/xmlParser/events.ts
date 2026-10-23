@@ -32,7 +32,10 @@ export function parseEventsXml(raw: string, duplicates?: string[]): Map<string, 
           deletable:      numAttr(ev.flags as Record<string, unknown>, 'deletable') as 0 | 1,
           init_random:    numAttr(ev.flags as Record<string, unknown>, 'init_random') as 0 | 1,
           remove_damaged: numAttr(ev.flags as Record<string, unknown>, 'remove_damaged') as 0 | 1,
-          sec_spawner:    numAttr(ev.flags as Record<string, unknown>, 'sec_spawner') as 0 | 1,
+          // optional in vanilla; only carry it when the file has it
+          ...((ev.flags as Record<string, unknown>)['@_sec_spawner'] !== undefined
+            ? { sec_spawner: numAttr(ev.flags as Record<string, unknown>, 'sec_spawner') as 0 | 1 }
+            : {}),
         },
       } : {}),
       ...(typeof ev.position === 'string' ? { position: ev.position } : {}),

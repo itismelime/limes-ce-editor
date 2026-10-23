@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useDeferredValue, useMemo } from 'react';
 import { useServerStore } from '../store/serverStore';
 import { useUiStore } from '../store/uiStore';
 import { useCommunityMapsStore } from '../store/communityMapsStore';
@@ -14,7 +14,9 @@ export function useMapMarkers(enabled = true) {
   const eventSpawns = useServerStore(s => s.mission?.eventSpawns ?? []);
   const events = useServerStore(s => s.mission?.events ?? EMPTY_EVENTS);
   const spawnableTypes = useServerStore(s => s.mission?.spawnableTypes ?? EMPTY_SPAWNABLE_TYPES);
-  const originalTypes = useServerStore(s => s.originalTypes ?? EMPTY_TYPES);
+  // Live (unsaved) types, like building popups; deferred so re-resolving every
+  // event marker never blocks typing in an editor.
+  const types = useDeferredValue(useServerStore(s => s.mission?.types ?? EMPTY_TYPES));
   const activeMap  = useUiStore(s => s.activeMap);
   const mapImagePaths  = useUiStore(s => s.mapImagePaths);
   const mapImageSizes  = useUiStore(s => s.mapImageSizes);
@@ -47,10 +49,9 @@ export function useMapMarkers(enabled = true) {
       eventSpawns,
       events,
       spawnableTypes,
-      // Keep event markers stable while unsaved types edits are being staged from building popups.
-      types: originalTypes,
+      types,
     };
-  }, [missionName, eventSpawns, events, spawnableTypes, originalTypes]);
+  }, [missionName, eventSpawns, events, spawnableTypes, types]);
 
   const markers = useMemo(() => {
     if (!markerMission || !enabled) return [];

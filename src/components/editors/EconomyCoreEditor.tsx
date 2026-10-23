@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { readFile, writeFile } from '../../lib/fileDiscovery';
+import { readFile, writeFile, backupIfNeeded } from '../../lib/fileDiscovery';
 import { useServerStore, toMessage } from '../../store/serverStore';
 import { SaveButton } from '../shared/SaveButton';
 
 interface EditingFile {
   path: string;
   name: string;
+  type: string;
   content: string;
   dirty: boolean;
 }
@@ -24,17 +25,27 @@ export function EconomyCoreEditor() {
   const [saving, setSaving]     = useState(false);
   const [success, setSuccess]   = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const reloadTypesSource = useServerStore(s => s.reloadTypesSource);
+  const dirtyTypesSources = useServerStore(s => s.dirty.typesSources);
+
+  // An open file / selection belongs to the mission it was opened from.
+  const [openedFor, setOpenedFor] = useState(paths.missionPath);
+  if (openedFor !== paths.missionPath) {
+    setOpenedFor(paths.missionPath);
+    setEditingFile(null);
+    setSelectedFolder(null);
+  }
 
   const trimmedName = name.trim();
   const canSave = trimmedName.length > 0 && xml.trim().length > 0 && !!paths.economyCorePath;
   const selectedEntry = economyCore.find(e => e.folder === selectedFolder) ?? null;
 
-  async function handleSelectFile(folder: string, fileName: string) {
+  async function handleSelectFile(folder: string, fileName: string, type: string) {
     if (!paths.missionPath) return;
     const filePath = `${paths.missionPath}/${folder}/${fileName}`;
     try {
       const content = await readFile(filePath);
-      setEditingFile({ path: filePath, name: fileName, content, dirty: false });
+      setEditingFile({ path: filePath, name: fileName, type, content, dirty: false });
     } catch (err) {
       useServerStore.setState({ saveError: `Failed to read ${fileName}: ${toMessage(err)}` });
     }
@@ -42,10 +53,17 @@ export function EconomyCoreEditor() {
 
   async function handleSaveFile() {
     if (!editingFile) return;
+    if (dirtyTypesSources.includes(editingFile.path)) {
+      useServerStore.setState({ saveError: `${editingFile.name} has unsaved edits from the Loot Types tab. Save or revert those first.` });
+      return;
+    }
     setSaving(true);
     try {
+      await backupIfNeeded(editingFile.path);
       await writeFile(editingFile.path, editingFile.content);
       setEditingFile({ ...editingFile, dirty: false });
+      // keep the Loot Types tab and map popups in step with the file
+      if (editingFile.type === 'types') reloadTypesSource(editingFile.path, editingFile.content);
     } catch (err) {
       useServerStore.setState({ saveError: `Failed to save ${editingFile.name}: ${toMessage(err)}` });
     }
@@ -189,7 +207,7 @@ export function EconomyCoreEditor() {
                   {selectedEntry.files.map((f, j) => (
                     <button
                       key={j}
-                      onClick={() => handleSelectFile(selectedEntry.folder, f.name)}
+                      onClick={() => handleSelectFile(selectedEntry.folder, f.name, f.type)}
                       className="w-full flex items-center gap-3 bg-slate-800 hover:bg-slate-700 rounded px-3 py-2 transition-colors text-left"
                     >
                       <svg className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
