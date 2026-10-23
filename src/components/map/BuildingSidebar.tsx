@@ -28,6 +28,7 @@ export function BuildingSidebar({ onWidthChange, onSelectItem }: {
   const tierZonesLoaded = useUiStore(s => s.tierZonesLoaded);
   const selectedBuildingPos = useUiStore(s => s.selectedBuildingPos);
   const territoryBitmaps = useServerStore(s => s.territoryBitmaps);
+  const ceToolLayers = useServerStore(s => s.ceToolLayers);
   const useZoneData = tierZonesLoaded || (territoryBitmaps.size > 0 && hasCeToolBitmaps());
 
   const building = useMemo(() => {
@@ -43,7 +44,9 @@ export function BuildingSidebar({ onWidthChange, onSelectItem }: {
   const allZones = useMemo(() => {
     if (!samplePos || !useZoneData) return null;
     return sampleAllZonesAtPos(samplePos.x, samplePos.z);
-  }, [samplePos, useZoneData]);
+    // sampleAllZonesAtPos reads module-level bitmaps; these change when zones are painted/added/removed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [samplePos, useZoneData, territoryBitmaps, ceToolLayers]);
 
   const zoneTiers  = allZones?.tiers.filter(t => t !== 'unknown') ?? [];
   const zoneUsages = allZones?.usages ?? [];

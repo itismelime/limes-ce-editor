@@ -1,5 +1,4 @@
 import { lazy, memo, Suspense, useEffect, useState } from 'react';
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
@@ -57,7 +56,6 @@ const TAB_PREFETCHERS: Record<ActiveTab, () => Promise<unknown>> = {
 
 const IDLE_PREFETCH_TABS: ActiveTab[] = ['map', 'types'];
 const prefetchedTabs = new Set<ActiveTab>();
-const KNOWN_MAPS = new Set(['namalsk', 'chernarus', 'livonia', 'sakhal']);
 
 function prefetchTabOnce(tab: ActiveTab): void {
   if (prefetchedTabs.has(tab)) return;
@@ -98,7 +96,9 @@ function parseLoadWarning(raw: string): ParsedLoadWarning {
         detail: rest.slice(unknownNodesIdx + ' unknown nodes '.length).replace(/^\(|\)$/g, ''),
       };
     }
-    return { raw, kind: 'compat', file: rest };
+    // other compat notices are "<file> <detail>"
+    const space = rest.indexOf(' ');
+    return space === -1 ? { raw, kind: 'compat', file: rest } : { raw, kind: 'compat', file: rest.slice(0, space), detail: rest.slice(space + 1) };
   }
 
   const parseMatch = raw.match(/^(.*) \(parse error(?:: (.*))?\)$/);
@@ -308,9 +308,6 @@ export function AppShell() {
   const missionPath = useServerStore(s => s.paths.missionPath);
   const dirty = useServerStore(s => s.dirty);
   const activeTab = useUiStore(s => s.activeTab);
-  const activeMap = useUiStore(s => s.activeMap);
-  const setMapImagePath = useUiStore(s => s.setMapImagePath);
-  const setMapImageSize = useUiStore(s => s.setMapImageSize);
   const loadError = useUiStore(s => s.loadError);
   const loadWarnings = useUiStore(s => s.loadWarnings);
   const isLoading = useUiStore(s => s.isLoading);
@@ -402,7 +399,7 @@ export function AppShell() {
 
     const warmup = async () => {
       setIsStartupWarmup(true);
-      setStartupMessage('Preparing map cache...');
+      setStartupMessage('Preparing map...');
 
       // Keep startup focused on map readiness; avoid mounting hidden heavy tabs.
       setMountedTabs(prev => ({
@@ -411,22 +408,6 @@ export function AppShell() {
       }));
       prefetchTabOnce('map');
       prefetchTabOnce('types');
-
-      const currentMapImagePaths = useUiStore.getState().mapImagePaths;
-      const currentCommunityMapIds = new Set(useCommunityMapsStore.getState().maps.map(m => m.id));
-      if ((KNOWN_MAPS.has(activeMap) || currentCommunityMapIds.has(activeMap)) && !currentMapImagePaths[activeMap]) {
-        try {
-          const result = await invoke<{ path: string; width: number; height: number }>('download_map_tiles', {
-            mapId: activeMap,
-          });
-          if (!cancelled) {
-            setMapImagePath(activeMap, convertFileSrc(result.path));
-            setMapImageSize(activeMap, result.width, result.height);
-          }
-        } catch {
-          // If map cache preparation fails, continue warmup and let map tab handle retries.
-        }
-      }
 
       if (cancelled) return;
       setStartupMessage('Warming editors...');
@@ -446,8 +427,7 @@ export function AppShell() {
       cancelled = true;
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missionPath, activeMap]);
+  }, [missionPath]);
 
   const showNoFilesError = loadError === 'no_files_found' || loadError === 'permission_denied' || loadError?.startsWith('error:');
   const prefetchTab = (tab: ActiveTab) => {

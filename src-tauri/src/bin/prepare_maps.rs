@@ -8,11 +8,12 @@
 //!   cargo run --manifest-path src-tauri/Cargo.toml --bin prepare_maps -- \
 //!     --chernarus "C:\...\chernarusplus_data.pbo" \
 //!     --livonia   "C:\...\enoch_data.pbo"         \
-//!     --sakhal    "C:\...\sakhal_data.pbo"
+//!     --sakhal    "C:\...\sakhal_data.pbo"         \
+//!     --nasdara   "C:\...\nasdara_data.pbo"
 //!
 //! Output: src-tauri/resources/maps/{map_id}/tiles/{z}/{x}/{y}.webp
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use limes_ce_editor_lib::pbo;
 
@@ -25,31 +26,9 @@ struct BuiltinMap {
 const BUILTIN_MAPS: &[BuiltinMap] = &[
     BuiltinMap { id: "chernarus", patterns: &["chernarusplus", "chernarus"], world_size: 15360 },
     BuiltinMap { id: "livonia",   patterns: &["enoch", "livonia"],           world_size: 12800 },
-    BuiltinMap { id: "sakhal",    patterns: &["sakhal"],                     world_size: 12800 },
+    BuiltinMap { id: "sakhal",    patterns: &["sakhal"],                     world_size: 15360 },
+    BuiltinMap { id: "nasdara",   patterns: &["nasdara"],                    world_size: 16384 },
 ];
-
-/// Recursively search `dir` (up to `depth` levels) for a file whose lowercase
-/// name ends in `_data.pbo` and contains at least one of `patterns`.
-fn find_data_pbo(dir: &Path, patterns: &[&str], depth: usize) -> Option<PathBuf> {
-    if depth == 0 { return None; }
-    let Ok(entries) = std::fs::read_dir(dir) else { return None };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                let lower = name.to_lowercase();
-                if lower.ends_with("_data.pbo") && patterns.iter().any(|p| lower.contains(p)) {
-                    return Some(path);
-                }
-            }
-        } else if path.is_dir() {
-            if let Some(found) = find_data_pbo(&path, patterns, depth - 1) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -67,7 +46,7 @@ fn main() {
                 i += 1;
                 if i < args.len() { dayz_path = Some(PathBuf::from(&args[i])); }
             }
-            s @ ("--chernarus" | "--livonia" | "--sakhal") => {
+            s @ ("--chernarus" | "--livonia" | "--sakhal" | "--nasdara") => {
                 let key = s.trim_start_matches('-').to_string();
                 i += 1;
                 if i < args.len() { explicit.insert(key, PathBuf::from(&args[i])); }
@@ -80,7 +59,7 @@ fn main() {
     if dayz_path.is_none() && explicit.is_empty() {
         eprintln!("Usage:");
         eprintln!("  --dayz-path <DayZ install dir>   auto-discover PBOs");
-        eprintln!("  --chernarus / --livonia / --sakhal <path>   explicit PBO paths");
+        eprintln!("  --chernarus / --livonia / --sakhal / --nasdara <path>   explicit PBO paths");
         std::process::exit(1);
     }
 
@@ -93,7 +72,7 @@ fn main() {
         }
         if let Some(ref dayz) = dayz_path {
             println!("[{}] Searching in {}…", map.id, dayz.display());
-            match find_data_pbo(dayz, map.patterns, 6) {
+            match pbo::find_data_pbo(dayz, map.patterns, 6) {
                 Some(p) => { println!("[{}] Found: {}", map.id, p.display()); return Some((map, p)); }
                 None => { eprintln!("[{}] PBO not found. Pass --{} <path> explicitly.", map.id, map.id); }
             }

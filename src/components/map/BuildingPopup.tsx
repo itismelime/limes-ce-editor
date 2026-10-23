@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BuildingInstance, DayZType } from '../../types/dayz';
+import { containerAcceptsType } from '../../lib/lootResolver';
 import { TIER_COLORS, getUsageColor, getUsageTextColor, formatUsageLabel } from '../../types/map';
 import { useUiStore } from '../../store/uiStore';
 import { useServerStore } from '../../store/serverStore';
@@ -18,25 +19,6 @@ interface Props {
 }
 
 const EMPTY_TYPES = new Map<string, DayZType>();
-
-function matchesContainer(
-  type: DayZType,
-  containerTags: string[],
-  containerCategories: string[],
-): boolean {
-  const isUnrestricted = type.usages.length === 0 || type.usages.every(u => u === '');
-  const normalizedTags = containerTags.map(tag => tag.toLowerCase());
-  const normalizedCategories = containerCategories.map(category => category.toLowerCase());
-  const usageMatch =
-    isUnrestricted ||
-    normalizedTags.length === 0 ||
-    type.usages.some(u => normalizedTags.includes(u.toLowerCase()));
-  const catMatch =
-    normalizedCategories.length > 0 &&
-    type.category !== null &&
-    normalizedCategories.includes(type.category.toLowerCase());
-  return usageMatch && catMatch;
-}
 
 function CategorySection({
   label,
@@ -413,7 +395,7 @@ export function BuildingPopup({
       if (container.categories.length === 0 && originalCategories.length > 0) continue;
       for (const type of types.values()) {
         if (seen.has(type.name)) continue;
-        if (!matchesContainer(type, container.tags, container.categories)) continue;
+        if (!containerAcceptsType(type, container.tags, container.categories)) continue;
         seen.add(type.name);
         result.push(type);
       }

@@ -23,7 +23,10 @@ function PosRow({ pos, onUpdate, onDelete }: {
   const commit = () => {
     const nx = parseFloat(x);
     const nz = parseFloat(z);
-    if (!isNaN(nx) && !isNaN(nz)) onUpdate({ x: nx, z: nz, rawX: x.trim(), rawZ: z.trim() });
+    if (isNaN(nx) || isNaN(nz)) return;
+    if (x.trim() === (pos.rawX ?? String(pos.x)) && z.trim() === (pos.rawZ ?? String(pos.z))) return; // focus/blur only
+    // keep y, a and any other attributes of the <pos>
+    onUpdate({ ...pos, x: nx, z: nz, rawX: x.trim(), rawZ: z.trim() });
   };
 
   return (

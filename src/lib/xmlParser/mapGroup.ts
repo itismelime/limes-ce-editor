@@ -1,9 +1,11 @@
-import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import { XMLParser } from 'fast-xml-parser';
 import { IS_COMPAT_MODE } from '../ceMode';
 import type { BuildingInstance, ContainerDef } from '../../types/dayz';
 import {
-  PARSER_OPTIONS, BUILDER_OPTIONS, stripBom,
+  PARSER_OPTIONS, stripBom,
   num, numAttr, strAttr, strAttrs, toObjectArray, parseTierValue,
+  parseOrdered, buildOrdered, tagOf, childrenOf, attrsOf, elementsOf, elem, syncChildren, patchNumAttr,
+  type ONode,
 } from './shared';
 
 const PROTO_PARSER_OPTIONS = {
@@ -71,10 +73,9 @@ export function parseMapGroupProtoXml(raw: string): Map<string, MapGroupProtoXml
       };
     });
 
-    const groupUsages = toObjectArray(group.usage).map(u => strAttr(u, 'name')).filter(Boolean);
-    const containerTags = containers.flatMap(c => c.tags).filter(Boolean);
-    // Building usage comes from mapgroupproto tag names, not container categories
-    const usages = uniqueCaseInsensitive(containerTags.length > 0 ? containerTags : groupUsages);
+    // Group <usage> is what types.xml usages match against; container <tag>s
+    // are placement (floor/shelves/ground), not usages.
+    const usages = uniqueCaseInsensitive(toObjectArray(group.usage).map(u => strAttr(u, 'name')).filter(Boolean));
 
     const valueUsers = toObjectArray(group.value)
       .map(v => strAttrs(v, ['user', 'name']))
@@ -121,36 +122,40 @@ export function joinMapGroups(
   });
 }
 
-export function serializeMapGroupProtoXml(proto: Map<string, MapGroupProtoXmlEntry>): string {
-  const groups = [...proto.entries()]
-    .sort(([, a], [, b]) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
-    .map(([name, entry]) => ({
-      '@_name':    entry.rawName ?? name,
-      '@_lootmax': String(entry.lootmax),
-      // Buildings without containers store usages as group-level <usage> elements
-      ...(entry.containers.length === 0 && entry.usages.length > 0
-        ? { usage: entry.usages.map(u => ({ '@_name': u })) }
-        : {}),
-      ...(entry.containers.length ? {
-        container: entry.containers.map(c => ({
-          '@_name':    c.name,
-          '@_lootmax': String(c.lootmax),
-          ...(c.categories.length ? { category: c.categories.map(cat => ({ '@_name': cat })) } : {}),
-          ...(c.tags.length       ? { tag:      c.tags.map(tag       => ({ '@_name': tag })) } : {}),
-        })),
-      } : {}),
-      ...((entry.valueUsers?.length ?? 0) > 0
-        ? { value: entry.valueUsers!.map(user => (IS_COMPAT_MODE ? { '@_user': user } : { '@_name': user })) }
-        : (entry.tiers.length
-          ? { value: tiersToValueUsers(entry.tiers).map(user => (IS_COMPAT_MODE ? { '@_user': user } : { '@_name': user })) }
-          : {})),
-    }));
+/**
+ * Patches edited usages / values / lootmax / container categories+tags into the
+ * file's current text; everything else (defaults, points, proxies, comments)
+ * is written back unchanged.
+ */
+export function serializeMapGroupProtoXml(proto: Map<string, MapGroupProtoXmlEntry>, original: string): string {
+  const doc = parseOrdered(sanitizeReservedTagNames(original));
+  const root = doc.find(n => ['_prototype', 'mapgroupproto', 'map'].includes(tagOf(n)));
+  if (!root) throw new Error('mapgroupproto.xml on disk has no <prototype> root; refusing to overwrite it');
+  const byName = new Map([...proto.values()].map(e => [(e.rawName ?? '').toLowerCase(), e]));
+  const nameKey = (n: ONode) => attrsOf(n)['@_name'] ?? '';
+  const valueKey = (n: ONode) => attrsOf(n)['@_user'] ?? attrsOf(n)['@_name'] ?? '';
 
-  const builder = new XMLBuilder(BUILDER_OPTIONS);
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    builder.build({ mapgroupproto: { group: groups } });
+  for (const group of elementsOf(childrenOf(root), 'group')) {
+    const entry = byName.get(nameKey(group).toLowerCase());
+    if (!entry) continue;
+    const kids = childrenOf(group);
+    patchNumAttr(group, 'lootmax', entry.lootmax);
+    syncChildren(kids, 'usage', entry.usages.map(u => elem('usage', { name: u })), nameKey, ['value', 'container', 'proxy']);
+    const values = (entry.valueUsers?.length ? entry.valueUsers : tiersToValueUsers(entry.tiers))
+      .map(v => elem('value', IS_COMPAT_MODE ? { user: v } : { name: v }));
+    syncChildren(kids, 'value', values, valueKey, ['container', 'proxy']);
+
+    elementsOf(kids, 'container').forEach((cNode, i) => {
+      const c = entry.containers[i];
+      if (!c || c.name.toLowerCase() !== nameKey(cNode).toLowerCase()) return;
+      const cKids = childrenOf(cNode);
+      patchNumAttr(cNode, 'lootmax', c.lootmax);
+      syncChildren(cKids, 'category', c.categories.map(n => elem('category', { name: n })), nameKey, ['tag', 'point']);
+      syncChildren(cKids, 'tag', c.tags.map(n => elem('tag', { name: n })), nameKey, ['point']);
+    });
+  }
+  return buildOrdered(doc).replace(/<(\/?)_(prototype|constructor|__proto__)([\s/>])/g, '<$1$2$3');
 }
-
 function tiersToValueUsers(tiers: string[]): string[] {
   const nums = [...new Set(
     tiers

@@ -4,15 +4,15 @@ import { useRef } from 'react';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { SearchBar } from '../shared/SearchBar';
+import { NewTypeForm } from './NewTypeForm';
 import { NumberInput } from '../shared/NumberInput';
 import type { DayZType } from '../../types/dayz';
-import { TIER_COLORS, getUsageColor, formatUsageLabel } from '../../types/map';
+import { TIER_COLORS, tierOptions, getUsageColor, formatUsageLabel } from '../../types/map';
 import { CATEGORY_LABELS, CATEGORY_OPTIONS, displayCategory, buildAttachmentNames } from '../../lib/itemClassifier';
 import { SELECTED_ROW_CLASS } from '../shared/ui';
 import { TypeDetailPanel } from '../shared/TypeDetailPanel';
 import { basename } from '../../lib/fileDiscovery';
 
-const TIER_OPTIONS = ['Tier1', 'Tier2', 'Tier3', 'Tier4', 'Tier5', 'Tier6', 'Tier7'];
 
 type SortColumn = 'name' | 'category' | 'tiers' | 'usages' | 'min' | 'nominal';
 type SortDirection = 'asc' | 'desc';
@@ -168,6 +168,9 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
   const [sortedNames, setSortedNames] = useState<string[]>([]);
   const [isComputing, setIsComputing] = useState(false);
   const [listReady, setListReady] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0);
+  const limitsValues = useServerStore(s => s.limitsDefinition?.values);
+  const TIER_OPTIONS = useMemo(() => tierOptions(limitsValues), [limitsValues]);
   const parentRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
   const requestIdRef = useRef(0);
@@ -352,15 +355,13 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
       nextQueryRef.current = null;
       inFlightRef.current = false;
       workerRef.current.postMessage({ type: 'setData', rows: workerRows });
+      // re-run the current filter/sort on the new data (cache was just cleared)
+      setDataVersion(v => v + 1);
     };
 
-    // First sync (fresh worker) posts immediately; edits debounce so rapid
+    // First sync (fresh worker) posts right away; edits debounce so rapid
     // typing doesn't re-serialize the whole dataset per keystroke.
-    if (lastSyncedRowsRef.current === null) {
-      sync();
-      return;
-    }
-    const timer = setTimeout(sync, 250);
+    const timer = setTimeout(sync, lastSyncedRowsRef.current === null ? 0 : 250);
     return () => clearTimeout(timer);
   }, [workerRows, isActive]);
 
@@ -431,7 +432,7 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
     
     setIsComputing(true);
     worker.postMessage({ type: 'compute', requestId, query });
-  }, [typeFilter, tierFilter, usageFilter, sourceFilter, categoryFilter, showInactive, sortCol, sortDir, workerRows, isActive]);
+  }, [typeFilter, tierFilter, usageFilter, sourceFilter, categoryFilter, showInactive, sortCol, sortDir, dataVersion, isActive]);
 
   const sorted = useMemo(
     () => sortedNames.map(name => types.get(name)).filter((t): t is DayZType => !!t),
@@ -460,6 +461,7 @@ export function TypesEditor({ isActive }: { isActive: boolean }) {
           <div className="flex-1 max-w-xs">
             <SearchBar value={typeFilter} onChange={setTypeFilter} placeholder="Search items..." />
           </div>
+          <NewTypeForm onCreated={name => { setTypeFilter(name); setSelectedName(name); }} />
 
           <div className="flex gap-1">
             <button

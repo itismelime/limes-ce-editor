@@ -26,7 +26,7 @@ export function TierLegend() {
       const key = normalized === '' || normalized === 'unknown' ? 'unknown' : normalized;
       if (!byKey.has(key)) {
         byKey.set(key, {
-          label: formatUsageLabel(key),
+          label: formatUsageLabel(key === 'unknown' ? key : usage),
           rawUsages: new Set<string>(),
         });
       }

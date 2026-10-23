@@ -82,12 +82,18 @@ export interface DayZEvent {
   limit?: string;
   secondary?: string;
   children: EventChild[];
+  /** File this event came from when it's a <ce> folder events file; unset = db/events.xml. */
+  source?: string;
 }
 
 export interface SpawnableItem {
   name: string;
   chance: number;
   rawChance?: string;
+  // Update 1.30+: an item can carry its own condition and contents (e.g. a gun case with its gun)
+  damage?: { min: number; max: number; rawMin?: string; rawMax?: string };
+  cargo?: SpawnableCargo[];
+  attachments?: SpawnableAttachments[];
 }
 
 export interface SpawnableCargo {

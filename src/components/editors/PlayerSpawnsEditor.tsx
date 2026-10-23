@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useServerStore } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { SearchBar } from '../shared/SearchBar';
@@ -135,13 +135,6 @@ function FFSpawnPointDetail({ point, onUpdate, onDelete, onClose }: {
   const [y, setY] = useState(String(point.y));
   const [z, setZ] = useState(String(point.z));
 
-  useEffect(() => {
-    setName(point.name);
-    setX(String(point.x));
-    setY(String(point.y));
-    setZ(String(point.z));
-  }, [point.name, point.x, point.y, point.z]);
-
   const commitName = () => { if (name.trim()) onUpdate({ name: name.trim() }); else setName(point.name); };
   const commitCoord = (field: 'x' | 'y' | 'z', raw: string) => {
     const v = parseFloat(raw);
@@ -215,6 +208,11 @@ function FFSpawnPointsSection() {
   const selectedPoint = selected ? ffSpawnPoints.spawnPoints.find(p => p.name === selected) ?? null : null;
 
   const updatePoint = (name: string, patch: Partial<FFSpawnPoint>) => {
+    // The name is the point's id (selection, map markers): never allow two.
+    if (patch.name && patch.name !== name && ffSpawnPoints.spawnPoints.some(p => p.name === patch.name)) {
+      window.alert(`A spawn point named "${patch.name}" already exists.`);
+      return;
+    }
     updateFfSpawnPoints({
       ...ffSpawnPoints,
       spawnPoints: ffSpawnPoints.spawnPoints.map(p => p.name === name ? { ...p, ...patch } : p),
@@ -280,6 +278,8 @@ function FFSpawnPointsSection() {
         </div>
         {selectedPoint && (
           <FFSpawnPointDetail
+            // remount (resetting the draft inputs) whenever the point changes elsewhere, e.g. dragged on the map
+            key={`${selectedPoint.name}|${selectedPoint.x}|${selectedPoint.y}|${selectedPoint.z}`}
             point={selectedPoint}
             onUpdate={patch => updatePoint(selectedPoint.name, patch)}
             onDelete={() => deletePoint(selectedPoint.name)}

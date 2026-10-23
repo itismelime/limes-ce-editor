@@ -1,5 +1,6 @@
 import { readDir, readTextFile, readFile as readBinaryFileNative, writeFile as writeBinaryFileNative, writeTextFile, mkdir, remove as removeNative, rename } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
+import { BUILTIN_MAP_BY_ID } from './mapConfig';
 
 const TARGET_FILES = new Set([
   'types.xml',
@@ -44,12 +45,7 @@ export interface MissionFiles {
   ceToolLayersDir: string | null;
 }
 
-const MAP_HINTS: Record<string, string[]> = {
-  namalsk: ['namalsk'],
-  chernarus: ['chernarus', 'chernarusplus'],
-  livonia: ['livonia', 'enoch'],
-  sakhal: ['sakhal'],
-};
+const mapHints = (mapId: string): string[] => BUILTIN_MAP_BY_ID[mapId]?.keywords ?? [];
 
 const TIER_LAYER_RE = /(?:valuef(?:lg|ig)[-_ ]?)?tier([1-9])\.(png|bmp|tga)$/i;
 const TIER_LAYER_CACHE = new Map<string, Promise<Partial<Record<string, string>>>>();
@@ -63,7 +59,7 @@ function scoreTierLayerPath(path: string, mapId?: string): number {
   if (p.includes('/cetool/')) score += 4;
   if (p.includes('/layers/')) score += 2;
   if (mapId) {
-    const hints = MAP_HINTS[mapId] ?? [];
+    const hints = mapHints(mapId);
     if (hints.some(h => p.includes(h))) score += 3;
   }
   return score;
@@ -123,7 +119,7 @@ export async function findCeToolProjectXmlInMission(missionPath: string, mapId?:
     });
     if (xmlCandidates.length === 0) return null;
 
-    const hints = mapId ? (MAP_HINTS[mapId] ?? []) : [];
+    const hints = mapId ? mapHints(mapId) : [];
     
     // Score candidates: prefer map-specific names, then hint matches
     const scored = xmlCandidates
@@ -328,7 +324,7 @@ export async function pickCeToolFolder(mapId?: string): Promise<string | null> {
   const xmlCandidates = results.filter(r => r.isXml);
   if (xmlCandidates.length === 0) return null;
 
-  const hints = mapId ? (MAP_HINTS[mapId] ?? []) : [];
+  const hints = mapId ? mapHints(mapId) : [];
   const scored = xmlCandidates
     .map(c => {
       const p = normalizePath(c.path).toLowerCase();

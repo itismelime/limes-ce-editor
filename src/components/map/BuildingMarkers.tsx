@@ -7,25 +7,11 @@ import { useServerStore } from '../../store/serverStore';
 import { gameToLeaflet } from '../../lib/coordinateTransform';
 import { TIER_ORDER, getUsageColor } from '../../types/map';
 import type { DayZType } from '../../types/dayz';
+import { containerAcceptsType } from '../../lib/lootResolver';
 import type { MapConfig } from '../../types/map';
 
 function sameStringArray(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-
-function containerMatchesType(type: DayZType, containerTags: string[], containerCategories: string[]): boolean {
-  const isUnrestricted = type.usages.length === 0 || type.usages.every(u => u === '');
-  const normalizedTags = containerTags.map(tag => tag.toLowerCase());
-  const normalizedCategories = containerCategories.map(category => category.toLowerCase());
-  const usageMatch =
-    isUnrestricted
-    || normalizedTags.length === 0
-    || type.usages.some(u => normalizedTags.includes(u.toLowerCase()));
-  const catMatch =
-    normalizedCategories.length > 0
-    && type.category !== null
-    && normalizedCategories.includes(type.category.toLowerCase());
-  return usageMatch && catMatch;
 }
 
 export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
@@ -47,6 +33,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
   const hiddenTiers         = useUiStore(s => s.hiddenTiers);
   const tierZonesLoaded     = useUiStore(s => s.tierZonesLoaded);
   const territoryBitmaps    = useServerStore(s => s.territoryBitmaps);
+  const ceToolLayers        = useServerStore(s => s.ceToolLayers);
   const setSelectedBuilding = useUiStore(s => s.setSelectedBuilding);
   const useZoneData         = tierZonesLoaded || (territoryBitmaps.size > 0 && hasCeToolBitmaps());
 
@@ -72,8 +59,8 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       for (const { current, original } of changedTypes) {
         if (buildingAffected) break;
         for (const container of b.containers) {
-          const currentMatch = containerMatchesType(current, container.tags, container.categories);
-          const originalMatch = original ? containerMatchesType(original, container.tags, container.categories) : false;
+          const currentMatch = containerAcceptsType(current, container.tags, container.categories);
+          const originalMatch = original ? containerAcceptsType(original, container.tags, container.categories) : false;
           if (currentMatch || originalMatch) {
             buildingAffected = true;
             break;
@@ -134,7 +121,9 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       cache.set(`${b.typeName}-${b.x}-${b.z}`, sampleAllZonesAtPos(b.x, b.z));
     }
     return cache;
-  }, [buildingInstances, useZoneData]);
+    // sampleAllZonesAtPos reads module-level bitmaps; these change when zones are painted/added/removed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingInstances, useZoneData, territoryBitmaps, ceToolLayers]);
 
   // Filter logic — stable across pans, no viewport check.
   const filteredBuildings = useMemo(() => {
@@ -160,7 +149,7 @@ export function BuildingMarkers({ mapConfig }: { mapConfig: MapConfig }) {
       } else {
         itemFilter = b =>
           (canonicalUsages.size > 0 && b.usages.some(u => canonicalUsages.has(u.trim().toLowerCase()))) ||
-          (rawTagUsages.size > 0 && b.containers.some(c => c.tags.some(t => rawTagUsages.has(t.toLowerCase()))));
+          (rawTagUsages.size > 0 && b.usages.some(u => rawTagUsages.has(u.trim().toLowerCase())));
       }
     }
 

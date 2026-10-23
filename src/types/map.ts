@@ -1,7 +1,3 @@
-export type MapId = 'namalsk' | 'chernarus' | 'livonia' | 'sakhal' | 'custom';
-
-export const BUILTIN_TILE_MAP_IDS = new Set<string>(['namalsk', 'chernarus', 'livonia', 'sakhal']);
-
 export interface CommunityMapDef {
   id: string;
   label: string;
@@ -36,6 +32,12 @@ export const TIER_COLORS: Record<string, string> = {
 };
 
 export const TIER_ORDER = ['Tier7', 'Tier6', 'Tier5', 'Tier4', 'Tier3', 'Tier2', 'Tier1'];
+
+/** Tier choices offered in editors: the server's cfglimitsdefinition values (vanilla: Tier1-4), else Tier1-7. */
+export function tierOptions(limitsValues: string[] | undefined): string[] {
+  const defined = (limitsValues ?? []).filter(v => /^Tier\d$/i.test(v));
+  return defined.length > 0 ? defined : TIER_ORDER.slice().reverse();
+}
 
 const TYPE_COLORS: Record<string, string> = {
   civilian: '#fef08a',
@@ -119,5 +121,7 @@ export function getUsageTextColor(hex: string): string {
 export function formatUsageLabel(usage: string): string {
   const normalized = usage.trim().toLowerCase();
   if (!normalized) return 'Unknown';
-  return CANONICAL_USAGE_LABELS[normalized] ?? (normalized.charAt(0).toUpperCase() + normalized.slice(1));
+  // Keep the file's own casing (MilitaryEast, ContaminatedArea) rather than flattening it.
+  const raw = usage.trim();
+  return CANONICAL_USAGE_LABELS[normalized] ?? (raw.charAt(0).toUpperCase() + raw.slice(1));
 }

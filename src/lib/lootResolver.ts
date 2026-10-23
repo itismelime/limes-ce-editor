@@ -1,4 +1,4 @@
-import type { MissionData, EventSpawnPos } from '../types/dayz';
+import type { MissionData, EventSpawnPos, DayZType } from '../types/dayz';
 import type { MapConfig } from '../types/map';
 import { TIER_ORDER } from '../types/map';
 import { isInBounds } from './coordinateTransform';
@@ -72,3 +72,19 @@ export function resolveLoot(data: MissionData, mapConfig: MapConfig): ResolvedMa
     };
   });
 }
+
+/**
+ * DayZ CE container rule: the item's category must be in the container's
+ * <category> list, and an item with placement <tag>s (floor/shelves/ground)
+ * only goes into containers carrying one of them. Usage is matched per group
+ * (building <usage> / zone), not per container.
+ */
+export function containerAcceptsType(type: DayZType, containerTags: string[], containerCategories: string[]): boolean {
+  if (type.category === null) return false;
+  const category = type.category.toLowerCase();
+  if (!containerCategories.some(c => c.toLowerCase() === category)) return false;
+  const itemTags = (type.tags ?? []).map(t => t.toLowerCase());
+  return itemTags.length === 0 || containerTags.length === 0
+    || containerTags.some(t => itemTags.includes(t.toLowerCase()));
+}
+

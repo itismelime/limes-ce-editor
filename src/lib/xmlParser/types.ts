@@ -1,9 +1,11 @@
-import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import { XMLParser } from 'fast-xml-parser';
 import { IS_COMPAT_MODE } from '../ceMode';
 import type { DayZType, DayZTypeFlags } from '../../types/dayz';
 import {
-  PARSER_OPTIONS, BUILDER_OPTIONS, stripBom,
+  PARSER_OPTIONS, stripBom,
   num, numAttr, strAttr, strAttrs, toObjectArray, collectUnknownKeys, parseTierValue,
+  parseOrdered, buildOrdered, tagOf, childrenOf, attrsOf, elementsOf, elem,
+  syncChildren, patchNumAttr, patchChildNum, type ONode,
 } from './shared';
 
 export function parseTypesXml(raw: string, source: string, duplicates?: string[]): Map<string, DayZType> {
@@ -31,10 +33,9 @@ export function parseTypesXml(raw: string, source: string, duplicates?: string[]
     const tagArr = toObjectArray(item.tag);
     const tags = tagArr.map(tag => strAttr(tag, 'name')).filter(Boolean);
     const parsedUsages = usageArr.map(u => strAttr(u, 'name')).filter(Boolean);
-    const parsedTiers = valueArr
-      .map(v => (IS_COMPAT_MODE ? strAttrs(v, ['name', 'user']) : strAttr(v, 'name')))
-      .filter(Boolean)
-      .flatMap(parseTierValue);
+    const parsedTiers = IS_COMPAT_MODE
+      ? valueArr.map(v => strAttrs(v, ['name', 'user'])).filter(Boolean).flatMap(parseTierValue)
+      : valueArr.map(v => strAttr(v, 'name')).filter(n => TIER_RE.test(n));
 
     const type: DayZType = {
       name:      strAttr(item, 'name'),
@@ -60,37 +61,76 @@ export function parseTypesXml(raw: string, source: string, duplicates?: string[]
   return map;
 }
 
-export function serializeTypesXml(types: Map<string, DayZType>): string {
-  const typesList = Array.from(types.values()).map(t => ({
-    '@_name': t.name,
-    nominal:  String(t.nominal),
-    lifetime: String(t.lifetime),
-    restock:  String(t.restock),
-    min:      String(t.min),
-    ...((t.quantminPresent ?? false) || t.quantmin !== -1 ? { quantmin: String(t.quantmin) } : {}),
-    ...((t.quantmaxPresent ?? false) || t.quantmax !== -1 ? { quantmax: String(t.quantmax) } : {}),
-    cost:     String(t.cost),
-    flags: {
-      '@_count_in_cargo':   String(t.flags.count_in_cargo),
-      '@_count_in_hoarder': String(t.flags.count_in_hoarder),
-      '@_count_in_map':     String(t.flags.count_in_map),
-      '@_count_in_player':  String(t.flags.count_in_player),
-      '@_crafted':          String(t.flags.crafted),
-      '@_deloot':           String(t.flags.deloot),
-    },
-    ...(t.category ? { category: { '@_name': t.category } } : {}),
-    ...(t.usages.length ? { usage: t.usages.map(u => ({ '@_name': u })) } : {}),
-    ...(t.tiers.length ? {
-      value: t.tiers.map(ti => (
-        IS_COMPAT_MODE ? { '@_name': ti, '@_user': ti } : { '@_name': ti }
-      )),
-    } : {}),
-    ...(t.tags && t.tags.length ? { tag: t.tags.map(tag => ({ '@_name': tag })) } : {}),
-  }));
+const TIER_RE = /^Tier\d$/i;
+const FLAG_KEYS = ['count_in_cargo', 'count_in_hoarder', 'count_in_map', 'count_in_player', 'crafted', 'deloot'] as const;
+const nameKey = (n: ONode) => attrsOf(n)['@_name'] ?? '';
+const hasName = (n: ONode) => attrsOf(n)['@_name'] !== undefined;
 
-  const builder = new XMLBuilder(BUILDER_OPTIONS);
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-    builder.build({ types: { type: typesList } });
+function patchTypeNode(node: ONode, t: DayZType): void {
+  const kids = childrenOf(node);
+  attrsOf(node)['@_name'] = t.name;
+  patchChildNum(kids, 'nominal', t.nominal, ['lifetime']);
+  patchChildNum(kids, 'lifetime', t.lifetime, ['restock']);
+  patchChildNum(kids, 'restock', t.restock, ['min']);
+  patchChildNum(kids, 'min', t.min, ['quantmin', 'quantmax', 'cost']);
+  if (t.quantminPresent || t.quantmin !== -1) patchChildNum(kids, 'quantmin', t.quantmin, ['quantmax', 'cost']);
+  if (t.quantmaxPresent || t.quantmax !== -1) patchChildNum(kids, 'quantmax', t.quantmax, ['cost']);
+  patchChildNum(kids, 'cost', t.cost, ['flags']);
+  let flags = elementsOf(kids, 'flags')[0];
+  const flagsCreated = !flags;
+  if (!flags) {
+    flags = elem('flags', {});
+    const at = kids.findIndex(c => ['category', 'usage', 'value', 'tag'].includes(tagOf(c)));
+    kids.splice(at < 0 ? kids.length : at, 0, flags);
+  }
+  for (const k of FLAG_KEYS) patchNumAttr(flags, k, t.flags[k], flagsCreated ? -1 : 0);
+  syncChildren(kids, 'category', t.category ? [elem('category', { name: t.category })] : [], nameKey, ['usage', 'value', 'tag']);
+  syncChildren(kids, 'usage', t.usages.map(u => elem('usage', { name: u })), nameKey, ['value', 'tag'], hasName);
+  syncChildren(kids, 'value', t.tiers.map(ti => elem('value', IS_COMPAT_MODE ? { name: ti, user: ti } : { name: ti })),
+    nameKey, ['tag'], n => TIER_RE.test(nameKey(n)));
+  syncChildren(kids, 'tag', (t.tags ?? []).map(tag => elem('tag', { name: tag })), nameKey);
+}
+
+/**
+ * Writes `types` (one source file's types) into that file's current text.
+ * Types equal to what's on disk are left alone; changed ones are patched field
+ * by field; names in `removed` are deleted; new ones appended. Types absent
+ * from `types` but not in `removed` (e.g. overridden by a <ce> folder file)
+ * are kept as-is.
+ */
+export function serializeTypesXml(
+  types: Map<string, DayZType>, sourcePath: string, original: string, removed: Set<string> = new Set(),
+): string {
+  const baseline = parseTypesXml(original, sourcePath);
+  const doc = original.trim() ? parseOrdered(original) : [{ types: [] }];
+  let root = doc.find(n => tagOf(n) === 'types');
+  if (!root) {
+    if (original.trim()) throw new Error('types file on disk has no <types> root; refusing to overwrite it');
+    root = { types: [] };
+    doc.push(root);
+  }
+  const unchanged = (t: DayZType) => {
+    const b = baseline?.get(t.name);
+    return !!b && JSON.stringify({ ...b, source: '' }) === JSON.stringify({ ...t, source: '' });
+  };
+  const seen = new Set<string>();
+  root.types = childrenOf(root).filter(node => {
+    if (tagOf(node) !== 'type') return true;
+    const name = nameKey(node);
+    const t = types.get(name);
+    if (!t) return !removed.has(name);
+    seen.add(t.name);
+    if (!unchanged(t)) patchTypeNode(node, t);
+    return true;
+  });
+  for (const t of types.values()) {
+    if (seen.has(t.name)) continue;
+    const node: ONode = { type: [], ':@': { '@_name': t.name } };
+    patchTypeNode(node, t);
+    (root.types as ONode[]).push(node);
+  }
+  const xml = buildOrdered(doc);
+  return xml.startsWith('<?xml') ? xml : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${xml}`;
 }
 
 export function inspectTypesXmlCompatibility(raw: string): string[] {

@@ -3,18 +3,32 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useServerStore } from '../../store/serverStore';
 import { SearchBar } from '../shared/SearchBar';
 import { SaveButton } from '../shared/SaveButton';
-import type { SpawnableType } from '../../types/dayz';
+import type { SpawnableItem, SpawnableType } from '../../types/dayz';
 import { SELECTED_ROW_CLASS, CloseButton } from '../shared/ui';
 
-function ItemList({ items, label }: { items: { name: string; chance: number }[]; label: string }) {
+function ItemList({ items, label }: { items: SpawnableItem[]; label?: string }) {
   if (items.length === 0) return null;
   return (
     <div>
-      <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">{label}</p>
-      {items.map(item => (
-        <div key={item.name} className="flex items-center justify-between py-0.5">
-          <span className="font-mono text-xs text-slate-300 truncate">{item.name}</span>
-          <span className="text-xs text-slate-500 ml-2 flex-shrink-0">{(item.chance * 100).toFixed(0)}%</span>
+      {label && <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">{label}</p>}
+      {items.map((item, i) => (
+        <div key={`${item.name}-${i}`}>
+          <div className="flex items-center justify-between py-0.5">
+            <span className="font-mono text-xs text-slate-300 truncate">{item.name}</span>
+            <span className="text-xs text-slate-500 ml-2 flex-shrink-0">{(item.chance * 100).toFixed(0)}%</span>
+          </div>
+          {/* contents of this item (e.g. a gun case with its gun), update 1.30+ */}
+          {(item.cargo?.length || item.attachments?.length) ? (
+            <div className="ml-3 pl-2 border-l border-slate-700">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider">contains</p>
+              {[...(item.cargo ?? []), ...(item.attachments ?? [])].map((block, j) => (
+                <div key={j} className={block.chance < 1 ? 'opacity-90' : ''}>
+                  {block.chance < 1 && <p className="text-[10px] text-slate-500">one group, {(block.chance * 100).toFixed(0)}% chance:</p>}
+                  <ItemList items={block.items} />
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

@@ -37,7 +37,12 @@ impl CommunityMapRegistry {
             return Vec::new();
         }
         match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+                // Keep the unreadable file instead of overwriting it on the next save.
+                eprintln!("community_maps.json unreadable ({e}); moved to community_maps.json.corrupt");
+                let _ = std::fs::rename(&path, path.with_extension("json.corrupt"));
+                Vec::new()
+            }),
             Err(_) => Vec::new(),
         }
     }
@@ -45,30 +50,45 @@ impl CommunityMapRegistry {
     fn save_to_disk(app_data_dir: &std::path::Path, maps: &[CommunityMapEntry]) -> Result<(), String> {
         let path = Self::community_maps_path(app_data_dir);
         let json = serde_json::to_string_pretty(maps).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())
+        std::fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
+        write_atomic(&path, json.as_bytes())
     }
 }
 
 // ── Steam / mod auto-discovery ──────────────────────────────────────────────
+
+/// Write via temp file + rename so a crash mid-write never leaves a truncated file.
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("tmp-write");
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
 
 struct KnownMap {
     id:         &'static str,
     patterns:   &'static [&'static str],
     label:      &'static str,
     world_size: u32,
+    /// Official BI map: world size is fixed (overrides stored registry values)
+    /// and its PBO ships inside the DayZ install rather than a mod folder.
+    official:   bool,
 }
 
 const KNOWN_MAPS: &[KnownMap] = &[
-    KnownMap { id: "chernarus",      patterns: &["chernarusplus", "chernarus"],  label: "Chernarus",       world_size: 15360 },
-    KnownMap { id: "livonia",        patterns: &["enoch", "livonia"],            label: "Livonia",         world_size: 12800 },
-    KnownMap { id: "sakhal",         patterns: &["sakhal"],                      label: "Sakhal",          world_size: 12800 },
-    KnownMap { id: "namalsk",        patterns: &["namalsk"],                     label: "Namalsk",         world_size: 12800 },
-    KnownMap { id: "deerisle",       patterns: &["deerisle", "deer_isle"],       label: "Deer Isle",       world_size: 16384 },
-    KnownMap { id: "esseker",        patterns: &["esseker"],                     label: "Esseker",         world_size: 12800 },
-    KnownMap { id: "banov",          patterns: &["banov"],                       label: "Banov",           world_size: 14336 },
-    KnownMap { id: "alteria",        patterns: &["alteria"],                     label: "Alteria",         world_size: 12800 },
-    KnownMap { id: "takistan",       patterns: &["takistanplus", "takistan"],    label: "Takistan",        world_size: 12800 },
-    KnownMap { id: "namalskorigins", patterns: &["namalsk"],                     label: "Namalsk Origins", world_size: 12800 },
+    // Keep in sync with src/lib/mapConfig.ts BUILTIN_MAPS.
+    KnownMap { id: "chernarus",      patterns: &["chernarusplus", "chernarus"],  label: "Chernarus",       world_size: 15360, official: true },
+    KnownMap { id: "livonia",        patterns: &["enoch", "livonia"],            label: "Livonia",         world_size: 12800, official: true },
+    KnownMap { id: "sakhal",         patterns: &["sakhal"],                      label: "Sakhal",          world_size: 15360, official: true },
+    KnownMap { id: "nasdara",        patterns: &["nasdara"],                     label: "Nasdara",         world_size: 16384, official: true },
+    KnownMap { id: "namalsk",        patterns: &["namalsk"],                     label: "Namalsk",         world_size: 12800, official: false },
+    KnownMap { id: "deerisle",       patterns: &["deerisle", "deer_isle"],       label: "Deer Isle",       world_size: 16384, official: false },
+    KnownMap { id: "esseker",        patterns: &["esseker"],                     label: "Esseker",         world_size: 12800, official: false },
+    KnownMap { id: "banov",          patterns: &["banov"],                       label: "Banov",           world_size: 14336, official: false },
+    KnownMap { id: "alteria",        patterns: &["alteria"],                     label: "Alteria",         world_size: 12800, official: false },
+    KnownMap { id: "takistan",       patterns: &["takistanplus", "takistan"],    label: "Takistan",        world_size: 12800, official: false },
+    // ponytail: shares the "namalsk" PBO pattern, so Steam auto-discovery always resolves to
+    // "namalsk"; Namalsk Origins needs its PBO added manually until its PBO name is known.
+    KnownMap { id: "namalskorigins", patterns: &["namalsk"],                     label: "Namalsk Origins", world_size: 12800, official: false },
 ];
 
 fn find_steam_path() -> Option<std::path::PathBuf> {
@@ -97,6 +117,13 @@ fn find_steam_path() -> Option<std::path::PathBuf> {
     ] {
         let p = std::path::PathBuf::from(candidate);
         if p.exists() { return Some(p); }
+    }
+    // Linux: native, legacy symlink, and Flatpak installs
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        for rel in [".local/share/Steam", ".steam/steam", ".var/app/com.valvesoftware.Steam/.local/share/Steam"] {
+            let p = home.join(rel);
+            if p.join("steamapps").exists() { return Some(p); }
+        }
     }
     None
 }
@@ -134,7 +161,7 @@ fn scan_steam_for_dayz_pbos(libs: &[std::path::PathBuf]) -> Vec<(String, std::pa
         if let Ok(entries) = std::fs::read_dir(&workshop) {
             for entry in entries.flatten() {
                 if !entry.path().is_dir() { continue; }
-                if let Some(pbo) = pbo::find_data_pbo(&entry.path(), 4) {
+                if let Some(pbo) = pbo::find_data_pbo(&entry.path(), &[], 4) {
                     if let Some(name) = pbo.file_name().and_then(|n| n.to_str()) {
                         if let Some(id) = pbo_matches_map(name) {
                             if !found.iter().any(|(fid, _)| fid == id) {
@@ -146,15 +173,23 @@ fn scan_steam_for_dayz_pbos(libs: &[std::path::PathBuf]) -> Vec<(String, std::pa
             }
         }
 
-        // Local @mods: {lib}/steamapps/common/DayZ/@*/
+        // Official maps ship inside the game install (Addons/, DLC folders).
         let dayz = lib.join("steamapps").join("common").join("DayZ");
+        for m in KNOWN_MAPS.iter().filter(|m| m.official) {
+            if found.iter().any(|(fid, _)| fid == m.id) { continue; }
+            if let Some(pbo) = pbo::find_data_pbo(&dayz, m.patterns, 3) {
+                found.push((m.id.to_string(), pbo));
+            }
+        }
+
+        // Local @mods: {lib}/steamapps/common/DayZ/@*/
         if let Ok(entries) = std::fs::read_dir(&dayz) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if !path.is_dir() { continue; }
                 let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if !dir_name.starts_with('@') { continue; }
-                if let Some(pbo) = pbo::find_data_pbo(&path, 3) {
+                if let Some(pbo) = pbo::find_data_pbo(&path, &[], 3) {
                     if let Some(name) = pbo.file_name().and_then(|n| n.to_str()) {
                         if let Some(id) = pbo_matches_map(name) {
                             if !found.iter().any(|(fid, _)| fid == id) {
@@ -277,10 +312,11 @@ async fn extract_map_tiles(
     let pbo_info: Option<(std::path::PathBuf, u32)> = {
         let reg = registry.0.lock().unwrap_or_else(|e| e.into_inner());
         reg.iter().find(|e| e.id == map_id).and_then(|entry| {
-            entry.pbo_path.as_ref().map(|p| (
-                std::path::PathBuf::from(p),
-                entry.world_width as u32,
-            ))
+            let ws = KNOWN_MAPS.iter()
+                .find(|m| m.official && m.id == map_id.as_str())
+                .map(|m| m.world_size)
+                .unwrap_or(entry.world_width as u32);
+            entry.pbo_path.as_ref().filter(|_| ws > 0).map(|p| (std::path::PathBuf::from(p), ws))
         })
     };
 
@@ -305,10 +341,12 @@ async fn extract_map_tiles(
         // Prefer user-configured world size from existing entry; fall back to KNOWN_MAPS.
         let ws = {
             let reg = registry.0.lock().unwrap_or_else(|e| e.into_inner());
-            reg.iter()
-                .find(|e| e.id == map_id && e.world_width > 0.0)
-                .map(|e| e.world_width as u32)
-                .or_else(|| KNOWN_MAPS.iter().find(|m| m.id == map_id.as_str()).map(|m| m.world_size))
+            let known = KNOWN_MAPS.iter().find(|m| m.id == map_id.as_str());
+            known.filter(|m| m.official).map(|m| m.world_size)
+                .or_else(|| reg.iter()
+                    .find(|e| e.id == map_id && e.world_width > 0.0)
+                    .map(|e| e.world_width as u32))
+                .or_else(|| known.map(|m| m.world_size))
                 .unwrap_or(12800)
         };
 
@@ -442,14 +480,16 @@ async fn discover_installed_maps() -> Result<Vec<DiscoveredMap>, String> {
 /// Read world size in metres directly from a *_data.pbo (no user input needed).
 #[tauri::command]
 async fn read_pbo_world_size(pbo_path: String) -> Result<u32, String> {
-    pbo::world_size_from_pbo(std::path::Path::new(&pbo_path))
+    tauri::async_runtime::spawn_blocking(move || pbo::world_size_from_pbo(std::path::Path::new(&pbo_path)))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Scan a mod folder for a *_data.pbo file (up to 4 levels deep).
 #[tauri::command]
 async fn find_map_pbo(folder: String) -> Result<Option<String>, String> {
     let path = std::path::Path::new(&folder);
-    Ok(pbo::find_data_pbo(path, 4)
+    Ok(pbo::find_data_pbo(path, &[], 4)
         .map(|p| p.to_string_lossy().replace('\\', "/")))
 
 }
@@ -524,7 +564,7 @@ fn extract_mpmission_from_zip(
         if relative.is_empty() { continue; }
         // Zip Slip guard: reject entries whose relative path climbs out of
         // `dest` via `..` segments before we ever join/write to disk.
-        if std::path::Path::new(relative).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if !std::path::Path::new(relative).components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir)) {
             return Err(format!("Archive entry escapes destination folder: {}", raw_name));
         }
 
@@ -764,5 +804,21 @@ mod zip_extract_tests {
 
         let _ = std::fs::remove_dir_all(&dest);
         let _ = std::fs::remove_file(&escaped);
+    }
+
+    #[test]
+    fn rejects_absolute_path_entries() {
+        let mut buf = Vec::new();
+        {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let options: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            writer.start_file("repo-main/Mission Files/dayzOffline.Test//tmp/abs_evil.txt", options).unwrap();
+            writer.write_all(b"pwned").unwrap();
+            writer.finish().unwrap();
+        }
+        let dest = std::env::temp_dir().join(format!("zip_abs_test_{}", std::process::id()));
+        let result = extract_mpmission_from_zip(&buf, "Mission Files/dayzOffline.Test", &dest);
+        assert!(result.is_err(), "absolute entry should be rejected");
+        let _ = std::fs::remove_dir_all(&dest);
     }
 }

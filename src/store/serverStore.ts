@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { MissionData, DayZType, DayZEvent, EventSpawnDef, SpawnableType, DirtyFlags, CeEntry, BuildingInstance, PlayerSpawnData, WeatherData, GameplayData, CeToolProject, LimitsDefinition, LimitsDefinitionUser } from '../types/dayz';
 import type { FFSpawnSelectorSettings, FFSpawnPointsData } from '../types/ffSpawnSelector';
 import {
-  serializeTypesXml, serializeEventSpawnsXml,
+  parseTypesXml, parseEventsXml, mergeIntoOriginal, serializeTypesXml, serializeEventSpawnsXml,
   serializeEventsXml, serializeSpawnableTypesXml,
   serializeEconomyCoreXml, serializeMapGroupProtoXml,
   serializeWeatherXml, serializeGameplayJson,
@@ -154,6 +154,9 @@ interface ServerState {
   clearSaveCheckpoints: () => void;
 
   updateType: (name: string, patch: Partial<DayZType>) => void;
+  /** New loot type in `source` (a loaded types file) with vanilla-style defaults. False if the name exists. */
+  addType: (name: string, source: string) => boolean;
+  deleteType: (name: string) => void;
   undoType: () => void;
   undoMapGroupProto: () => void;
   undoZoneRemove: () => void;
@@ -204,6 +207,8 @@ interface ServerState {
 
   addCustomTypePack: (name: string, xmlContent: string) => Promise<void>;
   removeEconomyCoreEntry: (folder: string) => Promise<void>;
+  /** Re-read one types file from disk into the loaded data (null = drop its types). */
+  reloadTypesSource: (path: string, raw: string | null) => void;
   saveTypesSource: (sourcePath: string) => Promise<void>;
   saveEventSpawns: () => Promise<void>;
   saveEvents: () => Promise<void>;
@@ -381,6 +386,16 @@ function cloneMapGroupProto(proto: Map<string, MapGroupProtoEntry>): Map<string,
   return next;
 }
 
+export function hasUnsavedChanges(d: DirtyFlags): boolean {
+  return Object.entries(d).some(([k, v]) => (k === 'typesSources' ? (v as string[]).length > 0 : v === true));
+}
+
+/** Asks before an action that would drop unsaved edits; true = go ahead. */
+export function confirmDiscardUnsaved(action: string): boolean {
+  if (!hasUnsavedChanges(useServerStore.getState().dirty)) return true;
+  return window.confirm(`You have unsaved changes. ${action} anyway and discard them?`);
+}
+
 export function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -462,7 +477,13 @@ export const useServerStore = create<ServerState>((set, get) => {
     originalEvents: new Map(mission.events),
     originalEventSpawns: [...mission.eventSpawns],
     originalSpawnableTypes: new Map(mission.spawnableTypes),
+    // Undo/revert stacks hold the previous mission's data (and file paths);
+    // applying them to a new mission would write old data into it.
     typeHistory: [],
+    saveCheckpoints: [],
+    zoneRemoveHistory: [],
+    mapGroupProtoHistory: [],
+    territoryPaintHistory: [],
   })),
   setPaths: (paths) => set(s => ({ paths: { ...s.paths, ...paths } })),
   setEconomyCore: (entries) => set({ economyCore: entries }),
@@ -482,9 +503,9 @@ export const useServerStore = create<ServerState>((set, get) => {
   updateGameplay: (data) => set(s => ({ gameplay: data, dirty: { ...s.dirty, gameplay: true } })),
   updateWeather: (data) => set(s => ({ weather: data, dirty: { ...s.dirty, weather: true } })),
   setFfProfileName: (name) => set({ ffProfileName: name }),
-  setFfSettings: (data) => set({ ffSettings: data, originalFfSettings: data }),
+  setFfSettings: (data) => set(s => ({ ffSettings: data, originalFfSettings: data, dirty: { ...s.dirty, ffSettings: false } })),
   updateFfSettings: (data) => set(s => ({ ffSettings: data, dirty: { ...s.dirty, ffSettings: true } })),
-  setFfSpawnPoints: (data) => set({ ffSpawnPoints: data, originalFfSpawnPoints: data }),
+  setFfSpawnPoints: (data) => set(s => ({ ffSpawnPoints: data, originalFfSpawnPoints: data, dirty: { ...s.dirty, ffSpawnPoints: false } })),
   updateFfSpawnPoints: (data) => set(s => ({ ffSpawnPoints: data, dirty: { ...s.dirty, ffSpawnPoints: true } })),
   setLimitsDefinition: (data) => set({ limitsDefinition: data, originalLimitsDefinition: data }),
   setLimitsDefinitionUser: (data) => set({ limitsDefinitionUser: data, originalLimitsDefinitionUser: data }),
@@ -585,7 +606,7 @@ export const useServerStore = create<ServerState>((set, get) => {
       nextBuildingInstances = s.buildingInstances.map(b => {
         const key = b.typeName.trim().toLowerCase();
         const entry = nextMapGroupProto.get(key);
-        return entry ? { ...b, containers: entry.containers } : b;
+        return entry ? { ...b, usages: entry.usages, containers: entry.containers } : b;
       });
     }
 
@@ -622,6 +643,35 @@ export const useServerStore = create<ServerState>((set, get) => {
     return { mission: { ...s.mission, types: next }, dirty: { ...s.dirty, typesSources }, typeHistory };
   }),
 
+  addType: (name, source) => {
+    const { mission } = get();
+    if (!mission || !name || mission.types.has(name)) return false;
+    const type: DayZType = {
+      name, nominal: 0, lifetime: 3888, restock: 0, min: 0, quantmin: -1, quantmax: -1, cost: 100,
+      flags: { count_in_cargo: 0, count_in_hoarder: 0, count_in_map: 1, count_in_player: 0, crafted: 0, deloot: 0 },
+      category: null, usages: [], tiers: [], tags: [], source,
+    };
+    set(s => ({
+      mission: { ...s.mission!, types: new Map(s.mission!.types).set(name, type) },
+      dirty: { ...s.dirty, typesSources: s.dirty.typesSources.includes(source) ? s.dirty.typesSources : [...s.dirty.typesSources, source] },
+    }));
+    return true;
+  },
+
+  deleteType: (name) => set(s => {
+    const existing = s.mission?.types.get(name);
+    if (!s.mission || !existing) return s;
+    const types = new Map(s.mission.types);
+    types.delete(name);
+    const source = existing.source;
+    return {
+      mission: { ...s.mission, types },
+      dirty: { ...s.dirty, typesSources: s.dirty.typesSources.includes(source) ? s.dirty.typesSources : [...s.dirty.typesSources, source] },
+      // history entries for a deleted type would resurrect it on undo
+      typeHistory: s.typeHistory.filter(h => h.name !== name),
+    };
+  }),
+
   undoType: () => set(s => {
     if (!s.mission || s.typeHistory.length === 0) return s;
     const [last, ...rest] = s.typeHistory;
@@ -654,8 +704,11 @@ export const useServerStore = create<ServerState>((set, get) => {
   revertTypesSource: (sourcePath) => set(s => {
     if (!s.mission) return s;
     const next = new Map(s.mission.types);
+    for (const [name, t] of next) {
+      if (t.source === sourcePath && !s.originalTypes.has(name)) next.delete(name); // added since load
+    }
     for (const [name, orig] of s.originalTypes) {
-      if (orig.source === sourcePath) next.set(name, orig);
+      if (orig.source === sourcePath) next.set(name, orig); // also restores deleted ones
     }
     const typeHistory = s.typeHistory.filter(h => s.originalTypes.get(h.name)?.source !== sourcePath);
     const typesSources = s.dirty.typesSources.filter(p => p !== sourcePath);
@@ -691,7 +744,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     const buildingInstances = s.buildingInstances.map(b => {
       const key = b.typeName.trim().toLowerCase();
       const entry = proto.get(key);
-      return entry ? { ...b, containers: entry.containers } : b;
+      return entry ? { ...b, usages: entry.usages, containers: entry.containers } : b;
     });
     return { mapGroupProto: proto, buildingInstances, dirty: { ...s.dirty, mapGroupProto: false }, mapGroupProtoHistory: [] };
   }),
@@ -794,10 +847,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     if (!key || !u || !s.mapGroupProto.has(key)) return s;
     const entry = s.mapGroupProto.get(key)!;
     if (entry.usages.some(existing => existing.trim().toLowerCase() === u.toLowerCase())) return s;
-    const containers = entry.containers.length > 0
-      ? entry.containers.map(c => ({ ...c, tags: [...c.tags, u] }))
-      : entry.containers;
-    const updated = { ...entry, usages: [...entry.usages, u], containers };
+    const updated = { ...entry, usages: [...entry.usages, u] };
     const protoNext = new Map(s.mapGroupProto);
     protoNext.set(key, updated);
     const buildingInstances = s.buildingInstances.map(b =>
@@ -812,10 +862,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     const u = usage.trim().toLowerCase();
     if (!key || !u || !s.mapGroupProto.has(key)) return s;
     const entry = s.mapGroupProto.get(key)!;
-    const containers = entry.containers.length > 0
-      ? entry.containers.map(c => ({ ...c, tags: c.tags.filter(t => t.trim().toLowerCase() !== u) }))
-      : entry.containers;
-    const updated = { ...entry, usages: entry.usages.filter(existing => existing.trim().toLowerCase() !== u), containers };
+    const updated = { ...entry, usages: entry.usages.filter(existing => existing.trim().toLowerCase() !== u) };
     const protoNext = new Map(s.mapGroupProto);
     protoNext.set(key, updated);
     const buildingInstances = s.buildingInstances.map(b =>
@@ -1093,8 +1140,9 @@ export const useServerStore = create<ServerState>((set, get) => {
         : [...economyCore, { folder: folderKey, files: [{ name: fileName, type: 'types' }] }];
 
       await backupIfNeeded(paths.economyCorePath);
-      await writeFile(paths.economyCorePath, serializeEconomyCoreXml(nextCore));
+      await writeFile(paths.economyCorePath, serializeEconomyCoreXml(nextCore, await readFile(paths.economyCorePath)));
       set({ economyCore: nextCore });
+      get().reloadTypesSource(filePath, xmlContent);
     } catch (err) {
       set({ saveError: `Failed to add custom types pack: ${toMessage(err)}` });
     }
@@ -1106,12 +1154,31 @@ export const useServerStore = create<ServerState>((set, get) => {
     const nextCore = economyCore.filter(e => e.folder !== folder);
     try {
       await backupIfNeeded(paths.economyCorePath);
-      await writeFile(paths.economyCorePath, serializeEconomyCoreXml(nextCore));
+      await writeFile(paths.economyCorePath, serializeEconomyCoreXml(nextCore, await readFile(paths.economyCorePath)));
       set({ economyCore: nextCore });
+      // The server no longer loads these files: stop listing (and saving) their types.
+      // ponytail: types they overrode in db/types.xml reappear only after a mission reload.
+      for (const f of economyCore.find(e => e.folder === folder)?.files ?? []) {
+        if (f.type === 'types') get().reloadTypesSource(`${paths.missionPath}/${folder}/${f.name}`, null);
+      }
     } catch (err) {
       set({ saveError: `Failed to update cfgeconomycore.xml: ${toMessage(err)}` });
     }
   },
+
+  reloadTypesSource: (path, raw) => set(s => {
+    if (!s.mission) return s;
+    const parsed = raw === null ? new Map<string, DayZType>() : parseTypesXml(raw, path);
+    const types = new Map([...s.mission.types].filter(([, t]) => t.source !== path));
+    const originalTypes = new Map([...s.originalTypes].filter(([, t]) => t.source !== path));
+    for (const [name, t] of parsed) { types.set(name, t); originalTypes.set(name, t); }
+    return {
+      mission: { ...s.mission, types },
+      originalTypes,
+      dirty: { ...s.dirty, typesSources: s.dirty.typesSources.filter(p => p !== path) },
+      typeHistory: s.typeHistory.filter(h => h.prev.source !== path),
+    };
+  }),
 
   saveTypesSource: async (sourcePath) => {
     const { mission } = get();
@@ -1120,7 +1187,11 @@ export const useServerStore = create<ServerState>((set, get) => {
       [...mission.types.entries()].filter(([, t]) => t.source === sourcePath)
     );
     await trySave(basename(sourcePath), async () => {
-      await writeFile(sourcePath, serializeTypesXml(sourceTypes));
+      const original = await readFile(sourcePath).catch(() => '');
+      const removed = new Set([...get().originalTypes.values()]
+        .filter(t => t.source === sourcePath && !mission.types.has(t.name))
+        .map(t => t.name));
+      await writeFile(sourcePath, serializeTypesXml(sourceTypes, sourcePath, original, removed));
       set(s => {
         const originalTypes = new Map(s.originalTypes);
         for (const [name, type] of s.mission?.types ?? []) {
@@ -1142,7 +1213,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const { mission, paths } = get();
     if (!mission || !paths.eventSpawnsPath) return;
     await trySave('cfgeventspawns.xml', async () => {
-      await writeFile(paths.eventSpawnsPath!, serializeEventSpawnsXml(mission.eventSpawns));
+      const raw = await readFile(paths.eventSpawnsPath!).catch(() => '');
+      await writeFile(paths.eventSpawnsPath!, mergeIntoOriginal(raw, serializeEventSpawnsXml(mission.eventSpawns)));
       set(s => ({ dirty: { ...s.dirty, eventSpawns: false }, originalEventSpawns: [...mission.eventSpawns] }));
     }, [paths.eventSpawnsPath]);
   },
@@ -1150,10 +1222,18 @@ export const useServerStore = create<ServerState>((set, get) => {
   saveEvents: async () => {
     const { mission, paths } = get();
     if (!mission || !paths.eventsPath) return;
+    const sources = [...new Set([...mission.events.values()].map(e => e.source ?? paths.eventsPath!))];
     await trySave('events.xml', async () => {
-      await writeFile(paths.eventsPath!, serializeEventsXml(mission.events));
+      // Overlay each file's events onto what's on disk, so an event overridden
+      // by a <ce> folder file stays in db/events.xml untouched.
+      for (const path of sources) {
+        const raw = await readFile(path);
+        const onDisk = parseEventsXml(raw);
+        for (const e of mission.events.values()) if ((e.source ?? paths.eventsPath) === path) onDisk.set(e.name, e);
+        await writeFile(path, mergeIntoOriginal(raw, serializeEventsXml(onDisk)));
+      }
       set(s => ({ dirty: { ...s.dirty, events: false }, originalEvents: new Map(mission.events) }));
-    }, [paths.eventsPath]);
+    }, sources);
   },
 
   saveSpawnableTypes: async () => {
@@ -1179,7 +1259,7 @@ export const useServerStore = create<ServerState>((set, get) => {
     const { mapGroupProto, paths } = get();
     if (!paths.mapGroupProtoPath) return;
     await trySave('mapgroupproto.xml', async () => {
-      await writeFile(paths.mapGroupProtoPath!, serializeMapGroupProtoXml(mapGroupProto));
+      await writeFile(paths.mapGroupProtoPath!, serializeMapGroupProtoXml(mapGroupProto, await readFile(paths.mapGroupProtoPath!)));
       set(s => ({ dirty: { ...s.dirty, mapGroupProto: false }, originalMapGroupProto: cloneMapGroupProto(s.mapGroupProto) }));
     }, [paths.mapGroupProtoPath]);
   },
@@ -1188,7 +1268,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const { weather, paths } = get();
     if (!paths.weatherPath || !weather) return;
     await trySave('cfgweather.xml', async () => {
-      await writeFile(paths.weatherPath!, serializeWeatherXml(weather));
+      const raw = await readFile(paths.weatherPath!).catch(() => '');
+      await writeFile(paths.weatherPath!, mergeIntoOriginal(raw, serializeWeatherXml(weather)));
       set(s => ({ dirty: { ...s.dirty, weather: false }, originalWeather: s.weather }));
     }, [paths.weatherPath]);
   },
@@ -1224,7 +1305,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const { limitsDefinition, paths } = get();
     if (!paths.limitsDefinitionPath || !limitsDefinition) return;
     await trySave('cfglimitsdefinition.xml', async () => {
-      await writeFile(paths.limitsDefinitionPath!, serializeLimitsDefinitionXml(limitsDefinition));
+      const raw = await readFile(paths.limitsDefinitionPath!).catch(() => '');
+      await writeFile(paths.limitsDefinitionPath!, mergeIntoOriginal(raw, serializeLimitsDefinitionXml(limitsDefinition)));
       set(s => ({ dirty: { ...s.dirty, limitsDefinition: false }, originalLimitsDefinition: s.limitsDefinition }));
     }, [paths.limitsDefinitionPath]);
   },
@@ -1233,7 +1315,8 @@ export const useServerStore = create<ServerState>((set, get) => {
     const { limitsDefinitionUser, paths } = get();
     if (!paths.limitsDefinitionUserPath || !limitsDefinitionUser) return;
     await trySave('cfglimitsdefinitionuser.xml', async () => {
-      await writeFile(paths.limitsDefinitionUserPath!, serializeLimitsDefinitionUserXml(limitsDefinitionUser));
+      const raw = await readFile(paths.limitsDefinitionUserPath!).catch(() => '');
+      await writeFile(paths.limitsDefinitionUserPath!, mergeIntoOriginal(raw, serializeLimitsDefinitionUserXml(limitsDefinitionUser)));
       set(s => ({ dirty: { ...s.dirty, limitsDefinitionUser: false }, originalLimitsDefinitionUser: s.limitsDefinitionUser }));
     }, [paths.limitsDefinitionUserPath]);
   },
@@ -1611,3 +1694,50 @@ export const useServerStore = create<ServerState>((set, get) => {
   },
   };
 });
+
+// ── Chronological undo across pages ─────────────────────────────────────────
+// Each editor keeps its own history; this records which one grew, so the
+// global Undo reverts the most recent change wherever it was made.
+// ponytail: inferred from history heads, not recorded per action; exact while
+// each action pushes one entry, which every current action does.
+export type UndoKind = 'type' | 'proto' | 'zone' | 'paint';
+const UNDO_HISTORY: Record<UndoKind, (s: ServerState) => readonly unknown[]> = {
+  type: s => s.typeHistory,
+  proto: s => s.mapGroupProtoHistory,
+  zone: s => s.zoneRemoveHistory,
+  paint: s => s.territoryPaintHistory,
+};
+// paint history appends; the others prepend
+const newestOf = (k: UndoKind, h: readonly unknown[]) => (k === 'paint' ? h[h.length - 1] : h[0]);
+let undoOrder: UndoKind[] = [];
+
+useServerStore.subscribe((s, prev) => {
+  let next = undoOrder;
+  for (const k of Object.keys(UNDO_HISTORY) as UndoKind[]) {
+    const h = UNDO_HISTORY[k](s);
+    const p = UNDO_HISTORY[k](prev);
+    if (h === p) continue;
+    if (h.length > 0 && h.length >= p.length && newestOf(k, h) !== newestOf(k, p)) next = [...next, k];
+    // shrunk (undo, save, mission switch): drop the newest entries of that kind
+    let extra = next.filter(x => x === k).length - h.length;
+    while (extra-- > 0) next = next.filter((x, i) => x !== k || i !== next.lastIndexOf(k));
+  }
+  undoOrder = next;
+});
+
+/** Most recent undoable change across all editors, or null. */
+export function lastUndoKind(): UndoKind | null {
+  return undoOrder[undoOrder.length - 1] ?? null;
+}
+
+/** Undo the most recent change wherever it was made; false when nothing is left. */
+export function undoLast(): boolean {
+  const s = useServerStore.getState();
+  switch (lastUndoKind()) {
+    case 'type': s.undoType(); return true;
+    case 'proto': s.undoMapGroupProto(); return true;
+    case 'zone': s.undoZoneRemove(); return true;
+    case 'paint': s.undoTerritoryPaint(); return true;
+    default: return false;
+  }
+}

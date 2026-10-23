@@ -12,6 +12,7 @@ const TERRAIN_DISPLAY: Record<string, string> = {
   enoch:         'Livonia',
   livonia:       'Livonia',
   sakhal:        'Sakhal',
+  nasdara:       'Nasdara',
   namalsk:       'Namalsk',
   deerisle:      'Deer Isle',
   alteria:       'Alteria',

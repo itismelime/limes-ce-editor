@@ -38,8 +38,11 @@ pub async fn write_tga_layer(
     if let Some(parent) = Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    img.save_with_format(&path, image::ImageFormat::Tga)
-        .map_err(|e| format!("Failed to write {path}: {e}"))
+    // Temp + rename: a crash mid-save must not truncate the admin's layer.
+    let tmp = format!("{path}.tmp-write");
+    img.save_with_format(&tmp, image::ImageFormat::Tga)
+        .map_err(|e| format!("Failed to write {path}: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("Failed to write {path}: {e}"))
 }
 
 // No real DayZ terrain grid is anywhere near this size (largest maps top out
@@ -56,6 +59,21 @@ pub async fn compile_areaflags(
     world_height: u32,
     out_path: String,
 ) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        compile_areaflags_blocking(&layers, width, height, world_width, world_height, &out_path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn compile_areaflags_blocking(
+    layers: &[LayerMeta],
+    width: u32,
+    height: u32,
+    world_width: u32,
+    world_height: u32,
+    out_path: &str,
+) -> Result<(), String> {
     if width > MAX_GRID_DIM || height > MAX_GRID_DIM {
         return Err(format!("grid {}x{} exceeds sane maximum", width, height));
     }
@@ -64,7 +82,7 @@ pub async fn compile_areaflags(
     // 5 bytes per cell: u32 usage_flags + u8 value_flags
     let mut data = vec![0u8; cell_count * 5];
 
-    for layer in &layers {
+    for layer in layers {
         if layer.usage_flags == 0 && layer.value_flags == 0 {
             continue;
         }
@@ -100,7 +118,7 @@ pub async fn compile_areaflags(
     // backup existing areaflags.map before first write
     let bak_path = format!("{out_path}.bak");
     if Path::new(&out_path).exists() && !Path::new(&bak_path).exists() {
-        std::fs::copy(&out_path, &bak_path)
+        std::fs::copy(out_path, &bak_path)
             .map_err(|e| format!("Failed to create backup: {e}"))?;
     }
 
@@ -120,6 +138,6 @@ pub async fn compile_areaflags(
     out.extend_from_slice(&header);
     out.extend_from_slice(&data);
 
-    std::fs::write(&out_path, &out)
+    crate::write_atomic(Path::new(out_path), &out)
         .map_err(|e| format!("Failed to write areaflags.map: {e}"))
 }

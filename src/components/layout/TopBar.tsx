@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl, openPath } from '@tauri-apps/plugin-opener';
-import { useServerStore } from '../../store/serverStore';
+import { useServerStore, undoLast, lastUndoKind } from '../../store/serverStore';
 import { useUiStore } from '../../store/uiStore';
 import { useCommunityMapsStore } from '../../store/communityMapsStore';
 import type { ActiveTab } from '../../store/uiStore';
 import { basename, type MissionFiles } from '../../lib/fileDiscovery';
+import { BUILTIN_MAPS, BUILTIN_MAP_BY_ID, detectBuiltinMap } from '../../lib/mapConfig';
 
 const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'map',           label: 'Map' },
@@ -19,13 +20,6 @@ const TABS: { id: ActiveTab; label: string }[] = [
   { id: 'gameplay',      label: 'Gameplay' },
 ];
 
-const BUILTIN_MAPS: { id: string; label: string }[] = [
-  { id: 'namalsk',   label: 'Namalsk' },
-  { id: 'chernarus', label: 'Chernarus+' },
-  { id: 'livonia',   label: 'Livonia' },
-  { id: 'sakhal',    label: 'Sakhal' },
-  { id: 'custom',    label: 'Custom' },
-];
 
 function Row({ label, value, mono, href }: { label: string; value: string; mono?: boolean; href?: string }) {
   return (
@@ -99,11 +93,7 @@ export function TopBar({
   const revertFfSpawnPoints = useServerStore(s => s.revertFfSpawnPoints);
   const saveTerritoryBitmaps = useServerStore(s => s.saveTerritoryBitmaps);
   const revertTerritoryBitmaps = useServerStore(s => s.revertTerritoryBitmaps);
-  const undoTerritoryPaint = useServerStore(s => s.undoTerritoryPaint);
   const territoryPaintHistory = useServerStore(s => s.territoryPaintHistory);
-  const undoType = useServerStore(s => s.undoType);
-  const undoMapGroupProto = useServerStore(s => s.undoMapGroupProto);
-  const undoZoneRemove = useServerStore(s => s.undoZoneRemove);
   const typeHistory = useServerStore(s => s.typeHistory);
   const mapGroupProtoHistory = useServerStore(s => s.mapGroupProtoHistory);
   const zoneRemoveHistory = useServerStore(s => s.zoneRemoveHistory);
@@ -123,44 +113,31 @@ export function TopBar({
 
 
 
-  const TERRAIN_KEYWORDS: Record<string, string[]> = {
-    namalsk:   ['namalsk'],
-    chernarus: ['chernarus'],
-    livonia:   ['livonia', 'enoch'],
-    sakhal:    ['sakhal'],
-  };
-
   const mapsWithMissions = useMemo(() => {
     const s = new Set<string>();
     for (const m of allMissions) {
-      const lower = m.missionName.toLowerCase();
-      for (const [mapId, keywords] of Object.entries(TERRAIN_KEYWORDS)) {
-        if (keywords.some(kw => lower.includes(kw))) { s.add(mapId); break; }
-      }
+      const id = detectBuiltinMap(m.missionName);
+      if (id) s.add(id);
     }
     return s;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allMissions]);
 
   const MAPS = useMemo(() => {
-    const builtinIds = new Set(BUILTIN_MAPS.map(m => m.id));
-    const missionName = mission?.missionName.toLowerCase() ?? null;
-    const builtins = missionName
+    const missionMap = mission ? detectBuiltinMap(mission.missionName) : null;
+    const builtins = mission
       ? BUILTIN_MAPS.filter(m =>
-          m.id === 'custom' ||
-          (TERRAIN_KEYWORDS[m.id]?.some(kw => missionName.includes(kw)) ?? false) ||
+          m.id === missionMap ||
           mapsWithMissions.has(m.id) ||
           !!mapImagePaths[m.id]
         )
       : BUILTIN_MAPS;
     return [
-      ...builtins.filter(m => m.id !== 'custom'),
+      ...builtins.map(m => ({ id: m.id, label: m.label })),
       ...communityMaps
-        .filter(cm => !builtinIds.has(cm.id))
+        .filter(cm => !BUILTIN_MAP_BY_ID[cm.id])
         .map(cm => ({ id: cm.id, label: cm.label })),
       { id: 'custom', label: 'Custom' },
     ];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [communityMaps, mission, mapsWithMissions, mapImagePaths]);
 
   const [showAbout, setShowAbout] = useState(false);
@@ -280,12 +257,12 @@ export function TopBar({
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
         e.preventDefault();
-        undoType();
+        undoLast();
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [undoType]);
+  }, []);
 
   const handleTabClick = (tabId: ActiveTab) => {
     pendingTabRef.current = tabId;
@@ -322,6 +299,13 @@ export function TopBar({
       setSavingPending(false);
     }
   };
+
+  const undoKind = lastUndoKind();
+  const undoTitle = undoKind === 'type' ? 'Undo last item edit'
+    : undoKind === 'proto' ? 'Undo last building change'
+    : undoKind === 'zone' ? `Undo zone deletion "${zoneRemoveHistory[0]?.usage ?? ''}"`
+    : undoKind === 'paint' ? 'Undo last territory paint stroke'
+    : 'Revert most recent saved change set';
 
   const undoLastSave = () => {
     if (saveCheckpoints.length === 0) return;
@@ -455,9 +439,9 @@ export function TopBar({
 
               <div className="flex items-center gap-1.5">
                 <button
-                  onClick={typeHistory.length > 0 ? undoType : mapGroupProtoHistory.length > 0 ? undoMapGroupProto : zoneRemoveHistory.length > 0 ? undoZoneRemove : territoryPaintHistory.length > 0 ? undoTerritoryPaint : undoLastSave}
+                  onClick={() => { if (!undoLast()) undoLastSave(); }}
                   disabled={typeHistory.length === 0 && mapGroupProtoHistory.length === 0 && zoneRemoveHistory.length === 0 && territoryPaintHistory.length === 0 && saveCheckpoints.length === 0}
-                  title={typeHistory.length > 0 ? `Undo last edit (${typeHistory.length} step${typeHistory.length !== 1 ? 's' : ''})` : mapGroupProtoHistory.length > 0 ? `Undo last building change (${mapGroupProtoHistory.length} step${mapGroupProtoHistory.length !== 1 ? 's' : ''})` : zoneRemoveHistory.length > 0 ? `Undo zone deletion "${zoneRemoveHistory[0].usage}"` : territoryPaintHistory.length > 0 ? `Undo territory paint (${territoryPaintHistory.length} stroke${territoryPaintHistory.length !== 1 ? 's' : ''})` : 'Revert most recent saved change set'}
+                  title={undoTitle}
                   className="h-8 px-3 rounded-lg text-xs font-medium transition-colors bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 disabled:opacity-50 flex items-center gap-1.5"
                 >
                   <span aria-hidden="true">↩</span>
